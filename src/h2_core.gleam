@@ -140,10 +140,22 @@ pub fn send_headers(
   connection: Connection,
   headers: List(Header),
   end_stream: Bool,
-) -> Result(#(Connection, List(StreamEvent)), H2Error) {
+) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
   use stream <- result.try(transition(new_stream(), SendHeaders))
 
-  Ok(#(add_stream(connection, stream), []))
+  Ok(#(add_stream(connection, stream), [], <<>>))
+}
+
+pub fn send_ping(
+  conn: Connection,
+  data: BitArray,
+) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+  case h2_frame.encode_ping(ack: False, data: data) {
+    Ok(encoded) -> {
+      Ok(#(conn, [], encoded))
+    }
+    Error(error) -> Error(map_frame_error(error))
+  }
 }
 
 fn parse_loop(

@@ -3,7 +3,7 @@ import gleam/option.{None}
 import gleeunit
 import h2_core.{
   Client, ConnectionError, Idle, Open, PingAcknowledged, Server, Stream,
-  new_connection, receive_data, send_headers,
+  new_connection, receive_data, send_headers, send_ping,
 }
 import h2_frame
 
@@ -64,20 +64,20 @@ pub fn server_next_stream_id_starts_at_2_test() {
 // RFC 9113 Section 5.1 - send HEADERS transitions idle -> open
 pub fn send_headers_opens_stream_test() {
   let conn = new_connection(Client)
-  let assert Ok(#(conn, _events)) = send_headers(conn, [], False)
+  let assert Ok(#(conn, _events, _to_send)) = send_headers(conn, [], False)
   let assert Ok(stream) = dict.get(conn.streams, 1)
   assert stream.state == Open
 }
 
 pub fn send_headers_increments_stream_id_test() {
   let conn = new_connection(Client)
-  let assert Ok(#(conn, _events)) = send_headers(conn, [], False)
+  let assert Ok(#(conn, _events, _to_send)) = send_headers(conn, [], False)
   assert conn.next_stream_id == 3
 }
 
 pub fn send_headers_returns_no_events_test() {
   let conn = new_connection(Client)
-  let assert Ok(#(_conn, events)) = send_headers(conn, [], False)
+  let assert Ok(#(_conn, events, _to_send)) = send_headers(conn, [], False)
   assert events == []
 }
 
@@ -176,4 +176,26 @@ pub fn receive_ping_nonzero_stream_test() {
   >>
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
     receive_data(conn, bad_ping)
+}
+
+pub fn send_ping_returns_encoded_frame_test() {
+  let conn = new_connection(Client)
+  let ping_data = <<1, 2, 3, 4, 5, 6, 7, 8>>
+  let assert Ok(#(_conn, events, to_send)) = send_ping(conn, ping_data)
+  assert events == []
+  let assert Ok(expected) = h2_frame.encode_ping(ack: False, data: ping_data)
+  assert to_send == expected
+}
+
+// PING round-trip: send ping, receive ack, verify event
+pub fn ping_round_trip_test() {
+  let conn = new_connection(Client)
+  let ping_data = <<10, 20, 30, 40, 50, 60, 70, 80>>
+  // Send a ping
+  let assert Ok(#(conn, _events, _to_send)) = send_ping(conn, ping_data)
+  // Simulate receiving the ack back
+  let assert Ok(ping_ack) = h2_frame.encode_ping(ack: True, data: ping_data)
+  let assert Ok(#(_conn, events, to_send)) = receive_data(conn, ping_ack)
+  assert events == [PingAcknowledged(ping_data)]
+  assert to_send == <<>>
 }
