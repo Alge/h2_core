@@ -1,5 +1,5 @@
-import gleeunit
 import gleam/option.{None}
+import gleeunit
 import h2_core.{Client, Server, new_connection}
 
 pub fn main() -> Nil {
