@@ -56,6 +56,7 @@ pub type Connection {
     remote_settings: Settings,
     streams: dict.Dict(Int, Stream),
     next_stream_id: Int,
+    recv_buffer: BitArray,
   )
 }
 
@@ -71,6 +72,7 @@ pub fn new_connection(role: Role) -> Connection {
     remote_settings: default_settings(),
     streams: dict.new(),
     next_stream_id: next_stream_id,
+    recv_buffer: <<>>,
   )
 }
 

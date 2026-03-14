@@ -76,3 +76,9 @@ pub fn send_headers_returns_no_events_test() {
   let assert Ok(#(_conn, events)) = send_headers(conn, [], False)
   assert events == []
 }
+
+// Connection recv_buffer
+pub fn new_connection_has_empty_recv_buffer_test() {
+  let conn = new_connection(Client)
+  assert conn.recv_buffer == <<>>
+}
