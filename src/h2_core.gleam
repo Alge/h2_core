@@ -1,4 +1,7 @@
+import gleam/dict
 import gleam/option
+import gleam/result
+import h2_frame
 
 pub type Role {
   Client
@@ -28,13 +31,86 @@ fn default_settings() -> Settings {
 }
 
 pub type Connection {
-  Connection(role: Role, local_settings: Settings, remote_settings: Settings)
+  Connection(
+    role: Role,
+    local_settings: Settings,
+    remote_settings: Settings,
+    streams: dict.Dict(Int, Stream),
+    next_stream_id: Int,
+  )
 }
 
 pub fn new_connection(role: Role) -> Connection {
+  let next_stream_id = case role {
+    Client -> 1
+    Server -> 2
+  }
+
   Connection(
     role: role,
     local_settings: default_settings(),
     remote_settings: default_settings(),
+    streams: dict.new(),
+    next_stream_id: next_stream_id,
   )
+}
+
+pub type StreamState {
+  Idle
+  ReservedLocal
+  ReservedRemote
+  Open
+  HalfClosedLocal
+  HalfClosedRemote
+  Closed
+}
+
+pub type Stream {
+  Stream(state: StreamState)
+}
+
+fn new_stream() -> Stream {
+  Stream(state: Idle)
+}
+
+fn add_stream(conn: Connection, stream: Stream) -> Connection {
+  Connection(
+    ..conn,
+    next_stream_id: conn.next_stream_id + 2,
+    streams: dict.insert(conn.streams, conn.next_stream_id, stream),
+  )
+}
+
+pub type StreamEvent {
+  SendHeaders
+  RecvHeaders
+  SendEndStream
+  RecvEndStream
+  SendRstStream
+  RecvRstStream
+  SendPushPromise
+  RecvPushPromise
+}
+
+fn transition(stream: Stream, event: StreamEvent) -> Result(Stream, H2Error) {
+  Ok(Stream(..stream, state: Open))
+}
+
+pub type Header {
+  Header(name: String, value: String)
+}
+
+pub type H2Error {
+  ConnectionError(error_code: h2_frame.ErrorCode)
+  StreamError(stream_id: Int, error_code: h2_frame.ErrorCode)
+}
+
+pub fn send_headers(
+  connection: Connection,
+  headers: List(Header),
+  end_stream: Bool,
+) -> Result(#(Connection), H2Error) {
+  use stream <- result.try(transition(Stream(state: Idle), SendHeaders))
+
+  Ok(#(add_stream(connection, stream)))
 }
