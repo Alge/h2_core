@@ -1,7 +1,7 @@
 import gleam/dict
 import gleam/option
 import gleam/result
-import h2_frame
+import h2_frame.{type ErrorCode}
 
 pub type Role {
   Client
@@ -28,6 +28,25 @@ fn default_settings() -> Settings {
     max_frame_size: 16_384,
     max_header_list_size: option.None,
   )
+}
+
+pub type Event {
+  HeadersReceived(stream_id: Int, headers: List(Header), end_stream: Bool)
+  DataReceived(stream_id: Int, data: BitArray, end_stream: Bool)
+  StreamReset(stream_id: Int, error_code: ErrorCode)
+  StreamEnded(stream_id: Int)
+  PushPromiseReceived(
+    stream_id: Int,
+    promised_stream_id: Int,
+    headers: List(Header),
+  )
+  SettingsChanged(settings: Settings)
+  GoawayReceived(
+    last_stream_id: Int,
+    error_code: ErrorCode,
+    debug_data: BitArray,
+  )
+  PingAcknowledged(data: BitArray)
 }
 
 pub type Connection {
@@ -109,8 +128,8 @@ pub fn send_headers(
   connection: Connection,
   headers: List(Header),
   end_stream: Bool,
-) -> Result(#(Connection), H2Error) {
-  use stream <- result.try(transition(Stream(state: Idle), SendHeaders))
+) -> Result(#(Connection, List(StreamEvent)), H2Error) {
+  use stream <- result.try(transition(new_stream(), SendHeaders))
 
-  Ok(#(add_stream(connection, stream)))
+  Ok(#(add_stream(connection, stream), []))
 }

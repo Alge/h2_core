@@ -60,13 +60,19 @@ pub fn server_next_stream_id_starts_at_2_test() {
 // RFC 9113 Section 5.1 - send HEADERS transitions idle -> open
 pub fn send_headers_opens_stream_test() {
   let conn = new_connection(Client)
-  let assert Ok(#(conn)) = send_headers(conn, [], False)
+  let assert Ok(#(conn, _events)) = send_headers(conn, [], False)
   let assert Ok(stream) = dict.get(conn.streams, 1)
   assert stream.state == Open
 }
 
 pub fn send_headers_increments_stream_id_test() {
   let conn = new_connection(Client)
-  let assert Ok(#(conn)) = send_headers(conn, [], False)
+  let assert Ok(#(conn, _events)) = send_headers(conn, [], False)
   assert conn.next_stream_id == 3
+}
+
+pub fn send_headers_returns_no_events_test() {
+  let conn = new_connection(Client)
+  let assert Ok(#(_conn, events)) = send_headers(conn, [], False)
+  assert events == []
 }
