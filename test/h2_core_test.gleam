@@ -1,7 +1,11 @@
 import gleam/dict
 import gleam/option.{None}
 import gleeunit
-import h2_core.{Client, Idle, Open, Server, Stream, new_connection, send_headers}
+import h2_core.{
+  Client, ConnectionError, Idle, Open, PingAcknowledged, Server, Stream,
+  new_connection, receive_data, send_headers,
+}
+import h2_frame
 
 pub fn main() -> Nil {
   gleeunit.main()
@@ -81,4 +85,95 @@ pub fn send_headers_returns_no_events_test() {
 pub fn new_connection_has_empty_recv_buffer_test() {
   let conn = new_connection(Client)
   assert conn.recv_buffer == <<>>
+}
+
+// receive_data
+pub fn receive_empty_data_test() {
+  let conn = new_connection(Client)
+  let assert Ok(#(_conn, events, to_send)) = receive_data(conn, <<>>)
+  assert events == []
+  assert to_send == <<>>
+}
+
+pub fn receive_partial_frame_buffers_data_test() {
+  let conn = new_connection(Client)
+  // A few bytes that can't form a complete frame
+  let assert Ok(#(conn, events, to_send)) = receive_data(conn, <<1, 2, 3>>)
+  assert events == []
+  assert to_send == <<>>
+  assert conn.recv_buffer == <<1, 2, 3>>
+}
+
+pub fn receive_partial_frame_appends_to_buffer_test() {
+  let conn = new_connection(Client)
+  let assert Ok(#(conn, _events, _to_send)) = receive_data(conn, <<1, 2, 3>>)
+  let assert Ok(#(conn, events, to_send)) = receive_data(conn, <<4, 5, 6>>)
+  assert events == []
+  assert to_send == <<>>
+  assert conn.recv_buffer == <<1, 2, 3, 4, 5, 6>>
+}
+
+// RFC 9113 Section 6.7 - PING
+pub fn receive_ping_sends_ack_test() {
+  let conn = new_connection(Client)
+  let ping_data = <<1, 2, 3, 4, 5, 6, 7, 8>>
+  let assert Ok(ping_frame) = h2_frame.encode_ping(ack: False, data: ping_data)
+  let assert Ok(#(conn, events, to_send)) = receive_data(conn, ping_frame)
+  assert events == []
+  assert conn.recv_buffer == <<>>
+  let assert Ok(expected) = h2_frame.encode_ping(ack: True, data: ping_data)
+  assert to_send == expected
+}
+
+pub fn receive_ping_ack_emits_event_test() {
+  let conn = new_connection(Client)
+  let ping_data = <<1, 2, 3, 4, 5, 6, 7, 8>>
+  let assert Ok(ping_ack) = h2_frame.encode_ping(ack: True, data: ping_data)
+  let assert Ok(#(_conn, events, to_send)) = receive_data(conn, ping_ack)
+  assert events == [PingAcknowledged(ping_data)]
+  assert to_send == <<>>
+}
+
+// RFC 9113 Section 6.7 - PING with wrong length is FRAME_SIZE_ERROR
+pub fn receive_ping_wrong_length_test() {
+  let conn = new_connection(Client)
+  // Manually craft a PING frame with 4 bytes payload instead of 8
+  // Length=4, Type=0x06 (PING), Flags=0, Reserved=0, Stream ID=0
+  let bad_ping = <<
+    4:size(24),
+    0x06:size(8),
+    0:size(8),
+    0:size(1),
+    0:size(31),
+    1,
+    2,
+    3,
+    4,
+  >>
+  let assert Error(ConnectionError(h2_frame.FrameSizeError)) =
+    receive_data(conn, bad_ping)
+}
+
+// RFC 9113 Section 6.7 - PING on non-zero stream is PROTOCOL_ERROR
+pub fn receive_ping_nonzero_stream_test() {
+  let conn = new_connection(Client)
+  // Manually craft a PING frame on stream 1
+  // Length=8, Type=0x06 (PING), Flags=0, Reserved=0, Stream ID=1
+  let bad_ping = <<
+    8:size(24),
+    0x06:size(8),
+    0:size(8),
+    0:size(1),
+    1:size(31),
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+  >>
+  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+    receive_data(conn, bad_ping)
 }

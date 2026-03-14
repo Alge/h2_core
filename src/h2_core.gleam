@@ -1,4 +1,5 @@
 import gleam/dict
+import gleam/list
 import gleam/option
 import gleam/result
 import h2_frame.{type ErrorCode}
@@ -126,6 +127,15 @@ pub type H2Error {
   StreamError(stream_id: Int, error_code: h2_frame.ErrorCode)
 }
 
+fn map_frame_error(error: h2_frame.FrameError) -> H2Error {
+  case error {
+    h2_frame.ConnectionError(code) -> ConnectionError(code)
+    h2_frame.StreamError(id, code) -> StreamError(id, code)
+    h2_frame.InvalidPadding -> ConnectionError(h2_frame.ProtocolError)
+    h2_frame.Incomplete -> ConnectionError(h2_frame.InternalError)
+  }
+}
+
 pub fn send_headers(
   connection: Connection,
   headers: List(Header),
@@ -134,4 +144,50 @@ pub fn send_headers(
   use stream <- result.try(transition(new_stream(), SendHeaders))
 
   Ok(#(add_stream(connection, stream), []))
+}
+
+fn parse_loop(
+  conn: Connection,
+  events: List(Event),
+  to_send: BitArray,
+) -> Result(#(Connection, List(Event), BitArray), H2Error) {
+  case h2_frame.parse(conn.recv_buffer) {
+    Ok(#(frame, rest)) -> {
+      let conn = Connection(..conn, recv_buffer: rest)
+
+      case frame {
+        h2_frame.Ping(ack: False, data: data) -> {
+          // Generate the Ping ack and put it on the to_send buffer
+          case h2_frame.encode_ping(ack: True, data: data) {
+            Ok(response) ->
+              parse_loop(conn, events, <<to_send:bits, response:bits>>)
+            Error(error) -> Error(map_frame_error(error))
+          }
+        }
+        h2_frame.Ping(ack: True, data: data) -> {
+          // Do nothing, this was the ack
+          parse_loop(conn, [PingAcknowledged(data: data), ..events], to_send)
+        }
+        _ -> todo
+      }
+    }
+    Error(h2_frame.Incomplete) -> Ok(#(conn, list.reverse(events), to_send))
+    Error(error) -> Error(map_frame_error(error))
+  }
+}
+
+pub fn receive_data(
+  conn: Connection,
+  data: BitArray,
+) -> Result(#(Connection, List(Event), BitArray), H2Error) {
+  let conn =
+    Connection(..conn, recv_buffer: <<conn.recv_buffer:bits, data:bits>>)
+
+  case parse_loop(conn, [], <<>>) {
+    Ok(#(conn, events, to_send)) -> {
+      Ok(#(conn, events, to_send))
+    }
+
+    Error(error) -> Error(error)
+  }
 }
