@@ -131,6 +131,8 @@ pub type Connection {
     last_remote_stream_id: Int,
     next_stream_id: Int,
     recv_buffer: BitArray,
+    send_window_size: Int,
+    recv_window_size: Int,
   )
 }
 
@@ -149,6 +151,8 @@ pub fn new_connection(role: Role) -> Connection {
     last_remote_stream_id: 0,
     next_stream_id: next_stream_id,
     recv_buffer: <<>>,
+    send_window_size: 65_535,
+    recv_window_size: 65_535,
   )
 }
 
@@ -189,8 +193,9 @@ pub type StreamEvent {
   RecvPushPromise
 }
 
-fn transition(stream: Stream, event: StreamEvent) -> Result(Stream, H2Error) {
-  Ok(Stream(..stream, state: Open))
+fn transition(_stream: Stream, _event: StreamEvent) -> Result(Stream, H2Error) {
+  Ok(Stream(state: Open))
+  //Ok(Stream(..stream, state: Open))
 }
 
 pub type Header {
@@ -213,8 +218,8 @@ fn map_frame_error(error: h2_frame.FrameError) -> H2Error {
 
 pub fn send_headers(
   connection: Connection,
-  headers: List(Header),
-  end_stream: Bool,
+  _headers: List(Header),
+  _end_stream: Bool,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
   use stream <- result.try(transition(new_stream(), SendHeaders))
 
@@ -262,6 +267,63 @@ pub fn send_goaway(
       debug_data: debug_data,
     )
   Ok(#(conn, [], encoded_frame))
+}
+
+pub fn send_window_update(
+  conn: Connection,
+  stream_id: Int,
+  window_size_increment: Int,
+) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+  // Update the connection
+
+  let conn = case stream_id {
+    0 ->
+      Connection(
+        ..conn,
+        recv_window_size: conn.recv_window_size + window_size_increment,
+      )
+    // TODO: Handle updating window size on stream
+    _ -> conn
+  }
+
+  use <- bool.guard(
+    stream_id == 0 && conn.recv_window_size > 2_147_483_647,
+    Error(ConnectionError(h2_frame.FlowControlError)),
+  )
+
+  case
+    h2_frame.encode_window_update(
+      stream_id: stream_id,
+      window_size_increment: window_size_increment,
+    )
+  {
+    Ok(encoded_frame) -> Ok(#(conn, [], encoded_frame))
+    Error(error) -> Error(map_frame_error(error))
+  }
+}
+
+pub fn send_rst_stream(
+  conn: Connection,
+  stream_id: Int,
+  error_code: h2_frame.ErrorCode,
+) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+  use stream <- result.try(
+    dict.get(conn.streams, stream_id)
+    |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  // Must not be sent on a idle stream
+  use <- bool.guard(
+    stream.state == Idle,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  case
+    h2_frame.encode_rst_stream(stream_id: stream_id, error_code: error_code)
+  {
+    Ok(encoded_frame) -> Ok(#(conn, [], encoded_frame))
+    Error(error) -> Error(map_frame_error(error))
+  }
 }
 
 fn parse_loop(
@@ -353,6 +415,53 @@ fn parse_loop(
             ],
             to_send,
           )
+        }
+
+        // WINDOW_UPDATE
+        h2_frame.WindowUpdate(stream_id, window_size_increment) -> {
+          case stream_id {
+            0 -> {
+              let conn =
+                Connection(
+                  ..conn,
+                  send_window_size: conn.send_window_size
+                    + window_size_increment,
+                )
+              use <- bool.guard(
+                conn.send_window_size > 2_147_483_647,
+                Error(ConnectionError(h2_frame.FlowControlError)),
+              )
+              parse_loop(conn, events, to_send)
+            }
+            stream_id -> {
+              // Handle WindowUpdate on specific stream
+              todo
+            }
+          }
+        }
+        // RST_STREAM
+        h2_frame.RstStream(stream_id, error_code) -> {
+          use stream <- result.try(
+            dict.get(conn.streams, stream_id)
+            |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
+          )
+
+          let stream = Stream(..stream, state: Closed)
+
+          let conn =
+            Connection(
+              ..conn,
+              streams: dict.insert(conn.streams, stream_id, stream),
+            )
+
+          Ok(#(
+            conn,
+            [
+              StreamReset(stream_id: stream_id, error_code: error_code),
+              ..events
+            ],
+            to_send,
+          ))
         }
         _ -> todo
       }
