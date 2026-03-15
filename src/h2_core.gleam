@@ -1,3 +1,4 @@
+import gleam/bool
 import gleam/dict
 import gleam/list
 import gleam/option
@@ -10,7 +11,7 @@ pub type Role {
 }
 
 pub type Settings {
-  Setting(
+  Settings(
     header_table_size: Int,
     enable_push: Bool,
     max_concurrent_streams: option.Option(Int),
@@ -20,8 +21,77 @@ pub type Settings {
   )
 }
 
+fn apply_settings(
+  role: Role,
+  settings: Settings,
+  new: List(h2_frame.Setting),
+) -> Result(Settings, H2Error) {
+  case new {
+    [] -> Ok(settings)
+    [h2_frame.HeaderTableSize(value), ..rest] ->
+      apply_settings(role, Settings(..settings, header_table_size: value), rest)
+    [h2_frame.EnablePush(value), ..rest] -> {
+      case value {
+        0 ->
+          apply_settings(role, Settings(..settings, enable_push: False), rest)
+        1 -> {
+          case role {
+            Server ->
+              apply_settings(
+                role,
+                Settings(..settings, enable_push: True),
+                rest,
+              )
+            // Client should never receive enable_push == 1
+            Client -> Error(ConnectionError(h2_frame.ProtocolError))
+          }
+        }
+        _ -> Error(ConnectionError(h2_frame.ProtocolError))
+      }
+    }
+    [h2_frame.MaxConcurrentStreams(value), ..rest] ->
+      apply_settings(
+        role,
+        Settings(..settings, max_concurrent_streams: option.Some(value)),
+        rest,
+      )
+    [h2_frame.InitialWindowSize(value), ..rest] -> {
+      use <- bool.guard(
+        value > 2_147_483_647,
+        Error(ConnectionError(h2_frame.FlowControlError)),
+      )
+      apply_settings(
+        role,
+        Settings(..settings, initial_window_size: value),
+        rest,
+      )
+    }
+    [h2_frame.MaxFrameSize(value), ..rest] -> {
+      use <- bool.guard(
+        value < 16_384,
+        Error(ConnectionError(h2_frame.ProtocolError)),
+      )
+      use <- bool.guard(
+        value > 16_777_215,
+        Error(ConnectionError(h2_frame.ProtocolError)),
+      )
+      apply_settings(role, Settings(..settings, max_frame_size: value), rest)
+    }
+    [h2_frame.MaxHeaderListSize(value), ..rest] ->
+      apply_settings(
+        role,
+        Settings(..settings, max_header_list_size: option.Some(value)),
+        rest,
+      )
+
+    // Ignore unknown settings
+    [h2_frame.UnknownSetting(_, _), ..rest] ->
+      apply_settings(role, settings, rest)
+  }
+}
+
 fn default_settings() -> Settings {
-  Setting(
+  Settings(
     header_table_size: 4096,
     enable_push: True,
     max_concurrent_streams: option.None,
@@ -41,7 +111,8 @@ pub type Event {
     promised_stream_id: Int,
     headers: List(Header),
   )
-  SettingsChanged(settings: Settings)
+  SettingsAcknowledged(settings: Settings)
+  RemoteSettingsChanged(settings: Settings)
   GoawayReceived(
     last_stream_id: Int,
     error_code: ErrorCode,
@@ -54,6 +125,7 @@ pub type Connection {
   Connection(
     role: Role,
     local_settings: Settings,
+    pending_settings: List(List(h2_frame.Setting)),
     remote_settings: Settings,
     streams: dict.Dict(Int, Stream),
     next_stream_id: Int,
@@ -70,6 +142,7 @@ pub fn new_connection(role: Role) -> Connection {
   Connection(
     role: role,
     local_settings: default_settings(),
+    pending_settings: [],
     remote_settings: default_settings(),
     streams: dict.new(),
     next_stream_id: next_stream_id,
@@ -146,6 +219,23 @@ pub fn send_headers(
   Ok(#(add_stream(connection, stream), [], <<>>))
 }
 
+pub fn send_settings(
+  conn: Connection,
+  settings: List(h2_frame.Setting),
+) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+  let conn =
+    Connection(
+      ..conn,
+      pending_settings: list.append(conn.pending_settings, [settings]),
+    )
+  case h2_frame.encode_settings(ack: False, settings: settings) {
+    Ok(encoded) -> {
+      Ok(#(conn, [], encoded))
+    }
+    Error(error) -> Error(map_frame_error(error))
+  }
+}
+
 pub fn send_ping(
   conn: Connection,
   data: BitArray,
@@ -168,6 +258,7 @@ fn parse_loop(
       let conn = Connection(..conn, recv_buffer: rest)
 
       case frame {
+        // Pings
         h2_frame.Ping(ack: False, data: data) -> {
           // Generate the Ping ack and put it on the to_send buffer
           case h2_frame.encode_ping(ack: True, data: data) {
@@ -179,6 +270,57 @@ fn parse_loop(
         h2_frame.Ping(ack: True, data: data) -> {
           // Do nothing, this was the ack
           parse_loop(conn, [PingAcknowledged(data: data), ..events], to_send)
+        }
+
+        // Settings
+        h2_frame.Settings(ack: False, settings: settings) -> {
+          // Apply these settings to the remote settings
+
+          case apply_settings(conn.role, conn.remote_settings, settings) {
+            Ok(new_settings) -> {
+              let conn = Connection(..conn, remote_settings: new_settings)
+
+              // Reply with an ACK
+              case h2_frame.encode_settings(ack: True, settings: []) {
+                Ok(response) ->
+                  parse_loop(
+                    conn,
+                    [RemoteSettingsChanged(conn.remote_settings), ..events],
+                    <<to_send:bits, response:bits>>,
+                  )
+                Error(error) -> Error(map_frame_error(error))
+              }
+            }
+
+            Error(error) -> Error(error)
+          }
+        }
+
+        h2_frame.Settings(ack: True, settings: _) -> {
+          case conn.pending_settings {
+            [settings, ..rest] -> {
+              case apply_settings(conn.role, conn.local_settings, settings) {
+                // Apply settings
+                Ok(new_settings) -> {
+                  let conn =
+                    Connection(
+                      ..conn,
+                      local_settings: new_settings,
+                      pending_settings: rest,
+                    )
+                  parse_loop(
+                    conn,
+                    [SettingsAcknowledged(conn.local_settings), ..events],
+                    to_send,
+                  )
+                }
+                Error(error) -> Error(error)
+              }
+            }
+            [] -> {
+              Error(ConnectionError(h2_frame.ProtocolError))
+            }
+          }
         }
         _ -> todo
       }
