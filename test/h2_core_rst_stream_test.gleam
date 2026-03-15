@@ -127,6 +127,30 @@ pub fn receive_rst_stream_wrong_length_test() {
     receive_data(conn, bad_rst)
 }
 
+// Receiving multiple frames in one receive_data call continues parsing
+pub fn receive_rst_stream_continues_parse_loop_test() {
+  let conn = new_connection(Client)
+  // Open two streams
+  let assert Ok(#(conn, _events, _to_send)) = send_headers(conn, [], False)
+  let assert Ok(#(conn, _events, _to_send)) = send_headers(conn, [], False)
+  // Concatenate two RST_STREAM frames
+  let assert Ok(rst1) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
+  let assert Ok(rst2) =
+    h2_frame.encode_rst_stream(stream_id: 3, error_code: h2_frame.InternalError)
+  let combined = <<rst1:bits, rst2:bits>>
+  let assert Ok(#(conn, events, _to_send)) = receive_data(conn, combined)
+  assert events
+    == [
+      StreamReset(stream_id: 1, error_code: h2_frame.Cancel),
+      StreamReset(stream_id: 3, error_code: h2_frame.InternalError),
+    ]
+  let assert Ok(s1) = dict.get(conn.streams, 1)
+  let assert Ok(s3) = dict.get(conn.streams, 3)
+  assert s1.state == Closed
+  assert s3.state == Closed
+}
+
 // RST_STREAM does not send any response frame
 pub fn receive_rst_stream_no_response_test() {
   let conn = new_connection(Client)

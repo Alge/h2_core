@@ -526,14 +526,14 @@ fn parse_loop(
               streams: dict.insert(conn.streams, stream_id, stream),
             )
 
-          Ok(#(
+          parse_loop(
             conn,
             [
               StreamReset(stream_id: stream_id, error_code: error_code),
               ..events
             ],
             to_send,
-          ))
+          )
         }
         h2_frame.Headers(
           stream_id,
