@@ -234,6 +234,15 @@ fn to_alpacki_header(header: Header) -> alpacki.HeaderField {
   )
 }
 
+fn from_alpacki_header(header: alpacki.HeaderField) -> Header {
+  let indexing = case header.indexing {
+    alpacki.WithIndexing -> WithIndexing
+    alpacki.WithoutIndexing -> WithoutIndexing
+    alpacki.NeverIndexed -> NeverIndexed
+  }
+  Header(name: header.name, value: header.value, indexing: indexing)
+}
+
 pub type H2Error {
   ConnectionError(error_code: h2_frame.ErrorCode)
   StreamError(stream_id: Int, error_code: h2_frame.ErrorCode)
@@ -253,9 +262,8 @@ pub fn send_headers(
   headers: List(Header),
   end_stream: Bool,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
-
-  let stream = case end_stream{
-    True-> Stream(..new_stream(), state: HalfClosedLocal)
+  let stream = case end_stream {
+    True -> Stream(..new_stream(), state: HalfClosedLocal)
     False -> Stream(..new_stream(), state: Open)
   }
 
@@ -526,6 +534,56 @@ fn parse_loop(
             ],
             to_send,
           ))
+        }
+        h2_frame.Headers(
+          stream_id,
+          end_stream,
+          _end_headers,
+          _priority,
+          field_block_fragment,
+        ) -> {
+          use <- bool.guard(
+            stream_id <= conn.last_remote_stream_id,
+            Error(ConnectionError(h2_frame.ProtocolError)),
+          )
+
+          use #(decoded_headers, new_table) <- result.try(
+            alpacki.decode_header_block(
+              field_block_fragment,
+              conn.hpack_decoder.table,
+            )
+            |> result.replace_error(ConnectionError(h2_frame.CompressionError)),
+          )
+
+          let decoded_headers = list.map(decoded_headers, from_alpacki_header)
+          let conn =
+            Connection(..conn, hpack_decoder: HpackContext(table: new_table))
+
+          // Create new stream
+          let stream = case end_stream {
+            False -> Stream(..new_stream(), state: Open)
+            True -> Stream(..new_stream(), state: HalfClosedRemote)
+          }
+
+          let conn =
+            Connection(
+              ..conn,
+              last_remote_stream_id: stream_id,
+              streams: dict.insert(conn.streams, stream_id, stream),
+            )
+
+          parse_loop(
+            conn,
+            [
+              HeadersReceived(
+                stream_id: stream_id,
+                headers: decoded_headers,
+                end_stream: end_stream,
+              ),
+              ..events
+            ],
+            to_send,
+          )
         }
         _ -> todo
       }
