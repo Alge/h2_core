@@ -128,6 +128,7 @@ pub type Connection {
     pending_settings: List(List(h2_frame.Setting)),
     remote_settings: Settings,
     streams: dict.Dict(Int, Stream),
+    last_remote_stream_id: Int,
     next_stream_id: Int,
     recv_buffer: BitArray,
   )
@@ -145,6 +146,7 @@ pub fn new_connection(role: Role) -> Connection {
     pending_settings: [],
     remote_settings: default_settings(),
     streams: dict.new(),
+    last_remote_stream_id: 0,
     next_stream_id: next_stream_id,
     recv_buffer: <<>>,
   )
@@ -248,6 +250,20 @@ pub fn send_ping(
   }
 }
 
+pub fn send_goaway(
+  conn: Connection,
+  error_code: h2_frame.ErrorCode,
+  debug_data: BitArray,
+) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+  let encoded_frame =
+    h2_frame.encode_goaway(
+      last_stream_id: conn.last_remote_stream_id,
+      error_code: error_code,
+      debug_data: debug_data,
+    )
+  Ok(#(conn, [], encoded_frame))
+}
+
 fn parse_loop(
   conn: Connection,
   events: List(Event),
@@ -321,6 +337,22 @@ fn parse_loop(
               Error(ConnectionError(h2_frame.ProtocolError))
             }
           }
+        }
+
+        // Goaway
+        h2_frame.Goaway(last_stream_id, error_code, debug_data) -> {
+          parse_loop(
+            conn,
+            [
+              GoawayReceived(
+                last_stream_id: last_stream_id,
+                error_code: error_code,
+                debug_data: debug_data,
+              ),
+              ..events
+            ],
+            to_send,
+          )
         }
         _ -> todo
       }
