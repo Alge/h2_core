@@ -1,4 +1,5 @@
 import alpacki
+import gleam/bit_array
 import gleam/bool
 import gleam/bytes_tree
 import gleam/dict
@@ -141,6 +142,7 @@ pub type Connection {
     recv_window_size: Int,
     hpack_encoder: HpackContext,
     hpack_decoder: HpackContext,
+    pending_header_blocks: option.Option(#(Int, Bool, BitArray)),
   )
 }
 
@@ -163,6 +165,7 @@ pub fn new_connection(role: Role) -> Connection {
     recv_window_size: 65_535,
     hpack_encoder: HpackContext(alpacki.new_dynamic(4096)),
     hpack_decoder: HpackContext(alpacki.new_dynamic(4096)),
+    pending_header_blocks: option.None,
   )
 }
 
@@ -257,6 +260,60 @@ fn map_frame_error(error: h2_frame.FrameError) -> H2Error {
   }
 }
 
+fn chunk_bytes(
+  bytes: BitArray,
+  chunk_size: Int,
+  chunks: List(BitArray),
+) -> List(BitArray) {
+  case bytes {
+    <<>> -> list.reverse(chunks)
+    <<b:bytes-size(chunk_size), rest:bits>> ->
+      chunk_bytes(rest, chunk_size, [b, ..chunks])
+    <<b:bits>> -> chunk_bytes(<<>>, chunk_size, [b, ..chunks])
+  }
+}
+
+fn encode_header_continuations(
+  chunks: List(BitArray),
+  stream_id: Int,
+  processed: BitArray,
+) -> Result(BitArray, H2Error) {
+  case chunks {
+    [] -> Ok(processed)
+    [chunk] -> {
+      case
+        h2_frame.encode_continuation(
+          stream_id: stream_id,
+          end_headers: True,
+          field_block_fragment: chunk,
+        )
+      {
+        Ok(encoded_frame) -> {
+          Ok(<<processed:bits, encoded_frame:bits>>)
+        }
+        Error(error) -> Error(map_frame_error(error))
+      }
+    }
+    [chunk, ..rest] -> {
+      case
+        h2_frame.encode_continuation(
+          stream_id: stream_id,
+          end_headers: False,
+          field_block_fragment: chunk,
+        )
+      {
+        Ok(encoded_frame) -> {
+          encode_header_continuations(rest, stream_id, <<
+            processed:bits,
+            encoded_frame:bits,
+          >>)
+        }
+        Error(error) -> Error(map_frame_error(error))
+      }
+    }
+  }
+}
+
 pub fn send_headers(
   conn: Connection,
   headers: List(Header),
@@ -283,17 +340,44 @@ pub fn send_headers(
   let conn = Connection(..conn, hpack_encoder: HpackContext(table: new_table))
 
   case
-    h2_frame.encode_headers(
-      stream_id: stream_id,
-      end_stream: end_stream,
-      end_headers: True,
-      priority: option.None,
-      field_block_fragment: bytes_tree.to_bit_array(encoded_headers),
-      padding: option.None,
+    chunk_bytes(
+      bytes_tree.to_bit_array(encoded_headers),
+      conn.remote_settings.max_frame_size,
+      [],
     )
   {
-    Ok(encoded_frame) -> Ok(#(conn, [], encoded_frame))
-    Error(error) -> Error(map_frame_error(error))
+    [] -> {
+      use frame <- result.try(
+        h2_frame.encode_headers(
+          stream_id: stream_id,
+          end_stream: end_stream,
+          end_headers: True,
+          priority: option.None,
+          field_block_fragment: <<>>,
+          padding: option.None,
+        )
+        |> result.map_error(map_frame_error),
+      )
+      Ok(#(conn, [], frame))
+    }
+
+    [header_chunk, ..rest] -> {
+      use headers_frame <- result.try(
+        h2_frame.encode_headers(
+          stream_id: stream_id,
+          end_stream: end_stream,
+          end_headers: rest == [],
+          priority: option.None,
+          field_block_fragment: header_chunk,
+          padding: option.None,
+        )
+        |> result.map_error(map_frame_error),
+      )
+      use continuation_frames <- result.try(
+        encode_header_continuations(rest, stream_id, <<>>),
+      )
+      Ok(#(conn, [], <<headers_frame:bits, continuation_frames:bits>>))
+    }
   }
 }
 
@@ -408,6 +492,101 @@ fn parse_loop(
       let conn = Connection(..conn, recv_buffer: rest)
 
       case frame {
+        // If we're in the middle of receiving a header block,
+        // only CONTINUATION on the same stream is allowed
+        _ if conn.pending_header_blocks != option.None -> {
+          case frame {
+            h2_frame.Continuation(stream_id, end_headers, field_block_fragment) -> {
+              case conn.pending_header_blocks {
+                option.None -> Error(ConnectionError(h2_frame.ProtocolError))
+                option.Some(#(
+                  pending_stream_id,
+                  end_stream,
+                  pending_block_fragment,
+                )) -> {
+                  use <- bool.guard(
+                    pending_stream_id != stream_id,
+                    Error(ConnectionError(h2_frame.ProtocolError)),
+                  )
+
+                  case end_headers {
+                    // More continuation frames incoming
+                    False -> {
+                      let conn =
+                        Connection(
+                          ..conn,
+                          pending_header_blocks: option.Some(
+                            #(stream_id, end_stream, <<
+                              pending_block_fragment:bits,
+                              field_block_fragment:bits,
+                            >>),
+                          ),
+                        )
+                      parse_loop(conn, events, to_send)
+                    }
+
+                    // Last continuation block 
+                    True -> {
+                      use #(decoded_headers, new_table) <- result.try(
+                        alpacki.decode_header_block(
+                          <<
+                            pending_block_fragment:bits,
+                            field_block_fragment:bits,
+                          >>,
+                          conn.hpack_decoder.table,
+                        )
+                        |> result.replace_error(ConnectionError(
+                          h2_frame.CompressionError,
+                        )),
+                      )
+
+                      let decoded_headers =
+                        list.map(decoded_headers, from_alpacki_header)
+                      let conn =
+                        Connection(
+                          ..conn,
+                          hpack_decoder: HpackContext(table: new_table),
+                        )
+
+                      // Create new stream
+                      let stream = case end_stream {
+                        False -> Stream(..new_stream(), state: Open)
+                        True -> Stream(..new_stream(), state: HalfClosedRemote)
+                      }
+
+                      let conn =
+                        Connection(
+                          ..conn,
+                          last_remote_stream_id: stream_id,
+                          streams: dict.insert(conn.streams, stream_id, stream),
+                        )
+
+                      parse_loop(
+                        conn,
+                        [
+                          HeadersReceived(
+                            stream_id: stream_id,
+                            headers: decoded_headers,
+                            end_stream: end_stream,
+                          ),
+                          ..events
+                        ],
+                        to_send,
+                      )
+                    }
+                  }
+                }
+              }
+            }
+            _ -> Error(ConnectionError(h2_frame.ProtocolError))
+          }
+        }
+
+        // Handle CONTINUATION if pending_header_blocks is None
+        // This is always an error
+        h2_frame.Continuation(_, _, _) ->
+          Error(ConnectionError(h2_frame.ProtocolError))
+
         // Pings
         h2_frame.Ping(ack: False, data: data) -> {
           // Generate the Ping ack and put it on the to_send buffer
@@ -538,7 +717,7 @@ fn parse_loop(
         h2_frame.Headers(
           stream_id,
           end_stream,
-          _end_headers,
+          end_headers,
           _priority,
           field_block_fragment,
         ) -> {
@@ -547,44 +726,67 @@ fn parse_loop(
             Error(ConnectionError(h2_frame.ProtocolError)),
           )
 
-          use #(decoded_headers, new_table) <- result.try(
-            alpacki.decode_header_block(
-              field_block_fragment,
-              conn.hpack_decoder.table,
-            )
-            |> result.replace_error(ConnectionError(h2_frame.CompressionError)),
-          )
+          case end_headers {
+            False -> {
+              let conn =
+                Connection(
+                  ..conn,
+                  pending_header_blocks: option.Some(#(
+                    stream_id,
+                    end_stream,
+                    field_block_fragment,
+                  )),
+                )
+              parse_loop(conn, events, to_send)
+            }
+            True -> {
+              use #(decoded_headers, new_table) <- result.try(
+                alpacki.decode_header_block(
+                  field_block_fragment,
+                  conn.hpack_decoder.table,
+                )
+                |> result.replace_error(ConnectionError(
+                  h2_frame.CompressionError,
+                )),
+              )
 
-          let decoded_headers = list.map(decoded_headers, from_alpacki_header)
-          let conn =
-            Connection(..conn, hpack_decoder: HpackContext(table: new_table))
+              let decoded_headers =
+                list.map(decoded_headers, from_alpacki_header)
+              let conn =
+                Connection(
+                  ..conn,
+                  hpack_decoder: HpackContext(table: new_table),
+                )
 
-          // Create new stream
-          let stream = case end_stream {
-            False -> Stream(..new_stream(), state: Open)
-            True -> Stream(..new_stream(), state: HalfClosedRemote)
+              // Create new stream
+              let stream = case end_stream {
+                False -> Stream(..new_stream(), state: Open)
+                True -> Stream(..new_stream(), state: HalfClosedRemote)
+              }
+
+              let conn =
+                Connection(
+                  ..conn,
+                  last_remote_stream_id: stream_id,
+                  streams: dict.insert(conn.streams, stream_id, stream),
+                )
+
+              parse_loop(
+                conn,
+                [
+                  HeadersReceived(
+                    stream_id: stream_id,
+                    headers: decoded_headers,
+                    end_stream: end_stream,
+                  ),
+                  ..events
+                ],
+                to_send,
+              )
+            }
           }
-
-          let conn =
-            Connection(
-              ..conn,
-              last_remote_stream_id: stream_id,
-              streams: dict.insert(conn.streams, stream_id, stream),
-            )
-
-          parse_loop(
-            conn,
-            [
-              HeadersReceived(
-                stream_id: stream_id,
-                headers: decoded_headers,
-                end_stream: end_stream,
-              ),
-              ..events
-            ],
-            to_send,
-          )
         }
+
         _ -> todo
       }
     }
