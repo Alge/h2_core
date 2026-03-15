@@ -1,4 +1,6 @@
+import alpacki
 import gleam/bool
+import gleam/bytes_tree
 import gleam/dict
 import gleam/list
 import gleam/option
@@ -121,6 +123,10 @@ pub type Event {
   PingAcknowledged(data: BitArray)
 }
 
+pub opaque type HpackContext {
+  HpackContext(table: alpacki.DynamicTable)
+}
+
 pub type Connection {
   Connection(
     role: Role,
@@ -133,6 +139,8 @@ pub type Connection {
     recv_buffer: BitArray,
     send_window_size: Int,
     recv_window_size: Int,
+    hpack_encoder: HpackContext,
+    hpack_decoder: HpackContext,
   )
 }
 
@@ -153,6 +161,8 @@ pub fn new_connection(role: Role) -> Connection {
     recv_buffer: <<>>,
     send_window_size: 65_535,
     recv_window_size: 65_535,
+    hpack_encoder: HpackContext(alpacki.new_dynamic(4096)),
+    hpack_decoder: HpackContext(alpacki.new_dynamic(4096)),
   )
 }
 
@@ -174,11 +184,14 @@ fn new_stream() -> Stream {
   Stream(state: Idle)
 }
 
-fn add_stream(conn: Connection, stream: Stream) -> Connection {
-  Connection(
-    ..conn,
-    next_stream_id: conn.next_stream_id + 2,
-    streams: dict.insert(conn.streams, conn.next_stream_id, stream),
+fn add_stream(conn: Connection, stream: Stream) -> #(Connection, Int) {
+  #(
+    Connection(
+      ..conn,
+      next_stream_id: conn.next_stream_id + 2,
+      streams: dict.insert(conn.streams, conn.next_stream_id, stream),
+    ),
+    conn.next_stream_id,
   )
 }
 
@@ -198,8 +211,27 @@ fn transition(_stream: Stream, _event: StreamEvent) -> Result(Stream, H2Error) {
   //Ok(Stream(..stream, state: Open))
 }
 
+pub type Indexing {
+  WithIndexing
+  WithoutIndexing
+  NeverIndexed
+}
+
 pub type Header {
-  Header(name: String, value: String)
+  Header(name: String, value: String, indexing: Indexing)
+}
+
+fn to_alpacki_header(header: Header) -> alpacki.HeaderField {
+  let alpacki_indexing = case header.indexing {
+    WithIndexing -> alpacki.WithIndexing
+    WithoutIndexing -> alpacki.WithoutIndexing
+    NeverIndexed -> alpacki.NeverIndexed
+  }
+  alpacki.HeaderField(
+    name: header.name,
+    value: header.value,
+    indexing: alpacki_indexing,
+  )
 }
 
 pub type H2Error {
@@ -217,13 +249,44 @@ fn map_frame_error(error: h2_frame.FrameError) -> H2Error {
 }
 
 pub fn send_headers(
-  connection: Connection,
-  _headers: List(Header),
-  _end_stream: Bool,
+  conn: Connection,
+  headers: List(Header),
+  end_stream: Bool,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
-  use stream <- result.try(transition(new_stream(), SendHeaders))
 
-  Ok(#(add_stream(connection, stream), [], <<>>))
+  let stream = case end_stream{
+    True-> Stream(..new_stream(), state: HalfClosedLocal)
+    False -> Stream(..new_stream(), state: Open)
+  }
+
+  let #(conn, stream_id) = add_stream(conn, stream)
+
+  // Map headers to alpacki headers for encoding
+  let headers = list.map(headers, to_alpacki_header)
+
+  let #(encoded_headers, new_table) =
+    alpacki.encode_header_block(
+      headers,
+      conn.hpack_encoder.table,
+      huffman: True,
+    )
+
+  // Add the new table to the conn
+  let conn = Connection(..conn, hpack_encoder: HpackContext(table: new_table))
+
+  case
+    h2_frame.encode_headers(
+      stream_id: stream_id,
+      end_stream: end_stream,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bytes_tree.to_bit_array(encoded_headers),
+      padding: option.None,
+    )
+  {
+    Ok(encoded_frame) -> Ok(#(conn, [], encoded_frame))
+    Error(error) -> Error(map_frame_error(error))
+  }
 }
 
 pub fn send_settings(
@@ -307,6 +370,7 @@ pub fn send_rst_stream(
   stream_id: Int,
   error_code: h2_frame.ErrorCode,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+  // Must be sent on a existing stream
   use stream <- result.try(
     dict.get(conn.streams, stream_id)
     |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
