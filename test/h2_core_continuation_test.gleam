@@ -3,9 +3,9 @@ import gleam/dict
 import gleam/list
 import gleam/option
 import h2_core.{
-  Client, Connection, ConnectionError, HalfClosedLocal, Header, HeadersReceived,
-  Open, Server, Settings, WithIndexing, new_connection, receive_data,
-  send_headers,
+  Client, Connection, ConnectionError, HalfClosedLocal, HalfClosedRemote, Header,
+  HeadersReceived, Open, Server, Settings, WithIndexing, new_connection,
+  receive_data, send_headers,
 }
 import h2_frame
 
@@ -308,6 +308,107 @@ pub fn receive_unexpected_continuation_is_protocol_error_test() {
     )
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
     receive_data(server, cont)
+}
+
+// Pending header block persists across separate receive_data calls
+pub fn receive_continuation_across_calls_test() {
+  let client = connection_with_small_frame_size(Client)
+  let headers = large_headers()
+  let assert Ok(#(_client, _events, to_send)) =
+    send_headers(client, headers, False)
+
+  // Split: first frame in one call, rest in another
+  let assert Ok(#(h2_frame.Headers(end_headers: False, ..), rest)) =
+    h2_frame.parse(to_send)
+  let headers_frame_size =
+    bit_array.byte_size(to_send) - bit_array.byte_size(rest)
+  let assert Ok(headers_only) =
+    bit_array.slice(to_send, 0, headers_frame_size)
+
+  let server = new_connection(Server)
+  // First call: only the HEADERS frame (no events yet, block incomplete)
+  let assert Ok(#(server, events1, _to_send)) =
+    receive_data(server, headers_only)
+  assert events1 == []
+
+  // Second call: the remaining CONTINUATION frames
+  let assert Ok(#(_server, events2, _to_send)) = receive_data(server, rest)
+  let assert [
+    HeadersReceived(stream_id: 1, headers: recv_headers, end_stream: False),
+  ] = events2
+  assert list.length(recv_headers) == list.length(headers)
+}
+
+// Header block split across 3+ frames (HEADERS + multiple CONTINUATIONs)
+pub fn receive_multiple_continuation_frames_test() {
+  // Use an even smaller frame size to force more splits
+  let conn = new_connection(Client)
+  let settings = Settings(..conn.remote_settings, max_frame_size: 16)
+  let conn = Connection(..conn, remote_settings: settings)
+  let headers = large_headers()
+  let assert Ok(#(_conn, _events, to_send)) =
+    send_headers(conn, headers, False)
+
+  // Verify we got at least 3 frames
+  let frames = parse_all_frames(to_send, [])
+  assert list.length(frames) >= 3
+
+  // Server should decode them all correctly
+  let server = new_connection(Server)
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, to_send)
+  let assert [
+    HeadersReceived(stream_id: 1, headers: recv_headers, end_stream: False),
+  ] = events
+  assert list.length(recv_headers) == list.length(headers)
+}
+
+// end_stream from HEADERS is preserved through CONTINUATION reassembly
+pub fn receive_continuation_preserves_end_stream_test() {
+  let client = connection_with_small_frame_size(Client)
+  let headers = large_headers()
+  let assert Ok(#(_client, _events, to_send)) =
+    send_headers(client, headers, True)
+
+  // Verify it was actually split
+  let frames = parse_all_frames(to_send, [])
+  assert list.length(frames) > 1
+
+  let server = new_connection(Server)
+  let assert Ok(#(server, events, _to_send)) = receive_data(server, to_send)
+  let assert [
+    HeadersReceived(stream_id: 1, headers: _, end_stream: True),
+  ] = events
+  // Stream should be HalfClosedRemote since end_stream was True
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == HalfClosedRemote
+}
+
+// Header order is preserved when split across multiple frames
+pub fn receive_continuation_preserves_header_order_test() {
+  let client = connection_with_small_frame_size(Client)
+  let headers = large_headers()
+  let assert Ok(#(_client, _events, to_send)) =
+    send_headers(client, headers, False)
+
+  // Verify it was actually split
+  let frames = parse_all_frames(to_send, [])
+  assert list.length(frames) > 1
+
+  let server = new_connection(Server)
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, to_send)
+  let assert [
+    HeadersReceived(stream_id: 1, headers: recv_headers, end_stream: False),
+  ] = events
+  // Headers must arrive in exact same order
+  let assert [
+    Header(":method", "GET", _),
+    Header(":path", "/this/is/a/fairly/long/path/to/ensure/size", _),
+    Header(":scheme", "https", _),
+    Header(":authority", "www.example.com", _),
+    Header("accept", "text/html,application/xhtml+xml,application/xml", _),
+    Header("user-agent", "h2_core-test/1.0", _),
+    Header("accept-language", "en-US,en;q=0.9", _),
+  ] = recv_headers
 }
 
 // Helper: parse all frames from a BitArray
