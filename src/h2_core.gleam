@@ -444,6 +444,16 @@ fn handle_decoded_headers(
     }
   })
 
+  // RFC 9113 Section 5.1.1 - Client streams are odd, server streams are even.
+  // The peer's streams must have the opposite parity from our role.
+  use <- bool.guard(
+    case conn.role {
+      Server -> stream_id % 2 == 0
+      Client -> stream_id % 2 != 0
+    },
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
   // Create new stream
   let stream = case end_stream {
     False -> Stream(..new_stream(), state: Open)
