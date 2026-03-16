@@ -2,8 +2,8 @@ import gleam/dict
 import gleam/option.{None, Some}
 import h2_core.{
   Client, ConnectionError, Header, RemoteSettingsChanged, Server,
-  SettingsAcknowledged, WithIndexing, new_connection, receive_data, send_headers,
-  send_settings,
+  SettingsAcknowledged, Stream, WithIndexing, new_connection, receive_data,
+  send_headers, send_settings,
 }
 import h2_frame
 
@@ -395,4 +395,110 @@ pub fn receive_settings_ack_with_nonzero_length_is_frame_size_error_test() {
   >>
   let assert Error(ConnectionError(h2_frame.FrameSizeError)) =
     receive_data(conn, bad_ack)
+}
+
+// RFC 9113 Section 6.9.2 - "When the value of SETTINGS_INITIAL_WINDOW_SIZE
+// changes, a receiver MUST adjust the size of all stream flow-control windows
+// that it maintains by the difference between the new value and the old value."
+//
+// When our own SETTINGS with INITIAL_WINDOW_SIZE is acknowledged, we must
+// adjust recv_window_size on existing streams by the delta.
+pub fn settings_ack_initial_window_size_adjusts_recv_window_test() {
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+
+  // Client opens stream 1
+  let assert Ok(#(_client, _events, headers)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.recv_window_size == 65_535
+
+  // Server sends SETTINGS with INITIAL_WINDOW_SIZE=32768
+  let assert Ok(#(server, _events, _to_send)) =
+    send_settings(server, [h2_frame.InitialWindowSize(32_768)])
+
+  // Server receives ACK for its settings
+  let assert Ok(settings_ack) =
+    h2_frame.encode_settings(ack: True, settings: [])
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, settings_ack)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  // Delta = 32768 - 65535 = -32767, so recv_window_size = 65535 - 32767 = 32768
+  assert stream.recv_window_size == 32_768
+}
+
+// RFC 9113 Section 6.9.2 - "A change to SETTINGS_INITIAL_WINDOW_SIZE can
+// cause the available space in a flow-control window to become negative.
+// A sender MUST track the negative flow-control window and MUST NOT send
+// new flow-controlled frames until it receives WINDOW_UPDATE frames that
+// cause the flow-control window to become positive."
+//
+// When the peer reduces INITIAL_WINDOW_SIZE, a stream's send_window_size
+// can go negative. This must not cause an error.
+pub fn receive_settings_initial_window_size_can_go_negative_test() {
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+
+  // Client opens stream 1 (default send_window_size = 65535)
+  let assert Ok(#(_client, _events, headers)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  // Peer sends SETTINGS with INITIAL_WINDOW_SIZE=0
+  // Delta = 0 - 65535 = -65535
+  let assert Ok(settings_frame) =
+    h2_frame.encode_settings(ack: False, settings: [
+      h2_frame.InitialWindowSize(0),
+    ])
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, settings_frame)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  // Window should be negative: 65535 + (-65535) = 0
+  assert stream.send_window_size == 0
+}
+
+// RFC 9113 Section 6.9.2 - "A change to SETTINGS_INITIAL_WINDOW_SIZE can
+// cause the available space in a flow-control window to become negative.
+// A sender MUST track the negative flow-control window and MUST NOT send
+// new flow-controlled frames until it receives WINDOW_UPDATE frames that
+// cause the flow-control window to become positive."
+//
+// Simulate a stream that has partially consumed its window (e.g. by sending
+// data), then the peer reduces INITIAL_WINDOW_SIZE enough to push the
+// remaining window negative. This must not error.
+pub fn receive_settings_initial_window_size_negative_window_tracked_test() {
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+
+  // Client opens stream 1 (send_window_size = 65535)
+  let assert Ok(#(_client, _events, headers)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  // Simulate having sent 60000 bytes: send_window_size = 65535 - 60000 = 5535
+  let server =
+    h2_core.Connection(
+      ..server,
+      streams: dict.insert(
+        server.streams,
+        1,
+        Stream(
+          state: h2_core.Open,
+          send_window_size: 5535,
+          recv_window_size: 65_535,
+        ),
+      ),
+    )
+
+  // Peer reduces INITIAL_WINDOW_SIZE to 0. Delta = 0 - 65535 = -65535
+  // send_window_size = 5535 + (-65535) = -60000
+  let assert Ok(settings_frame) =
+    h2_frame.encode_settings(ack: False, settings: [
+      h2_frame.InitialWindowSize(0),
+    ])
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, settings_frame)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.send_window_size == -60_000
 }
