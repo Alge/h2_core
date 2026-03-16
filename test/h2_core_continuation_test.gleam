@@ -529,7 +529,15 @@ pub fn receive_continuation_on_half_closed_local_is_valid_test() {
   let server =
     Connection(
       ..server,
-      streams: dict.insert(server.streams, 1, Stream(state: HalfClosedLocal)),
+      streams: dict.insert(
+        server.streams,
+        1,
+        Stream(
+          state: HalfClosedLocal,
+          send_window_size: 65_535,
+          recv_window_size: 65_535,
+        ),
+      ),
     )
 
   let assert Ok(#(_server, events, to_send)) = receive_data(server, patched)
@@ -538,9 +546,12 @@ pub fn receive_continuation_on_half_closed_local_is_valid_test() {
   assert to_send == <<>>
 }
 
-// RFC 9113 Section 5.1 - Receiving HEADERS+CONTINUATION on a closed
-// stream is a stream error of type STREAM_CLOSED.
-pub fn receive_continuation_on_closed_stream_is_stream_error_test() {
+// RFC 9113 Section 5.1 - An endpoint that sends RST_STREAM "MUST
+// minimally process and then discard any frames it receives in this
+// state. This means updating header compression state for HEADERS
+// [...] frames." HEADERS+CONTINUATION on a closed stream must be
+// silently discarded (HPACK decoded but no event, no response).
+pub fn receive_continuation_on_closed_stream_is_discarded_test() {
   let client = connection_with_small_frame_size(Client)
   let headers = large_headers()
   let assert Ok(#(client, _events, encoded1)) =
@@ -564,9 +575,10 @@ pub fn receive_continuation_on_closed_stream_is_stream_error_test() {
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == Closed
 
-  let assert Ok(#(_server, events, _to_send)) = receive_data(server, patched)
-  let assert [StreamReset(stream_id: 1, error_code: h2_frame.StreamClosed)] =
-    events
+  // Silently discarded — no events, no response
+  let assert Ok(#(_server, events, to_send)) = receive_data(server, patched)
+  assert events == []
+  assert to_send == <<>>
 }
 
 // RFC 9113 Section 4.3 - HPACK state must be preserved when a

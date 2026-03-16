@@ -1,5 +1,4 @@
 import alpacki
-import gleam/bit_array
 import gleam/bool
 import gleam/bytes_tree
 import gleam/dict
@@ -180,11 +179,11 @@ pub type StreamState {
 }
 
 pub type Stream {
-  Stream(state: StreamState)
+  Stream(state: StreamState, send_window_size: Int, recv_window_size: Int)
 }
 
 fn new_stream() -> Stream {
-  Stream(state: Idle)
+  Stream(state: Idle, send_window_size: 65_535, recv_window_size: 65_535)
 }
 
 fn add_stream(conn: Connection, stream: Stream) -> #(Connection, Int) {
@@ -207,11 +206,6 @@ pub type StreamEvent {
   RecvRstStream
   SendPushPromise
   RecvPushPromise
-}
-
-fn transition(_stream: Stream, _event: StreamEvent) -> Result(Stream, H2Error) {
-  Ok(Stream(state: Open))
-  //Ok(Stream(..stream, state: Open))
 }
 
 pub type Indexing {
@@ -374,7 +368,7 @@ fn handle_decoded_headers(
               True -> {
                 let new_state = case existing_stream.state {
                   Open -> HalfClosedRemote
-                  HalfClosedLocal  -> Closed
+                  HalfClosedLocal -> Closed
                   // can't happen
                   _ -> existing_stream.state
                 }
@@ -403,8 +397,11 @@ fn handle_decoded_headers(
               to_send,
             ))
           }
-          // HalfClosedRemote / Closed: stream error STREAM_CLOSED
-          HalfClosedRemote | Closed -> {
+          // RFC 9113 Section 5.1 (half-closed remote) - "If an endpoint
+          // receives additional frames, other than WINDOW_UPDATE, PRIORITY,
+          // or RST_STREAM, for a stream that is in this state, it MUST
+          // respond with a stream error of type STREAM_CLOSED."
+          HalfClosedRemote -> {
             case
               h2_frame.encode_rst_stream(
                 stream_id: stream_id,
@@ -428,6 +425,12 @@ fn handle_decoded_headers(
               }
               Error(error) -> Error(map_frame_error(error))
             }
+          }
+          // RFC 9113 Section 5.1 (closed state) - "An endpoint MUST
+          // minimally process and then discard any frames it receives
+          // in this state." HPACK decoding already happened above.
+          Closed -> {
+            Ok(#(conn, events, to_send))
           }
           // Should never happen
           Idle | ReservedLocal | ReservedRemote ->
@@ -568,20 +571,46 @@ pub fn send_window_update(
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
   // Update the connection
 
-  let conn = case stream_id {
-    0 ->
-      Connection(
-        ..conn,
-        recv_window_size: conn.recv_window_size + window_size_increment,
+  use conn <- result.try(case stream_id {
+    // updating window size on the connection
+    0 -> {
+      let conn =
+        Connection(
+          ..conn,
+          recv_window_size: conn.recv_window_size + window_size_increment,
+        )
+      use <- bool.guard(
+        conn.recv_window_size > 2_147_483_647,
+        Error(ConnectionError(h2_frame.FlowControlError)),
       )
-    // TODO: Handle updating window size on stream
-    _ -> conn
-  }
 
-  use <- bool.guard(
-    stream_id == 0 && conn.recv_window_size > 2_147_483_647,
-    Error(ConnectionError(h2_frame.FlowControlError)),
-  )
+      Ok(conn)
+    }
+    // updating window size on stream
+    _ -> {
+      case dict.get(conn.streams, stream_id) {
+        Ok(stream) -> {
+          let stream =
+            Stream(
+              ..stream,
+              recv_window_size: stream.recv_window_size + window_size_increment,
+            )
+          use <- bool.guard(
+            stream.recv_window_size > 2_147_483_647,
+            Error(ConnectionError(h2_frame.FlowControlError)),
+          )
+          Ok(
+            Connection(
+              ..conn,
+              streams: dict.insert(conn.streams, stream_id, stream),
+            ),
+          )
+        }
+        // Stream doesn't exist
+        Error(_) -> Error(ConnectionError(h2_frame.ProtocolError))
+      }
+    }
+  })
 
   case
     h2_frame.encode_window_update(
@@ -798,9 +827,51 @@ fn parse_loop(
               )
               parse_loop(conn, events, to_send)
             }
+            // Handle WindowUpdate on specific stream
             stream_id -> {
-              // Handle WindowUpdate on specific stream
-              todo
+              case dict.get(conn.streams, stream_id) {
+                Ok(stream) -> {
+                  let stream =
+                    Stream(
+                      ..stream,
+                      send_window_size: stream.send_window_size
+                        + window_size_increment,
+                    )
+                  use <- bool.guard(stream.send_window_size > 2_147_483_647, {
+                    // Send RST_STREAM and bubble up StreamReset
+                    case
+                      h2_frame.encode_rst_stream(
+                        stream_id: stream_id,
+                        error_code: h2_frame.FlowControlError,
+                      )
+                    {
+                      Ok(encoded_frame) -> {
+                        parse_loop(
+                          conn,
+                          [
+                            StreamReset(
+                              stream_id: stream_id,
+                              error_code: h2_frame.FlowControlError,
+                            ),
+                            ..events
+                          ],
+                          <<to_send:bits, encoded_frame:bits>>,
+                        )
+                      }
+                      Error(error) -> Error(map_frame_error(error))
+                    }
+                  })
+
+                  let conn =
+                    Connection(
+                      ..conn,
+                      streams: dict.insert(conn.streams, stream_id, stream),
+                    )
+
+                  parse_loop(conn, events, to_send)
+                }
+                Error(_) -> Error(ConnectionError(h2_frame.ProtocolError))
+              }
             }
           }
         }

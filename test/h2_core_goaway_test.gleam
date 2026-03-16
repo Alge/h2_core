@@ -1,6 +1,6 @@
 import h2_core.{
-  Client, Connection, ConnectionError, GoawayReceived, Server, new_connection,
-  receive_data, send_goaway,
+  Client, Connection, ConnectionError, GoawayReceived, Header, HeadersReceived,
+  Server, WithIndexing, new_connection, receive_data, send_goaway, send_headers,
 }
 import h2_frame
 
@@ -161,4 +161,45 @@ pub fn receive_goaway_does_not_affect_buffer_test() {
   let assert Ok(#(conn, events, _to_send)) = receive_data(conn, data)
   assert events == [GoawayReceived(0, h2_frame.NoError, <<>>)]
   assert conn.recv_buffer == <<1, 2, 3>>
+}
+
+// RFC 9113 Section 6.8 - "However, any frames that alter connection
+// state cannot be completely ignored. For instance, HEADERS,
+// PUSH_PROMISE, and CONTINUATION frames MUST be minimally processed
+// to ensure that the state maintained for field section compression
+// is consistent (see Section 4.3)."
+//
+// After receiving GOAWAY, the server must still HPACK-decode HEADERS
+// frames (even on streams above last_stream_id) to keep the dynamic
+// table in sync. If it doesn't, subsequent header decoding will fail
+// with a CompressionError.
+pub fn receive_headers_after_goaway_maintains_hpack_state_test() {
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+
+  // Client sends three HEADERS frames — HPACK state accumulates across all three
+  let assert Ok(#(client, _events, encoded1)) =
+    send_headers(client, [Header("x-custom", "value1", WithIndexing)], False)
+  let assert Ok(#(client, _events, encoded2)) =
+    send_headers(client, [Header("x-custom", "value2", WithIndexing)], False)
+  let assert Ok(#(_client, _events, encoded3)) =
+    send_headers(client, [Header("x-custom", "value3", WithIndexing)], False)
+
+  // Server receives stream 1
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
+
+  // Server sends GOAWAY with last_stream_id=1
+  let assert Ok(#(server, _events, _to_send)) =
+    send_goaway(server, h2_frame.NoError, <<>>)
+
+  // Server receives stream 3 (above last_stream_id in the GOAWAY we sent,
+  // but still must be HPACK-decoded to maintain compression state)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded2)
+
+  // Server receives stream 5 — if HPACK state from stream 3 was not
+  // maintained, this will fail with CompressionError
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, encoded3)
+  let assert [HeadersReceived(stream_id: 5, headers: h, end_stream: False)] =
+    events
+  let assert [Header("x-custom", "value3", _)] = h
 }

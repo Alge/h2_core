@@ -2,8 +2,8 @@ import gleam/bit_array
 import gleam/dict
 import gleam/option.{None}
 import h2_core.{
-  Client, Connection, HalfClosedLocal, Header, HeadersReceived, Open, Server,
-  WithIndexing, new_connection, receive_data, send_headers,
+  Client, HalfClosedLocal, Header, Open, Server, WithIndexing, new_connection,
+  send_headers,
 }
 import h2_frame
 

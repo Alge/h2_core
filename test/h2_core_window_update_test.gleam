@@ -1,6 +1,8 @@
+import gleam/dict
 import h2_core.{
-  Client, ConnectionError, Server, new_connection, receive_data,
-  send_window_update,
+  Client, Connection, ConnectionError, HalfClosedLocal, HalfClosedRemote, Header,
+  HeadersReceived, Open, Server, Stream, StreamReset, WithIndexing,
+  new_connection, receive_data, send_headers, send_window_update,
 }
 import h2_frame
 
@@ -11,7 +13,20 @@ pub fn new_connection_default_window_sizes_test() {
   assert conn.recv_window_size == 65_535
 }
 
-// RFC 9113 Section 6.9 - Sending WINDOW_UPDATE
+// RFC 9113 Section 6.9.2 - New streams start with the initial window
+// size of 65,535.
+pub fn new_stream_default_window_sizes_test() {
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+  let assert Ok(#(_client, _events, headers)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.send_window_size == 65_535
+  assert stream.recv_window_size == 65_535
+}
+
+// --- Sending WINDOW_UPDATE ---
 
 // Connection-level window update (stream 0)
 pub fn send_window_update_connection_level_test() {
@@ -25,8 +40,14 @@ pub fn send_window_update_connection_level_test() {
 
 // Stream-level window update
 pub fn send_window_update_stream_level_test() {
-  let conn = new_connection(Server)
-  let assert Ok(#(_conn, events, to_send)) = send_window_update(conn, 1, 32_768)
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+  let assert Ok(#(_client, _events, headers)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  let assert Ok(#(_server, events, to_send)) =
+    send_window_update(server, 1, 32_768)
   assert events == []
   let assert Ok(expected) =
     h2_frame.encode_window_update(stream_id: 1, window_size_increment: 32_768)
@@ -85,10 +106,46 @@ pub fn send_window_update_overflow_recv_window_test() {
 
 // Stream-level WINDOW_UPDATE should not affect connection recv_window_size
 pub fn send_window_update_stream_does_not_affect_connection_test() {
-  let conn = new_connection(Client)
-  let assert Ok(#(conn, _events, _to_send)) =
-    send_window_update(conn, 1, 10_000)
-  assert conn.recv_window_size == 65_535
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+  let assert Ok(#(_client, _events, headers)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  let assert Ok(#(server, _events, _to_send)) =
+    send_window_update(server, 1, 10_000)
+  assert server.recv_window_size == 65_535
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.recv_window_size == 75_535
+}
+
+// RFC 9113 Section 6.9 - Multiple stream-level WINDOW_UPDATEs accumulate.
+pub fn send_window_update_stream_recv_window_accumulates_test() {
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+  let assert Ok(#(_client, _events, headers)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  let assert Ok(#(server, _events, _to_send)) =
+    send_window_update(server, 1, 1000)
+  let assert Ok(#(server, _events, _to_send)) =
+    send_window_update(server, 1, 2000)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.recv_window_size == 68_535
+}
+
+// RFC 9113 Section 6.9.1 - Stream recv window overflow is
+// FLOW_CONTROL_ERROR.
+pub fn send_window_update_stream_overflow_recv_window_test() {
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+  let assert Ok(#(_client, _events, headers)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+    send_window_update(server, 1, 2_147_483_647)
 }
 
 // RFC 9113 Section 6.9 - Receiving WINDOW_UPDATE
@@ -191,4 +248,232 @@ pub fn receive_window_update_no_response_test() {
     h2_frame.encode_window_update(stream_id: 0, window_size_increment: 100)
   let assert Ok(#(_conn, _events, to_send)) = receive_data(conn, wu)
   assert to_send == <<>>
+}
+
+// RFC 9113 Section 6.9 - Stream-level WINDOW_UPDATE increases the
+// stream's send window.
+pub fn receive_window_update_stream_level_test() {
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+  let assert Ok(#(_client, _events, headers)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  let assert Ok(wu) =
+    h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)
+  let assert Ok(#(server, events, to_send)) = receive_data(server, wu)
+  assert events == []
+  assert to_send == <<>>
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.send_window_size == 66_535
+}
+
+// RFC 9113 Section 6.9 - Stream and connection flow control windows
+// are independent. Stream-level WINDOW_UPDATE does not affect
+// connection send window.
+pub fn receive_window_update_stream_does_not_affect_connection_window_test() {
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+  let assert Ok(#(_client, _events, headers)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  let assert Ok(wu) =
+    h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, wu)
+  assert server.send_window_size == 65_535
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.send_window_size == 66_535
+}
+
+// RFC 9113 Section 6.9 - Multiple stream-level WINDOW_UPDATEs
+// accumulate.
+pub fn receive_window_update_stream_accumulates_test() {
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+  let assert Ok(#(_client, _events, headers)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  let assert Ok(wu1) =
+    h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, wu1)
+  let assert Ok(wu2) =
+    h2_frame.encode_window_update(stream_id: 1, window_size_increment: 500)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, wu2)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.send_window_size == 67_035
+}
+
+// RFC 9113 Section 6.9.1 - Stream window overflow is a stream error
+// of type FLOW_CONTROL_ERROR. Per Section 5.4.2, stream errors are
+// non-fatal: send RST_STREAM and continue.
+pub fn receive_window_update_stream_overflow_test() {
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+  let assert Ok(#(_client, _events, headers)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  let assert Ok(wu) =
+    h2_frame.encode_window_update(
+      stream_id: 1,
+      window_size_increment: 2_147_483_647,
+    )
+  let assert Ok(#(_server, events, to_send)) = receive_data(server, wu)
+  let assert [StreamReset(stream_id: 1, error_code: h2_frame.FlowControlError)] =
+    events
+  let assert Ok(#(h2_frame.RstStream(1, h2_frame.FlowControlError), _rest)) =
+    h2_frame.parse(to_send)
+}
+
+// --- Stream state validation ---
+
+// RFC 9113 Section 5.1 - "Receiving any frame other than HEADERS or
+// PRIORITY on a stream in [idle] state MUST be treated as a connection
+// error of type PROTOCOL_ERROR."
+pub fn receive_window_update_idle_stream_is_protocol_error_test() {
+  let conn = new_connection(Server)
+  let assert Ok(wu) =
+    h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)
+  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+    receive_data(conn, wu)
+}
+
+// RFC 9113 Section 5.1 - WINDOW_UPDATE on an "open" stream is valid.
+pub fn receive_window_update_on_open_stream_test() {
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+  let assert Ok(#(_client, _events, headers)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == Open
+
+  let assert Ok(wu) =
+    h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)
+  let assert Ok(#(server, events, to_send)) = receive_data(server, wu)
+  assert events == []
+  assert to_send == <<>>
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.send_window_size == 66_535
+}
+
+// RFC 9113 Section 5.1 - WINDOW_UPDATE on a "half-closed (local)"
+// stream is valid. "An endpoint can receive any type of frame in this
+// state."
+pub fn receive_window_update_on_half_closed_local_stream_test() {
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+  let assert Ok(#(_client, _events, headers)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+  let server =
+    Connection(
+      ..server,
+      streams: dict.insert(
+        server.streams,
+        1,
+        Stream(
+          state: HalfClosedLocal,
+          send_window_size: 65_535,
+          recv_window_size: 65_535,
+        ),
+      ),
+    )
+
+  let assert Ok(wu) =
+    h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)
+  let assert Ok(#(server, events, to_send)) = receive_data(server, wu)
+  assert events == []
+  assert to_send == <<>>
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.send_window_size == 66_535
+}
+
+// RFC 9113 Section 5.1 - WINDOW_UPDATE is explicitly allowed on
+// "half-closed (remote)" streams. "If an endpoint receives additional
+// frames, other than WINDOW_UPDATE, PRIORITY, or RST_STREAM, [...]
+// it MUST respond with a stream error of type STREAM_CLOSED."
+// WINDOW_UPDATE is in the exception list.
+pub fn receive_window_update_on_half_closed_remote_stream_test() {
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+  let assert Ok(#(_client, _events, headers)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], True)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == HalfClosedRemote
+
+  let assert Ok(wu) =
+    h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)
+  let assert Ok(#(server, events, to_send)) = receive_data(server, wu)
+  assert events == []
+  assert to_send == <<>>
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.send_window_size == 66_535
+}
+
+// RFC 9113 Section 5.1 - WINDOW_UPDATE on a closed stream. The RFC
+// specifically notes: "An endpoint that sends a frame with the
+// END_STREAM flag set or a RST_STREAM frame might receive a
+// WINDOW_UPDATE [...] from its peer." and "An endpoint MUST minimally
+// process and then discard any frames it receives in this state."
+// WINDOW_UPDATE on a closed stream should be silently discarded.
+pub fn receive_window_update_on_closed_stream_test() {
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+  let assert Ok(#(_client, _events, headers)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+  let server =
+    Connection(
+      ..server,
+      streams: dict.insert(
+        server.streams,
+        1,
+        Stream(
+          state: h2_core.Closed,
+          send_window_size: 65_535,
+          recv_window_size: 65_535,
+        ),
+      ),
+    )
+
+  let assert Ok(wu) =
+    h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)
+  // Silently discarded — no events, no response
+  let assert Ok(#(_server, events, to_send)) = receive_data(server, wu)
+  assert events == []
+  assert to_send == <<>>
+}
+
+// RFC 9113 Section 5.4.2 - Stream errors are non-fatal. After a stream
+// error (RST_STREAM sent for overflow), the connection must continue
+// processing new streams.
+pub fn receive_window_update_connection_survives_stream_overflow_test() {
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+  let assert Ok(#(client, _events, headers1)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers1)
+
+  // Overflow stream 1's window — should get RST_STREAM but connection lives
+  let assert Ok(wu) =
+    h2_frame.encode_window_update(
+      stream_id: 1,
+      window_size_increment: 2_147_483_647,
+    )
+  let assert Ok(#(server, events, _to_send)) = receive_data(server, wu)
+  let assert [StreamReset(stream_id: 1, error_code: h2_frame.FlowControlError)] =
+    events
+
+  // Connection should still work — open stream 3
+  let assert Ok(#(_client, _events, headers3)) =
+    send_headers(client, [Header(":method", "POST", WithIndexing)], False)
+  let assert Ok(#(server, events, _to_send)) = receive_data(server, headers3)
+  let assert [HeadersReceived(stream_id: 3, headers: _, end_stream: False)] =
+    events
+  let assert Ok(stream) = dict.get(server.streams, 3)
+  assert stream.state == Open
 }

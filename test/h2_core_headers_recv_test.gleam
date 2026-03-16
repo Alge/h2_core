@@ -1,9 +1,11 @@
 import gleam/bit_array
 import gleam/dict
+import gleam/option
 import h2_core.{
   Client, Closed, Connection, ConnectionError, HalfClosedLocal, HalfClosedRemote,
   Header, HeadersReceived, NeverIndexed, Open, Server, Stream, StreamReset,
   WithIndexing, WithoutIndexing, new_connection, receive_data, send_headers,
+  send_settings,
 }
 import h2_frame
 
@@ -292,7 +294,15 @@ pub fn receive_headers_on_half_closed_local_stream_is_valid_test() {
   let server =
     Connection(
       ..server,
-      streams: dict.insert(server.streams, 1, Stream(state: HalfClosedLocal)),
+      streams: dict.insert(
+        server.streams,
+        1,
+        Stream(
+          state: HalfClosedLocal,
+          send_window_size: 65_535,
+          recv_window_size: 65_535,
+        ),
+      ),
     )
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == HalfClosedLocal
@@ -342,7 +352,15 @@ pub fn receive_headers_end_stream_on_half_closed_local_transitions_to_closed_tes
   let server =
     Connection(
       ..server,
-      streams: dict.insert(server.streams, 1, Stream(state: HalfClosedLocal)),
+      streams: dict.insert(
+        server.streams,
+        1,
+        Stream(
+          state: HalfClosedLocal,
+          send_window_size: 65_535,
+          recv_window_size: 65_535,
+        ),
+      ),
     )
 
   let assert Ok(#(server, events, _to_send)) = receive_data(server, patched)
@@ -412,10 +430,13 @@ pub fn receive_headers_never_indexed_test() {
 
 // --- Stream state validation ---
 
-// RFC 9113 Section 5.1 - "An endpoint that receives any frame other than
-// PRIORITY after receiving a RST_STREAM MUST treat that as a stream error
-// of type STREAM_CLOSED." HPACK data must still be decoded (Section 4.3).
-pub fn receive_headers_on_closed_stream_is_stream_closed_error_test() {
+// RFC 9113 Section 5.1 - An endpoint that sends RST_STREAM "might
+// receive frames that were in transit" and "MUST minimally process
+// and then discard any frames it receives in this state. This means
+// updating header compression state for HEADERS [...] frames."
+// HEADERS on a closed stream must be silently discarded (HPACK decoded
+// but no event, no response).
+pub fn receive_headers_on_closed_stream_is_discarded_test() {
   let client = new_connection(Client)
   let headers = [Header(":method", "GET", WithIndexing)]
   // Open stream 1
@@ -439,13 +460,10 @@ pub fn receive_headers_on_closed_stream_is_stream_closed_error_test() {
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == Closed
 
-  // HEADERS on closed stream is a stream error of type STREAM_CLOSED
+  // HEADERS on closed stream: silently discarded
   let assert Ok(#(_server, events, to_send)) = receive_data(server, patched)
-  let assert [StreamReset(stream_id: 1, error_code: h2_frame.StreamClosed)] =
-    events
-  let assert Ok(expected_rst) =
-    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.StreamClosed)
-  assert to_send == expected_rst
+  assert events == []
+  assert to_send == <<>>
 }
 
 // --- Half-closed (remote) stream error handling ---
@@ -560,4 +578,88 @@ pub fn rejected_headers_must_still_update_hpack_state_test() {
   let assert [HeadersReceived(stream_id: 5, headers: h, end_stream: False)] =
     events
   let assert [Header("x-custom", "value3", _)] = h
+}
+
+// --- MAX_CONCURRENT_STREAMS enforcement ---
+
+// RFC 9113 Section 5.1.2 - "Endpoints MUST NOT exceed the limit set
+// by their peer. An endpoint that receives a HEADERS frame that causes
+// its advertised concurrent stream limit to be exceeded MUST treat
+// this as a stream error (Section 5.4.2) of type PROTOCOL_ERROR or
+// REFUSED_STREAM."
+//
+// When the server has advertised MAX_CONCURRENT_STREAMS=1, a second
+// concurrent stream must be refused.
+pub fn receive_headers_exceeding_max_concurrent_streams_test() {
+  let server = new_connection(Server)
+  let client = new_connection(Client)
+
+  // Server advertises MAX_CONCURRENT_STREAMS=1
+  let assert Ok(#(server, _events, _to_send)) =
+    send_settings(server, [h2_frame.MaxConcurrentStreams(1)])
+  // Simulate the client having received and acked our settings
+  // by directly setting local_settings (the ack path is tested elsewhere)
+  let server =
+    Connection(
+      ..server,
+      local_settings: h2_core.Settings(
+        ..server.local_settings,
+        max_concurrent_streams: option.Some(1),
+      ),
+      pending_settings: [],
+    )
+
+  // Open stream 1
+  let assert Ok(#(client, _events, encoded1)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == Open
+
+  // Open stream 3 — should be refused (exceeds MAX_CONCURRENT_STREAMS=1)
+  let assert Ok(#(_client, _events, encoded3)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(_server, events, to_send)) = receive_data(server, encoded3)
+
+  // Should get a RST_STREAM with REFUSED_STREAM
+  let assert [StreamReset(stream_id: 3, error_code: h2_frame.RefusedStream)] =
+    events
+  let assert Ok(#(h2_frame.RstStream(3, h2_frame.RefusedStream), _rest)) =
+    h2_frame.parse(to_send)
+}
+
+// --- Stream ID parity validation ---
+
+// RFC 9113 Section 5.1.1 - "Streams initiated by a client MUST use
+// odd-numbered stream identifiers; those initiated by the server MUST
+// use even-numbered stream identifiers." and "An endpoint that
+// receives an unexpected stream identifier MUST respond with a
+// connection error (Section 5.4.1) of type PROTOCOL_ERROR."
+//
+// A server receiving HEADERS on an even stream ID (which is reserved
+// for server-initiated streams) must reject it.
+pub fn receive_headers_on_even_stream_id_is_protocol_error_test() {
+  let client = new_connection(Client)
+  let assert Ok(#(_client, _events, encoded)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  // Patch stream ID from 1 (odd/client) to 2 (even/server)
+  let patched = patch_stream_id(encoded, 2)
+
+  let server = new_connection(Server)
+  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+    receive_data(server, patched)
+}
+
+// A client receiving HEADERS on an odd stream ID (which is reserved
+// for client-initiated streams) must reject it.
+pub fn client_receive_headers_on_odd_stream_id_is_protocol_error_test() {
+  let server = new_connection(Server)
+  let assert Ok(#(_server, _events, encoded)) =
+    send_headers(server, [Header(":status", "200", WithIndexing)], False)
+  // Patch stream ID from 2 (even/server) to 1 (odd/client)
+  let patched = patch_stream_id(encoded, 1)
+
+  let client = new_connection(Client)
+  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+    receive_data(client, patched)
 }
