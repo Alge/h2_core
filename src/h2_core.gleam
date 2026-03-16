@@ -938,6 +938,10 @@ fn parse_loop(
           }
         }
 
+        h2_frame.Unknown(_, _, _, _) -> {
+          parse_loop(conn, events, to_send)
+        }
+
         _ -> todo
       }
     }
