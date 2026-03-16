@@ -23,6 +23,28 @@ pub type Settings {
   )
 }
 
+fn apply_new_window_size(
+  conn: Connection,
+  delta: Int,
+) -> Result(Connection, H2Error) {
+  // Early return if delta is 0
+  use <- bool.guard(delta == 0, Ok(conn))
+
+  use streams <- result.try(
+    list.try_map(dict.to_list(conn.streams), fn(pair) {
+      let #(stream_id, stream) = pair
+      let stream =
+        Stream(..stream, send_window_size: stream.send_window_size + delta)
+      use <- bool.guard(
+        stream.send_window_size > 2_147_483_647,
+        Error(ConnectionError(h2_frame.FlowControlError)),
+      )
+      Ok(#(stream_id, stream))
+    }),
+  )
+  Ok(Connection(..conn, streams: dict.from_list(streams)))
+}
+
 fn apply_settings(
   role: Role,
   settings: Settings,
@@ -805,7 +827,14 @@ fn parse_loop(
 
           case apply_settings(conn.role, conn.remote_settings, settings) {
             Ok(new_settings) -> {
+              let old_settings = conn.remote_settings
               let conn = Connection(..conn, remote_settings: new_settings)
+
+              use conn <- result.try(apply_new_window_size(
+                conn,
+                new_settings.initial_window_size
+                  - old_settings.initial_window_size,
+              ))
 
               // Reply with an ACK
               case h2_frame.encode_settings(ack: True, settings: []) {
