@@ -1,11 +1,10 @@
 import gleam/bit_array
 import gleam/dict
 import gleam/list
-import gleam/option
 import h2_core.{
-  Client, Connection, ConnectionError, HalfClosedLocal, HalfClosedRemote, Header,
-  HeadersReceived, Open, Server, Settings, WithIndexing, new_connection,
-  receive_data, send_headers,
+  Client, Closed, Connection, ConnectionError, HalfClosedLocal, HalfClosedRemote,
+  Header, HeadersReceived, Open, Server, Settings, Stream, StreamReset,
+  WithIndexing, new_connection, receive_data, send_headers,
 }
 import h2_frame
 
@@ -322,8 +321,7 @@ pub fn receive_continuation_across_calls_test() {
     h2_frame.parse(to_send)
   let headers_frame_size =
     bit_array.byte_size(to_send) - bit_array.byte_size(rest)
-  let assert Ok(headers_only) =
-    bit_array.slice(to_send, 0, headers_frame_size)
+  let assert Ok(headers_only) = bit_array.slice(to_send, 0, headers_frame_size)
 
   let server = new_connection(Server)
   // First call: only the HEADERS frame (no events yet, block incomplete)
@@ -346,8 +344,7 @@ pub fn receive_multiple_continuation_frames_test() {
   let settings = Settings(..conn.remote_settings, max_frame_size: 16)
   let conn = Connection(..conn, remote_settings: settings)
   let headers = large_headers()
-  let assert Ok(#(_conn, _events, to_send)) =
-    send_headers(conn, headers, False)
+  let assert Ok(#(_conn, _events, to_send)) = send_headers(conn, headers, False)
 
   // Verify we got at least 3 frames
   let frames = parse_all_frames(to_send, [])
@@ -360,6 +357,27 @@ pub fn receive_multiple_continuation_frames_test() {
     HeadersReceived(stream_id: 1, headers: recv_headers, end_stream: False),
   ] = events
   assert list.length(recv_headers) == list.length(headers)
+}
+
+// After fully reassembling a HEADERS+CONTINUATION block, pending_header_blocks
+// must be cleared. Otherwise subsequent non-CONTINUATION frames are rejected.
+pub fn receive_continuation_clears_pending_state_test() {
+  let client = connection_with_small_frame_size(Client)
+  let headers = large_headers()
+  let assert Ok(#(client, _events, to_send)) =
+    send_headers(client, headers, False)
+  let frames = parse_all_frames(to_send, [])
+  assert list.length(frames) > 1
+
+  let server = new_connection(Server)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, to_send)
+
+  // A normal single-frame HEADERS on a new stream must work after reassembly
+  let assert Ok(#(_client, _events, encoded2)) =
+    send_headers(client, [Header(":method", "POST", WithIndexing)], False)
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, encoded2)
+  let assert [HeadersReceived(stream_id: 3, headers: _, end_stream: False)] =
+    events
 }
 
 // end_stream from HEADERS is preserved through CONTINUATION reassembly
@@ -375,9 +393,8 @@ pub fn receive_continuation_preserves_end_stream_test() {
 
   let server = new_connection(Server)
   let assert Ok(#(server, events, _to_send)) = receive_data(server, to_send)
-  let assert [
-    HeadersReceived(stream_id: 1, headers: _, end_stream: True),
-  ] = events
+  let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: True)] =
+    events
   // Stream should be HalfClosedRemote since end_stream was True
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == HalfClosedRemote
@@ -409,6 +426,230 @@ pub fn receive_continuation_preserves_header_order_test() {
     Header("user-agent", "h2_core-test/1.0", _),
     Header("accept-language", "en-US,en;q=0.9", _),
   ] = recv_headers
+}
+
+// RFC 9113 Section 4.3 - Invalid HPACK data in a CONTINUATION-reassembled
+// block is a connection error of type COMPRESSION_ERROR.
+pub fn receive_continuation_invalid_hpack_is_compression_error_test() {
+  let client = connection_with_small_frame_size(Client)
+  let headers = large_headers()
+  let assert Ok(#(_client, _events, to_send)) =
+    send_headers(client, headers, False)
+
+  // Parse the HEADERS frame, keep its bytes
+  let assert Ok(#(h2_frame.Headers(end_headers: False, ..), rest)) =
+    h2_frame.parse(to_send)
+  let headers_frame_size =
+    bit_array.byte_size(to_send) - bit_array.byte_size(rest)
+  let assert Ok(headers_only) = bit_array.slice(to_send, 0, headers_frame_size)
+
+  // Append a CONTINUATION with invalid HPACK data and END_HEADERS
+  let assert Ok(bad_cont) =
+    h2_frame.encode_continuation(
+      stream_id: 1,
+      end_headers: True,
+      field_block_fragment: <<0xFF, 0xFF, 0xFF>>,
+    )
+  let bad_data = <<headers_only:bits, bad_cont:bits>>
+
+  let server = new_connection(Server)
+  let assert Error(ConnectionError(h2_frame.CompressionError)) =
+    receive_data(server, bad_data)
+}
+
+// RFC 9113 Section 6.10 - CONTINUATION on stream 0 is PROTOCOL_ERROR
+pub fn receive_continuation_on_stream_zero_is_protocol_error_test() {
+  let server = new_connection(Server)
+  // Manually craft: Length=0, Type=0x09, Flags=0x04 (END_HEADERS), Stream ID=0
+  let bad_cont = <<
+    0:size(24),
+    0x09:size(8),
+    0x04:size(8),
+    0:size(1),
+    0:size(31),
+  >>
+  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+    receive_data(server, bad_cont)
+}
+
+// --- Stream state validation for CONTINUATION reassembly path ---
+// These mirror the stream state tests in h2_core_headers_recv_test but
+// exercise the CONTINUATION code path (multi-frame header blocks).
+
+// RFC 9113 Section 5.1 - Receiving HEADERS+CONTINUATION on an open stream
+// is valid (e.g. trailers).
+pub fn receive_continuation_on_open_stream_is_valid_test() {
+  let client = connection_with_small_frame_size(Client)
+  let headers = large_headers()
+  let assert Ok(#(client, _events, encoded1)) =
+    send_headers(client, headers, False)
+
+  let h2 = [
+    Header(":method", "POST", WithIndexing),
+    Header(":path", "/second/request/path", WithIndexing),
+    Header("x-request-id", "aaaa-bbbb-cccc-dddd", WithIndexing),
+  ]
+  let assert Ok(#(_client, _events, encoded2)) = send_headers(client, h2, False)
+  let frames = parse_all_frames(encoded2, [])
+  assert list.length(frames) > 1
+  let patched = patch_all_frames_stream_id(encoded2, 1)
+
+  let server = new_connection(Server)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == Open
+
+  let assert Ok(#(_server, events, to_send)) = receive_data(server, patched)
+  let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: False)] =
+    events
+  assert to_send == <<>>
+}
+
+// RFC 9113 Section 5.1 - Receiving HEADERS+CONTINUATION on a
+// half-closed(local) stream is valid.
+pub fn receive_continuation_on_half_closed_local_is_valid_test() {
+  let client = connection_with_small_frame_size(Client)
+  let headers = large_headers()
+  let assert Ok(#(client, _events, encoded1)) =
+    send_headers(client, headers, False)
+
+  let h2 = [
+    Header(":method", "POST", WithIndexing),
+    Header(":path", "/second/request/path", WithIndexing),
+    Header("x-request-id", "aaaa-bbbb-cccc-dddd", WithIndexing),
+  ]
+  let assert Ok(#(_client, _events, encoded2)) = send_headers(client, h2, False)
+  let frames = parse_all_frames(encoded2, [])
+  assert list.length(frames) > 1
+  let patched = patch_all_frames_stream_id(encoded2, 1)
+
+  let server = new_connection(Server)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
+  // Simulate server having sent END_STREAM
+  let server =
+    Connection(
+      ..server,
+      streams: dict.insert(server.streams, 1, Stream(state: HalfClosedLocal)),
+    )
+
+  let assert Ok(#(_server, events, to_send)) = receive_data(server, patched)
+  let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: False)] =
+    events
+  assert to_send == <<>>
+}
+
+// RFC 9113 Section 5.1 - Receiving HEADERS+CONTINUATION on a closed
+// stream is a stream error of type STREAM_CLOSED.
+pub fn receive_continuation_on_closed_stream_is_stream_error_test() {
+  let client = connection_with_small_frame_size(Client)
+  let headers = large_headers()
+  let assert Ok(#(client, _events, encoded1)) =
+    send_headers(client, headers, False)
+  let assert Ok(rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
+
+  let h2 = [
+    Header(":method", "POST", WithIndexing),
+    Header(":path", "/second/request/path", WithIndexing),
+    Header("x-request-id", "aaaa-bbbb-cccc-dddd", WithIndexing),
+  ]
+  let assert Ok(#(_client, _events, encoded2)) = send_headers(client, h2, False)
+  let frames = parse_all_frames(encoded2, [])
+  assert list.length(frames) > 1
+  let patched = patch_all_frames_stream_id(encoded2, 1)
+
+  let server = new_connection(Server)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, rst)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == Closed
+
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, patched)
+  let assert [StreamReset(stream_id: 1, error_code: h2_frame.StreamClosed)] =
+    events
+}
+
+// RFC 9113 Section 4.3 - HPACK state must be preserved when a
+// HEADERS+CONTINUATION block is rejected. This tests the CONTINUATION
+// reassembly path specifically (the HEADERS-only path is tested in
+// h2_core_headers_recv_test).
+pub fn receive_continuation_rejected_preserves_hpack_state_test() {
+  let client = connection_with_small_frame_size(Client)
+  // Use distinct headers for each send to prevent HPACK compression
+  // from shrinking subsequent sends below the frame size limit
+  let h1 = [
+    Header(":method", "GET", WithIndexing),
+    Header(":path", "/first/request/path", WithIndexing),
+    Header("x-request-id", "aaaa-bbbb-cccc-dddd", WithIndexing),
+  ]
+  let h2 = [
+    Header(":method", "POST", WithIndexing),
+    Header(":path", "/second/request/path", WithIndexing),
+    Header("x-request-id", "eeee-ffff-0000-1111", WithIndexing),
+  ]
+  let h3 = [
+    Header(":method", "PUT", WithIndexing),
+    Header(":path", "/third/request/path", WithIndexing),
+    Header("x-request-id", "2222-3333-4444-5555", WithIndexing),
+  ]
+  // Block 1: stream 1 with END_STREAM (split across HEADERS+CONTINUATION)
+  let assert Ok(#(client, _events, encoded1)) = send_headers(client, h1, True)
+  // Block 2: stream 3 (split across HEADERS+CONTINUATION)
+  let assert Ok(#(client, _events, encoded2)) = send_headers(client, h2, False)
+  // Block 3: stream 5 (split across HEADERS+CONTINUATION)
+  let assert Ok(#(_client, _events, encoded3)) = send_headers(client, h3, False)
+
+  // Verify block 2 is actually split across multiple frames
+  let frames = parse_all_frames(encoded2, [])
+  assert list.length(frames) > 1
+
+  // Patch all frames in block 2 to target stream 1
+  let patched2 = patch_all_frames_stream_id(encoded2, 1)
+
+  let server = new_connection(Server)
+  // Receive block 1 — stream 1 becomes HalfClosedRemote
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == HalfClosedRemote
+
+  // Receive patched block 2 — rejected, but HPACK must still be decoded
+  let assert Ok(#(server, events, _to_send)) = receive_data(server, patched2)
+  let assert [StreamReset(stream_id: 1, error_code: h2_frame.StreamClosed)] =
+    events
+
+  // Block 3 on stream 5 proves HPACK state survived
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, encoded3)
+  let assert [HeadersReceived(stream_id: 5, headers: h, end_stream: False)] =
+    events
+  assert list.length(h) == list.length(h3)
+}
+
+// Helper: patch a frame's stream ID
+fn patch_stream_id(frame_bytes: BitArray, new_id: Int) -> BitArray {
+  let assert <<
+    header:bits-size(40),
+    _reserved:size(1),
+    _old:size(31),
+    payload:bits,
+  >> = frame_bytes
+  <<header:bits, 0:size(1), new_id:size(31), payload:bits>>
+}
+
+// Helper: patch stream ID on every frame in a sequence
+fn patch_all_frames_stream_id(data: BitArray, new_id: Int) -> BitArray {
+  patch_all_frames_loop(data, new_id, <<>>)
+}
+
+fn patch_all_frames_loop(data: BitArray, new_id: Int, acc: BitArray) -> BitArray {
+  case h2_frame.parse(data) {
+    Ok(#(_frame, rest)) -> {
+      let frame_size = bit_array.byte_size(data) - bit_array.byte_size(rest)
+      let assert Ok(frame_bytes) = bit_array.slice(data, 0, frame_size)
+      let patched = patch_stream_id(frame_bytes, new_id)
+      patch_all_frames_loop(rest, new_id, <<acc:bits, patched:bits>>)
+    }
+    Error(_) -> acc
+  }
 }
 
 // Helper: parse all frames from a BitArray

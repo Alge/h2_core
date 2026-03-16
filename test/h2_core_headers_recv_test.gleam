@@ -1,9 +1,9 @@
 import gleam/bit_array
 import gleam/dict
 import h2_core.{
-  Client, ConnectionError, HalfClosedRemote, Header, HeadersReceived,
-  NeverIndexed, Open, Server, WithIndexing, WithoutIndexing, new_connection,
-  receive_data, send_headers,
+  Client, Closed, Connection, ConnectionError, HalfClosedLocal, HalfClosedRemote,
+  Header, HeadersReceived, NeverIndexed, Open, Server, Stream, StreamReset,
+  WithIndexing, WithoutIndexing, new_connection, receive_data, send_headers,
 }
 import h2_frame
 
@@ -224,23 +224,132 @@ pub fn receive_headers_updates_last_remote_stream_id_test() {
 }
 
 // RFC 9113 Section 5.1.1 - Stream IDs must be monotonically increasing
-// Receiving HEADERS with a stream ID <= last_remote_stream_id is PROTOCOL_ERROR
+// Receiving HEADERS with a stream ID that doesn't exist in conn.streams
+// and is <= last_remote_stream_id is a connection error PROTOCOL_ERROR.
 pub fn receive_headers_decreasing_stream_id_is_protocol_error_test() {
+  let client = new_connection(Client)
   let headers = [Header(":method", "GET", WithIndexing)]
-  // Produce a HEADERS frame for stream 1
-  let assert Ok(#(_client, _events, encoded1)) =
-    send_headers(new_connection(Client), headers, False)
+  // Open streams 1 and 3
+  let assert Ok(#(client, _events, encoded1)) =
+    send_headers(client, headers, False)
+  let assert Ok(#(_client, _events, encoded3)) =
+    send_headers(client, headers, False)
 
   let server = new_connection(Server)
-  // Receive stream 1
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
-  assert server.last_remote_stream_id == 1
-  // Produce another HEADERS frame for stream 1 (from a fresh client)
-  let assert Ok(#(_client, _events, dup_encoded)) =
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded3)
+  assert server.last_remote_stream_id == 3
+
+  // Craft a HEADERS frame for stream 2 (even = server-initiated, never opened)
+  // stream 2 doesn't exist in conn.streams and 2 < 3 = last_remote_stream_id
+  let assert Ok(#(_fresh, _events, encoded_new)) =
     send_headers(new_connection(Client), headers, False)
-  // Feeding stream 1 again should be PROTOCOL_ERROR (not increasing)
+  let patched = patch_stream_id(encoded_new, 2)
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
-    receive_data(server, dup_encoded)
+    receive_data(server, patched)
+}
+
+// RFC 9113 Section 5.1 - Receiving HEADERS on an open stream is valid
+// (e.g. trailer headers after message body).
+pub fn receive_headers_on_open_stream_is_valid_test() {
+  let client = new_connection(Client)
+  let headers = [Header(":method", "GET", WithIndexing)]
+  let assert Ok(#(client, _events, encoded1)) =
+    send_headers(client, headers, False)
+  // Produce a second HEADERS for stream 3, then patch to stream 1
+  let assert Ok(#(_client, _events, encoded2)) =
+    send_headers(client, [Header("x-trailer", "value", WithIndexing)], False)
+  let patched = patch_stream_id(encoded2, 1)
+
+  let server = new_connection(Server)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == Open
+
+  // HEADERS on an open stream should succeed and keep state Open
+  let assert Ok(#(server, events, to_send)) = receive_data(server, patched)
+  let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: False)] =
+    events
+  assert to_send == <<>>
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == Open
+}
+
+// RFC 9113 Section 5.1 - Receiving HEADERS on a half-closed(local) stream
+// is valid. Half-closed(local) means we sent END_STREAM but the remote
+// peer can still send frames, including HEADERS (trailers).
+pub fn receive_headers_on_half_closed_local_stream_is_valid_test() {
+  let client = new_connection(Client)
+  let assert Ok(#(client, _events, encoded1)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(_client, _events, encoded2)) =
+    send_headers(client, [Header("x-trailer", "value", WithIndexing)], False)
+  let patched = patch_stream_id(encoded2, 1)
+
+  let server = new_connection(Server)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
+  // Simulate server having sent END_STREAM on stream 1 (half-closed local)
+  let server =
+    Connection(
+      ..server,
+      streams: dict.insert(server.streams, 1, Stream(state: HalfClosedLocal)),
+    )
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == HalfClosedLocal
+
+  // HEADERS on half-closed(local) should succeed
+  let assert Ok(#(_server, events, to_send)) = receive_data(server, patched)
+  let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: False)] =
+    events
+  assert to_send == <<>>
+}
+
+// RFC 9113 Section 5.1 - Receiving HEADERS with END_STREAM on an open
+// stream transitions it to half-closed(remote).
+pub fn receive_headers_end_stream_on_open_stream_transitions_state_test() {
+  let client = new_connection(Client)
+  let assert Ok(#(client, _events, encoded1)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(_client, _events, encoded2)) =
+    send_headers(client, [Header("x-trailer", "done", WithIndexing)], True)
+  let patched = patch_stream_id(encoded2, 1)
+
+  let server = new_connection(Server)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == Open
+
+  let assert Ok(#(server, events, _to_send)) = receive_data(server, patched)
+  let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: True)] =
+    events
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == HalfClosedRemote
+}
+
+// RFC 9113 Section 5.1 - Receiving HEADERS with END_STREAM on a
+// half-closed(local) stream transitions it to Closed.
+pub fn receive_headers_end_stream_on_half_closed_local_transitions_to_closed_test() {
+  let client = new_connection(Client)
+  let assert Ok(#(client, _events, encoded1)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(_client, _events, encoded2)) =
+    send_headers(client, [Header("x-trailer", "done", WithIndexing)], True)
+  let patched = patch_stream_id(encoded2, 1)
+
+  let server = new_connection(Server)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
+  // Simulate server having sent END_STREAM on stream 1 (half-closed local)
+  let server =
+    Connection(
+      ..server,
+      streams: dict.insert(server.streams, 1, Stream(state: HalfClosedLocal)),
+    )
+
+  let assert Ok(#(server, events, _to_send)) = receive_data(server, patched)
+  let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: True)] =
+    events
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == Closed
 }
 
 // RFC 9113 Section 4.3 - Invalid HPACK data is COMPRESSION_ERROR
@@ -279,8 +388,8 @@ pub fn receive_headers_without_indexing_test() {
     HeadersReceived(stream_id: 1, headers: recv_headers, end_stream: False),
   ] = events
   let assert [
-    Header(":method", "GET", _),
-    Header("authorization", "Bearer secret", _),
+    Header(":method", "GET", WithIndexing),
+    Header("authorization", "Bearer secret", WithoutIndexing),
   ] = recv_headers
 }
 
@@ -298,5 +407,157 @@ pub fn receive_headers_never_indexed_test() {
   let assert [
     HeadersReceived(stream_id: 1, headers: recv_headers, end_stream: False),
   ] = events
-  let assert [Header("secret-token", "abc123", _)] = recv_headers
+  let assert [Header("secret-token", "abc123", NeverIndexed)] = recv_headers
+}
+
+// --- Stream state validation ---
+
+// RFC 9113 Section 5.1 - "An endpoint that receives any frame other than
+// PRIORITY after receiving a RST_STREAM MUST treat that as a stream error
+// of type STREAM_CLOSED." HPACK data must still be decoded (Section 4.3).
+pub fn receive_headers_on_closed_stream_is_stream_closed_error_test() {
+  let client = new_connection(Client)
+  let headers = [Header(":method", "GET", WithIndexing)]
+  // Open stream 1
+  let assert Ok(#(client, _events, encoded1)) =
+    send_headers(client, headers, False)
+  // Encode a RST_STREAM to close stream 1
+  let assert Ok(rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
+  // Produce a second HEADERS, patch to stream 1
+  let assert Ok(#(_client, _events, encoded2)) =
+    send_headers(client, headers, False)
+  let patched = patch_stream_id(encoded2, 1)
+
+  let server = new_connection(Server)
+  // Receive HEADERS to open stream 1
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == Open
+  // Receive RST_STREAM to close stream 1
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, rst)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == Closed
+
+  // HEADERS on closed stream is a stream error of type STREAM_CLOSED
+  let assert Ok(#(_server, events, to_send)) = receive_data(server, patched)
+  let assert [StreamReset(stream_id: 1, error_code: h2_frame.StreamClosed)] =
+    events
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.StreamClosed)
+  assert to_send == expected_rst
+}
+
+// --- Half-closed (remote) stream error handling ---
+// RFC 9113 Section 5.1 - "If an endpoint receives additional frames,
+// other than WINDOW_UPDATE, PRIORITY, or RST_STREAM, for a stream that
+// is in this state, it MUST respond with a stream error of type
+// STREAM_CLOSED."
+
+// Helper: patch a frame's stream ID without changing anything else.
+// Frame layout: 3 bytes length, 1 byte type, 1 byte flags, 4 bytes stream ID
+fn patch_stream_id(frame: BitArray, new_id: Int) -> BitArray {
+  let assert <<
+    header:bits-size(40),
+    _reserved:size(1),
+    _old:size(31),
+    payload:bits,
+  >> = frame
+  <<header:bits, 0:size(1), new_id:size(31), payload:bits>>
+}
+
+// Receiving HEADERS on a half-closed(remote) stream is a stream error,
+// not a connection error — the connection must survive.
+pub fn receive_headers_on_half_closed_remote_is_stream_error_test() {
+  let client = new_connection(Client)
+  let assert Ok(#(client, _events, encoded1)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], True)
+  let assert Ok(#(_client, _events, encoded2)) =
+    send_headers(client, [Header(":method", "POST", WithIndexing)], False)
+
+  let server = new_connection(Server)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == HalfClosedRemote
+
+  // Patch frame 2 to target stream 1 (half-closed remote)
+  let patched = patch_stream_id(encoded2, 1)
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, patched)
+  let assert [StreamReset(stream_id: 1, error_code: h2_frame.StreamClosed)] =
+    events
+}
+
+// RFC 9113 Section 5.4.2 - Stream error sends RST_STREAM
+pub fn receive_headers_on_half_closed_remote_sends_rst_stream_test() {
+  let client = new_connection(Client)
+  let assert Ok(#(client, _events, encoded1)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], True)
+  let assert Ok(#(_client, _events, encoded2)) =
+    send_headers(client, [Header(":method", "POST", WithIndexing)], False)
+
+  let server = new_connection(Server)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
+
+  let patched = patch_stream_id(encoded2, 1)
+  let assert Ok(#(_server, _events, to_send)) = receive_data(server, patched)
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.StreamClosed)
+  assert to_send == expected_rst
+}
+
+// The connection continues processing after a stream error —
+// subsequent valid HEADERS on a new stream must succeed.
+pub fn receive_headers_after_stream_error_succeeds_test() {
+  let client = new_connection(Client)
+  let assert Ok(#(client, _events, encoded1)) =
+    send_headers(client, [Header(":method", "GET", WithIndexing)], True)
+  let assert Ok(#(client, _events, encoded2)) =
+    send_headers(client, [Header(":method", "POST", WithIndexing)], False)
+  let assert Ok(#(_client, _events, encoded3)) =
+    send_headers(client, [Header(":method", "PUT", WithIndexing)], False)
+
+  let server = new_connection(Server)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
+
+  // Stream error on stream 1
+  let patched = patch_stream_id(encoded2, 1)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, patched)
+
+  // Stream 5 should still work
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, encoded3)
+  let assert [HeadersReceived(stream_id: 5, headers: _, end_stream: False)] =
+    events
+}
+
+// RFC 9113 Section 4.3 - HPACK state must be preserved even when
+// HEADERS are rejected. "An endpoint receiving HEADERS, PUSH_PROMISE,
+// or CONTINUATION frames needs to reassemble field blocks and perform
+// decompression even if the frames are to be discarded."
+//
+// If the rejected frame's HPACK data is not decoded, the dynamic table
+// goes out of sync and all subsequent header decoding fails with
+// CompressionError.
+pub fn rejected_headers_must_still_update_hpack_state_test() {
+  let client = new_connection(Client)
+  let assert Ok(#(client, _events, encoded1)) =
+    send_headers(client, [Header("x-custom", "value1", WithIndexing)], True)
+  let assert Ok(#(client, _events, encoded2)) =
+    send_headers(client, [Header("x-custom", "value2", WithIndexing)], False)
+  let assert Ok(#(_client, _events, encoded3)) =
+    send_headers(client, [Header("x-custom", "value3", WithIndexing)], False)
+
+  let server = new_connection(Server)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
+
+  // Rejected: HEADERS on half-closed(remote) stream 1
+  let patched = patch_stream_id(encoded2, 1)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, patched)
+
+  // Frame 3 on stream 5 proves HPACK state survived the rejection.
+  // Without HPACK decoding of the rejected frame, the dynamic table
+  // is out of sync and this fails with CompressionError.
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, encoded3)
+  let assert [HeadersReceived(stream_id: 5, headers: h, end_stream: False)] =
+    events
+  let assert [Header("x-custom", "value3", _)] = h
 }
