@@ -168,6 +168,20 @@ pub fn new_connection(role: Role) -> Connection {
   )
 }
 
+fn count_inbound_streams(conn: Connection) -> Int {
+  dict.fold(conn.streams, 0, fn(count, stream_id, stream) {
+    let is_peer_stream = case conn.role {
+      Server -> stream_id % 2 == 1
+      Client -> stream_id % 2 == 0
+    }
+
+    case is_peer_stream, stream.state {
+      True, Open | True, HalfClosedLocal | True, HalfClosedRemote -> count + 1
+      _, _ -> count
+    }
+  })
+}
+
 pub type StreamState {
   Idle
   ReservedLocal
@@ -452,6 +466,37 @@ fn handle_decoded_headers(
       Client -> stream_id % 2 != 0
     },
     Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  // Check MAX_CONCURRENT_STREAMS
+  use <- bool.guard(
+    case conn.local_settings.max_concurrent_streams {
+      option.Some(max) -> count_inbound_streams(conn) >= max
+      option.None -> False
+    },
+    {
+      use encoded_frame <- result.try(
+        h2_frame.encode_rst_stream(
+          stream_id: stream_id,
+          error_code: h2_frame.RefusedStream,
+        )
+        |> result.map_error(map_frame_error),
+      )
+
+      Ok(
+        #(
+          conn,
+          [
+            StreamReset(
+              stream_id: stream_id,
+              error_code: h2_frame.RefusedStream,
+            ),
+            ..events
+          ],
+          <<to_send:bits, encoded_frame:bits>>,
+        ),
+      )
+    },
   )
 
   // Create new stream
