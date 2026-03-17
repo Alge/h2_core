@@ -1,15 +1,16 @@
 import gleam/dict
 import gleam/option.{None, Some}
 import h2_core.{
-  Client, ConnectionError, Header, RemoteSettingsChanged, Server,
-  SettingsAcknowledged, Stream, WithIndexing, new_connection, receive_data,
-  send_headers, send_settings,
+  Client, Connected, ConnectionError, Header, RemoteSettingsChanged, Server,
+  SettingsAcknowledged, Stream, WithIndexing, receive_data, send_headers,
+  send_settings,
 }
 import h2_frame
+import helper
 
 // RFC 9113 Section 6.5 - Sending SETTINGS
 pub fn send_settings_returns_encoded_frame_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let settings = [h2_frame.MaxConcurrentStreams(100)]
   let assert Ok(#(_conn, events, to_send)) = send_settings(conn, settings)
   assert events == []
@@ -20,7 +21,7 @@ pub fn send_settings_returns_encoded_frame_test() {
 
 // RFC 9113 Section 6.5.3 - Sent settings are pending until acked
 pub fn send_settings_adds_to_pending_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let settings = [h2_frame.MaxConcurrentStreams(100)]
   let assert Ok(#(conn, _events, _to_send)) = send_settings(conn, settings)
   assert conn.pending_settings == [settings]
@@ -28,7 +29,7 @@ pub fn send_settings_adds_to_pending_test() {
 
 // Local settings should not change until ack received
 pub fn send_settings_does_not_change_local_settings_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let original_settings = conn.local_settings
   let settings = [h2_frame.MaxConcurrentStreams(100)]
   let assert Ok(#(conn, _events, _to_send)) = send_settings(conn, settings)
@@ -36,7 +37,7 @@ pub fn send_settings_does_not_change_local_settings_test() {
 }
 
 pub fn send_settings_multiple_values_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let settings = [
     h2_frame.MaxConcurrentStreams(100),
     h2_frame.InitialWindowSize(32_768),
@@ -51,7 +52,7 @@ pub fn send_settings_multiple_values_test() {
 
 // Sending two SETTINGS frames queues both in pending
 pub fn send_settings_twice_queues_both_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let first = [h2_frame.MaxConcurrentStreams(100)]
   let second = [h2_frame.InitialWindowSize(32_768)]
   let assert Ok(#(conn, _events, _to_send)) = send_settings(conn, first)
@@ -61,7 +62,7 @@ pub fn send_settings_twice_queues_both_test() {
 
 // RFC 9113 Section 6.5.3 - Spurious SETTINGS ack is a PROTOCOL_ERROR
 pub fn receive_settings_ack_with_nothing_pending_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let assert Ok(settings_ack) =
     h2_frame.encode_settings(ack: True, settings: [])
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
@@ -70,7 +71,7 @@ pub fn receive_settings_ack_with_nothing_pending_test() {
 
 // RFC 9113 Section 6.5 - Receiving SETTINGS from peer
 pub fn receive_settings_updates_remote_settings_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.MaxConcurrentStreams(100),
@@ -80,7 +81,7 @@ pub fn receive_settings_updates_remote_settings_test() {
 }
 
 pub fn receive_settings_sends_ack_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.MaxConcurrentStreams(100),
@@ -91,7 +92,7 @@ pub fn receive_settings_sends_ack_test() {
 }
 
 pub fn receive_settings_emits_event_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.MaxConcurrentStreams(100),
@@ -101,7 +102,7 @@ pub fn receive_settings_emits_event_test() {
 }
 
 pub fn receive_settings_does_not_change_local_settings_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let original = conn.local_settings
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
@@ -113,7 +114,7 @@ pub fn receive_settings_does_not_change_local_settings_test() {
 
 // RFC 9113 Section 6.5.3 - Receiving SETTINGS ack applies local pending settings
 pub fn receive_settings_ack_applies_pending_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let settings = [h2_frame.MaxConcurrentStreams(200)]
   let assert Ok(#(conn, _events, _to_send)) = send_settings(conn, settings)
   assert conn.local_settings.max_concurrent_streams == None
@@ -125,7 +126,7 @@ pub fn receive_settings_ack_applies_pending_test() {
 }
 
 pub fn receive_settings_ack_removes_from_pending_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let first = [h2_frame.MaxConcurrentStreams(100)]
   let second = [h2_frame.InitialWindowSize(32_768)]
   let assert Ok(#(conn, _events, _to_send)) = send_settings(conn, first)
@@ -138,7 +139,7 @@ pub fn receive_settings_ack_removes_from_pending_test() {
 
 // RFC 9113 Section 6.5.2 - ENABLE_PUSH invalid value is PROTOCOL_ERROR
 pub fn receive_settings_enable_push_invalid_value_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.EnablePush(2),
@@ -149,7 +150,7 @@ pub fn receive_settings_enable_push_invalid_value_test() {
 
 // RFC 9113 Section 6.5.2 - INITIAL_WINDOW_SIZE above 2^31-1 is FLOW_CONTROL_ERROR
 pub fn receive_settings_initial_window_size_too_large_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
       // 2^31 = 2_147_483_648, one above max
@@ -161,7 +162,7 @@ pub fn receive_settings_initial_window_size_too_large_test() {
 
 // RFC 9113 Section 6.5.2 - MAX_FRAME_SIZE below 16384 is PROTOCOL_ERROR
 pub fn receive_settings_max_frame_size_too_small_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.MaxFrameSize(16_383),
@@ -172,7 +173,7 @@ pub fn receive_settings_max_frame_size_too_small_test() {
 
 // RFC 9113 Section 6.5.2 - MAX_FRAME_SIZE above 2^24-1 is PROTOCOL_ERROR
 pub fn receive_settings_max_frame_size_too_large_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
       // 2^24 = 16_777_216, one above max
@@ -184,7 +185,7 @@ pub fn receive_settings_max_frame_size_too_large_test() {
 
 // RFC 9113 Section 6.5.2 - Valid ENABLE_PUSH values
 pub fn receive_settings_enable_push_zero_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.EnablePush(0),
@@ -195,7 +196,7 @@ pub fn receive_settings_enable_push_zero_test() {
 
 // ENABLE_PUSH=1 from a client (received by server) is valid
 pub fn receive_settings_enable_push_one_test() {
-  let conn = new_connection(Server)
+  let conn = helper.new_connection(Server, Connected)
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.EnablePush(1),
@@ -206,7 +207,7 @@ pub fn receive_settings_enable_push_one_test() {
 
 // RFC 9113 Section 6.5.2 - Valid boundary values
 pub fn receive_settings_initial_window_size_max_valid_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
       // 2^31-1 = 2_147_483_647, exactly the max
@@ -217,7 +218,7 @@ pub fn receive_settings_initial_window_size_max_valid_test() {
 }
 
 pub fn receive_settings_max_frame_size_boundary_valid_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
       // 2^24-1 = 16_777_215, exactly the max
@@ -229,7 +230,7 @@ pub fn receive_settings_max_frame_size_boundary_valid_test() {
 
 // RFC 9113 Section 6.5.2 - Client MUST treat ENABLE_PUSH=1 from server as PROTOCOL_ERROR
 pub fn receive_settings_server_sends_enable_push_1_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   // Simulate receiving settings from a server with ENABLE_PUSH=1
   // A client must reject this
   let assert Ok(settings_frame) =
@@ -244,7 +245,7 @@ pub fn receive_settings_server_sends_enable_push_1_test() {
 
 // RFC 9113 Section 6.5 - Settings processed in order, last value wins
 pub fn receive_settings_last_value_wins_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.MaxConcurrentStreams(100),
@@ -256,7 +257,7 @@ pub fn receive_settings_last_value_wins_test() {
 
 // RFC 9113 Section 6.5.2 - Unknown settings MUST be ignored
 pub fn receive_settings_unknown_setting_ignored_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.UnknownSetting(id: 0xFF, value: 42),
@@ -274,8 +275,8 @@ pub fn receive_settings_unknown_setting_ignored_test() {
 // When the peer sends a new INITIAL_WINDOW_SIZE, existing streams'
 // send windows must be adjusted by the delta.
 pub fn receive_settings_initial_window_size_adjusts_existing_streams_test() {
-  let server = new_connection(Server)
-  let client = new_connection(Client)
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
 
   // Open stream 1 on the server
   let assert Ok(#(_client, _events, headers)) =
@@ -301,8 +302,8 @@ pub fn receive_settings_initial_window_size_adjusts_existing_streams_test() {
 // to exceed the maximum size as a connection error (Section 5.4.1)
 // of type FLOW_CONTROL_ERROR."
 pub fn receive_settings_initial_window_size_overflow_is_flow_control_error_test() {
-  let server = new_connection(Server)
-  let client = new_connection(Client)
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
 
   // Open stream 1 on the server (default send_window_size = 65535)
   let assert Ok(#(_client, _events, headers)) =
@@ -320,10 +321,10 @@ pub fn receive_settings_initial_window_size_overflow_is_flow_control_error_test(
     receive_data(server, settings_frame)
 
   // Start fresh with a known state
-  let server = new_connection(Server)
+  let server = helper.new_connection(Server, Connected)
   let assert Ok(#(_client2, _events, headers2)) =
     send_headers(
-      new_connection(Client),
+      helper.new_connection(Client, Connected),
       [Header(":method", "GET", WithIndexing)],
       False,
     )
@@ -356,7 +357,7 @@ pub fn receive_settings_initial_window_size_overflow_is_flow_control_error_test(
 // the endpoint MUST respond with a connection error (Section 5.4.1)
 // of type PROTOCOL_ERROR."
 pub fn receive_settings_nonzero_stream_id_is_protocol_error_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   // Manually craft a SETTINGS frame on stream 1
   // Length=0, Type=0x04, Flags=0, Stream ID=1
   let bad_settings = <<
@@ -376,7 +377,7 @@ pub fn receive_settings_nonzero_stream_id_is_protocol_error_test() {
 // MUST be treated as a connection error (Section 5.4.1) of type
 // FRAME_SIZE_ERROR."
 pub fn receive_settings_ack_with_nonzero_length_is_frame_size_error_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   // First send a SETTINGS so there's something pending to ack
   let assert Ok(#(conn, _events, _to_send)) =
     send_settings(conn, [h2_frame.MaxConcurrentStreams(100)])
@@ -404,8 +405,8 @@ pub fn receive_settings_ack_with_nonzero_length_is_frame_size_error_test() {
 // When our own SETTINGS with INITIAL_WINDOW_SIZE is acknowledged, we must
 // adjust recv_window_size on existing streams by the delta.
 pub fn settings_ack_initial_window_size_adjusts_recv_window_test() {
-  let server = new_connection(Server)
-  let client = new_connection(Client)
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
 
   // Client opens stream 1
   let assert Ok(#(_client, _events, headers)) =
@@ -437,8 +438,8 @@ pub fn settings_ack_initial_window_size_adjusts_recv_window_test() {
 // When the peer reduces INITIAL_WINDOW_SIZE, a stream's send_window_size
 // can go negative. This must not cause an error.
 pub fn receive_settings_initial_window_size_can_go_negative_test() {
-  let server = new_connection(Server)
-  let client = new_connection(Client)
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
 
   // Client opens stream 1 (default send_window_size = 65535)
   let assert Ok(#(_client, _events, headers)) =
@@ -468,8 +469,8 @@ pub fn receive_settings_initial_window_size_can_go_negative_test() {
 // data), then the peer reduces INITIAL_WINDOW_SIZE enough to push the
 // remaining window negative. This must not error.
 pub fn receive_settings_initial_window_size_negative_window_tracked_test() {
-  let server = new_connection(Server)
-  let client = new_connection(Client)
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
 
   // Client opens stream 1 (send_window_size = 65535)
   let assert Ok(#(_client, _events, headers)) =
@@ -507,7 +508,7 @@ pub fn receive_settings_initial_window_size_negative_window_tracked_test() {
 // multiple of 6 octets MUST be treated as a connection error (Section 5.4.1)
 // of type FRAME_SIZE_ERROR."
 pub fn receive_settings_non_multiple_of_six_length_is_frame_size_error_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   // Manually craft a SETTINGS frame with 7 bytes payload (not a multiple of 6)
   // Length=7, Type=0x04, Flags=0, Stream ID=0
   let bad_settings = <<

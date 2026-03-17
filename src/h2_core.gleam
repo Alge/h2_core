@@ -1,4 +1,5 @@
 import alpacki
+import gleam/bit_array
 import gleam/bool
 import gleam/bytes_tree
 import gleam/dict
@@ -171,8 +172,15 @@ pub opaque type HpackContext {
   HpackContext(table: alpacki.DynamicTable)
 }
 
+pub type ConnectionState {
+  AwaitingPreface
+  AwaitingSettings
+  Connected
+}
+
 pub type Connection {
   Connection(
+    state: ConnectionState,
     role: Role,
     local_settings: Settings,
     pending_settings: List(List(h2_frame.Setting)),
@@ -195,7 +203,13 @@ pub fn new_connection(role: Role) -> Connection {
     Server -> 2
   }
 
+  let state = case role {
+    Client -> AwaitingSettings
+    Server -> AwaitingPreface
+  }
+
   Connection(
+    state: state,
     role: role,
     local_settings: default_settings(),
     pending_settings: [],
@@ -1148,6 +1162,8 @@ fn parse_loop(
   }
 }
 
+const client_preface_magic = <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8>>
+
 pub fn receive_data(
   conn: Connection,
   data: BitArray,
@@ -1155,11 +1171,42 @@ pub fn receive_data(
   let conn =
     Connection(..conn, recv_buffer: <<conn.recv_buffer:bits, data:bits>>)
 
-  case parse_loop(conn, [], <<>>) {
-    Ok(#(conn, events, to_send)) -> {
-      Ok(#(conn, events, to_send))
+  case conn.state {
+    // Make sure we receive the preface first!
+    AwaitingPreface -> {
+      let size = bit_array.byte_size(conn.recv_buffer)
+      case size < 24 {
+        True -> {
+          case client_preface_magic {
+            <<expected:bytes-size(size), _:bits>> ->
+              case conn.recv_buffer == expected {
+                True -> Ok(#(conn, [], <<>>))
+                False -> Error(ConnectionError(h2_frame.ProtocolError))
+              }
+            _ -> Error(ConnectionError(h2_frame.ProtocolError))
+          }
+        }
+        False -> {
+          case conn.recv_buffer {
+            <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8, rest:bits>> -> {
+              let conn =
+                Connection(..conn, state: AwaitingSettings, recv_buffer: rest)
+              parse_loop(conn, [], <<>>)
+            }
+            _ -> Error(ConnectionError(h2_frame.ProtocolError))
+          }
+        }
+      }
     }
 
-    Error(error) -> Error(error)
+    _ -> {
+      case parse_loop(conn, [], <<>>) {
+        Ok(#(conn, events, to_send)) -> {
+          Ok(#(conn, events, to_send))
+        }
+
+        Error(error) -> Error(error)
+      }
+    }
   }
 }
