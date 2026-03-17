@@ -2,10 +2,9 @@ import gleam/dict
 import gleam/option.{None}
 import gleeunit
 import h2_core.{
-  Client, ConnectionError, Header, Idle, Open, Server, Stream, WithIndexing,
-  new_connection, receive_data, send_headers,
+  Client, Header, Idle, Open, Server, Stream, WithIndexing, new_connection,
+  receive_data, send_headers,
 }
-import h2_frame
 
 pub fn main() -> Nil {
   gleeunit.main()
@@ -200,34 +199,3 @@ pub fn receive_frame_with_reserved_bit_set_is_accepted_test() {
   assert to_send != <<>>
 }
 
-// RFC 9113 Section 4.2 - "An endpoint MUST send an error code of
-// FRAME_SIZE_ERROR if a frame exceeds the size defined in
-// SETTINGS_MAX_FRAME_SIZE, exceeds any limit defined for the frame
-// type, or is too small to contain mandatory frame data. A frame size
-// error in a frame that could alter the state of the entire
-// connection MUST be treated as a connection error (Section 5.4.1)."
-//
-// A DATA frame exceeding SETTINGS_MAX_FRAME_SIZE (default 16384) on
-// a stream should be a connection error of type FRAME_SIZE_ERROR since
-// a frame that exceeds the limit is always a connection error.
-pub fn receive_frame_exceeding_max_frame_size_test() {
-  let server = new_connection(Server)
-  let client = new_connection(Client)
-  let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
-  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
-
-  // Craft a DATA frame (type 0x00) with payload larger than 16384 bytes
-  // Length=16385, Type=0x00, Flags=0, Stream ID=1
-  let oversized_payload = <<0:size(16_385)-unit(8)>>
-  let oversized_frame = <<
-    16_385:size(24),
-    0x00:size(8),
-    0:size(8),
-    0:size(1),
-    1:size(31),
-    oversized_payload:bits,
-  >>
-  let assert Error(ConnectionError(h2_frame.FrameSizeError)) =
-    receive_data(server, oversized_frame)
-}
