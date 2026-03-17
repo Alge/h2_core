@@ -800,6 +800,16 @@ fn parse_loop(
 
       case h2_frame.decode_frame(frame_data) {
         Ok(frame) -> {
+          // Make sure we are not receiving anything but settings in the AwaitingSettings state
+          use <- bool.guard(
+            conn.state == AwaitingSettings
+              && case frame {
+              h2_frame.Settings(ack: False, ..) -> False
+              _ -> True
+            },
+            Error(ConnectionError(h2_frame.ProtocolError)),
+          )
+
           case frame {
             // If we're in the middle of receiving a header block,
             // only CONTINUATION on the same stream is allowed
@@ -906,7 +916,9 @@ fn parse_loop(
               case apply_settings(conn.role, conn.remote_settings, settings) {
                 Ok(new_settings) -> {
                   let old_settings = conn.remote_settings
-                  let conn = Connection(..conn, remote_settings: new_settings)
+
+                  // Apply new settings and update the state
+                  let conn = Connection(..conn, remote_settings: new_settings, state: Connected)
 
                   use conn <- result.try(apply_send_new_window_size(
                     conn,
