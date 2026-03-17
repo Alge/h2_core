@@ -204,8 +204,12 @@ pub fn receive_window_update_zero_increment_stream_test() {
     0:size(1),
     0:size(31),
   >>
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
-    receive_data(conn, bad_wu)
+  let assert Ok(#(_conn, events, to_send)) = receive_data(conn, bad_wu)
+  let assert [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)] =
+    events
+  let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
+  let assert Ok(h2_frame.RstStream(1, h2_frame.ProtocolError)) =
+    h2_frame.decode_frame(frame_data)
 }
 
 // RFC 9113 Section 6.9 - Wrong frame size is connection error FRAME_SIZE_ERROR
@@ -323,8 +327,9 @@ pub fn receive_window_update_stream_overflow_test() {
   let assert Ok(#(_server, events, to_send)) = receive_data(server, wu)
   let assert [StreamReset(stream_id: 1, error_code: h2_frame.FlowControlError)] =
     events
-  let assert Ok(#(h2_frame.RstStream(1, h2_frame.FlowControlError), _rest)) =
-    h2_frame.parse(to_send)
+  let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
+  let assert Ok(h2_frame.RstStream(1, h2_frame.FlowControlError)) =
+    h2_frame.decode_frame(frame_data)
 }
 
 // --- Stream state validation ---

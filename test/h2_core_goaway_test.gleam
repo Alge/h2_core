@@ -156,11 +156,13 @@ pub fn receive_goaway_does_not_affect_buffer_test() {
       error_code: h2_frame.NoError,
       debug_data: <<>>,
     )
-  // Append some trailing bytes that don't form a complete frame
-  let data = <<goaway:bits, 1, 2, 3>>
+  // Append some trailing bytes that represent a partial frame header
+  // (length=0, then 2 more header bytes — not enough for a full 9-byte header)
+  let trailing = <<0, 0, 0, 0x06, 0>>
+  let data = <<goaway:bits, trailing:bits>>
   let assert Ok(#(conn, events, _to_send)) = receive_data(conn, data)
   assert events == [GoawayReceived(0, h2_frame.NoError, <<>>)]
-  assert conn.recv_buffer == <<1, 2, 3>>
+  assert conn.recv_buffer == trailing
 }
 
 // RFC 9113 Section 6.8 - "However, any frames that alter connection

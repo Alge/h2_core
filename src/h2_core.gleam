@@ -308,7 +308,8 @@ fn map_frame_error(error: h2_frame.FrameError) -> H2Error {
     h2_frame.ConnectionError(code) -> ConnectionError(code)
     h2_frame.StreamError(id, code) -> StreamError(id, code)
     h2_frame.InvalidPadding -> ConnectionError(h2_frame.ProtocolError)
-    h2_frame.Incomplete -> ConnectionError(h2_frame.InternalError)
+    h2_frame.NeedMoreData -> ConnectionError(h2_frame.InternalError)
+    h2_frame.MalformedFrame -> ConnectionError(h2_frame.InternalError)
   }
 }
 
@@ -777,257 +778,341 @@ fn parse_loop(
   events: List(Event),
   to_send: BitArray,
 ) -> Result(#(Connection, List(Event), BitArray), H2Error) {
-  case h2_frame.parse(conn.recv_buffer) {
-    Ok(#(frame, rest)) -> {
+  case
+    h2_frame.extract_frame(conn.recv_buffer, conn.local_settings.max_frame_size)
+  {
+    Ok(#(frame_data, rest)) -> {
       let conn = Connection(..conn, recv_buffer: rest)
 
-      case frame {
-        // If we're in the middle of receiving a header block,
-        // only CONTINUATION on the same stream is allowed
-        _ if conn.pending_header_blocks != option.None -> {
+      case h2_frame.decode_frame(frame_data) {
+        Ok(frame) -> {
           case frame {
-            h2_frame.Continuation(stream_id, end_headers, field_block_fragment) -> {
-              case conn.pending_header_blocks {
-                option.None -> Error(ConnectionError(h2_frame.ProtocolError))
-                option.Some(#(
-                  pending_stream_id,
-                  end_stream,
-                  pending_block_fragment,
-                )) -> {
-                  use <- bool.guard(
-                    pending_stream_id != stream_id,
-                    Error(ConnectionError(h2_frame.ProtocolError)),
-                  )
+            // If we're in the middle of receiving a header block,
+            // only CONTINUATION on the same stream is allowed
+            _ if conn.pending_header_blocks != option.None -> {
+              case frame {
+                h2_frame.Continuation(
+                  stream_id,
+                  end_headers,
+                  field_block_fragment,
+                ) -> {
+                  case conn.pending_header_blocks {
+                    option.None ->
+                      Error(ConnectionError(h2_frame.ProtocolError))
+                    option.Some(#(
+                      pending_stream_id,
+                      end_stream,
+                      pending_block_fragment,
+                    )) -> {
+                      use <- bool.guard(
+                        pending_stream_id != stream_id,
+                        Error(ConnectionError(h2_frame.ProtocolError)),
+                      )
 
-                  case end_headers {
-                    // More continuation frames incoming
-                    False -> {
-                      let conn =
-                        Connection(
-                          ..conn,
-                          pending_header_blocks: option.Some(
-                            #(stream_id, end_stream, <<
+                      case end_headers {
+                        // More continuation frames incoming
+                        False -> {
+                          let conn =
+                            Connection(
+                              ..conn,
+                              pending_header_blocks: option.Some(
+                                #(stream_id, end_stream, <<
+                                  pending_block_fragment:bits,
+                                  field_block_fragment:bits,
+                                >>),
+                              ),
+                            )
+                          parse_loop(conn, events, to_send)
+                        }
+
+                        // Last continuation block 
+                        True -> {
+                          use #(conn, decoded_headers) <- result.try(
+                            decode_headers(conn, <<
                               pending_block_fragment:bits,
                               field_block_fragment:bits,
                             >>),
-                          ),
-                        )
-                      parse_loop(conn, events, to_send)
-                    }
+                          )
 
-                    // Last continuation block 
-                    True -> {
-                      use #(conn, decoded_headers) <- result.try(
-                        decode_headers(conn, <<
-                          pending_block_fragment:bits,
-                          field_block_fragment:bits,
-                        >>),
-                      )
+                          // Reset the pending headers variable in the conn as 
+                          // we have received the full headers
+                          let conn =
+                            Connection(
+                              ..conn,
+                              pending_header_blocks: option.None,
+                            )
 
-                      // Reset the pending headers variable in the conn as 
-                      // we have received the full headers
-                      let conn =
-                        Connection(..conn, pending_header_blocks: option.None)
-
-                      use #(conn, events, to_send) <- result.try(
-                        handle_decoded_headers(
-                          conn,
-                          stream_id,
-                          end_stream,
-                          decoded_headers,
-                          events,
-                          to_send,
-                        ),
-                      )
-                      parse_loop(conn, events, to_send)
+                          use #(conn, events, to_send) <- result.try(
+                            handle_decoded_headers(
+                              conn,
+                              stream_id,
+                              end_stream,
+                              decoded_headers,
+                              events,
+                              to_send,
+                            ),
+                          )
+                          parse_loop(conn, events, to_send)
+                        }
+                      }
                     }
                   }
                 }
+                _ -> Error(ConnectionError(h2_frame.ProtocolError))
               }
             }
-            _ -> Error(ConnectionError(h2_frame.ProtocolError))
-          }
-        }
 
-        // Handle CONTINUATION if pending_header_blocks is None
-        // This is always an error
-        h2_frame.Continuation(_, _, _) ->
-          Error(ConnectionError(h2_frame.ProtocolError))
+            // Handle CONTINUATION if pending_header_blocks is None
+            // This is always an error
+            h2_frame.Continuation(_, _, _) ->
+              Error(ConnectionError(h2_frame.ProtocolError))
 
-        // Pings
-        h2_frame.Ping(ack: False, data: data) -> {
-          // Generate the Ping ack and put it on the to_send buffer
-          case h2_frame.encode_ping(ack: True, data: data) {
-            Ok(response) ->
-              parse_loop(conn, events, <<to_send:bits, response:bits>>)
-            Error(error) -> Error(map_frame_error(error))
-          }
-        }
-        h2_frame.Ping(ack: True, data: data) -> {
-          // Do nothing, this was the ack
-          parse_loop(conn, [PingAcknowledged(data: data), ..events], to_send)
-        }
-
-        // Settings
-        h2_frame.Settings(ack: False, settings: settings) -> {
-          // Apply these settings to the remote settings
-
-          case apply_settings(conn.role, conn.remote_settings, settings) {
-            Ok(new_settings) -> {
-              let old_settings = conn.remote_settings
-              let conn = Connection(..conn, remote_settings: new_settings)
-
-              use conn <- result.try(apply_send_new_window_size(
-                conn,
-                new_settings.initial_window_size
-                  - old_settings.initial_window_size,
-              ))
-
-              // Reply with an ACK
-              case h2_frame.encode_settings(ack: True, settings: []) {
+            // Pings
+            h2_frame.Ping(ack: False, data: data) -> {
+              // Generate the Ping ack and put it on the to_send buffer
+              case h2_frame.encode_ping(ack: True, data: data) {
                 Ok(response) ->
-                  parse_loop(
-                    conn,
-                    [RemoteSettingsChanged(conn.remote_settings), ..events],
-                    <<to_send:bits, response:bits>>,
-                  )
+                  parse_loop(conn, events, <<to_send:bits, response:bits>>)
                 Error(error) -> Error(map_frame_error(error))
               }
             }
+            h2_frame.Ping(ack: True, data: data) -> {
+              // Do nothing, this was the ack
+              parse_loop(
+                conn,
+                [PingAcknowledged(data: data), ..events],
+                to_send,
+              )
+            }
 
-            Error(error) -> Error(error)
-          }
-        }
+            // Settings
+            h2_frame.Settings(ack: False, settings: settings) -> {
+              // Apply these settings to the remote settings
 
-        h2_frame.Settings(ack: True, settings: _) -> {
-          case conn.pending_settings {
-            [settings, ..rest] -> {
-              case apply_settings(conn.role, conn.local_settings, settings) {
-                // Apply settings
+              case apply_settings(conn.role, conn.remote_settings, settings) {
                 Ok(new_settings) -> {
-                  let old_settings = conn.local_settings
-                  let conn =
-                    Connection(
-                      ..conn,
-                      local_settings: new_settings,
-                      pending_settings: rest,
-                    )
+                  let old_settings = conn.remote_settings
+                  let conn = Connection(..conn, remote_settings: new_settings)
 
-                  use conn <- result.try(apply_recv_new_window_size(
+                  use conn <- result.try(apply_send_new_window_size(
                     conn,
                     new_settings.initial_window_size
                       - old_settings.initial_window_size,
                   ))
 
-                  parse_loop(
-                    conn,
-                    [SettingsAcknowledged(conn.local_settings), ..events],
-                    to_send,
-                  )
+                  // Reply with an ACK
+                  case h2_frame.encode_settings(ack: True, settings: []) {
+                    Ok(response) ->
+                      parse_loop(
+                        conn,
+                        [RemoteSettingsChanged(conn.remote_settings), ..events],
+                        <<to_send:bits, response:bits>>,
+                      )
+                    Error(error) -> Error(map_frame_error(error))
+                  }
                 }
+
                 Error(error) -> Error(error)
               }
             }
-            [] -> {
-              Error(ConnectionError(h2_frame.ProtocolError))
-            }
-          }
-        }
 
-        // Goaway
-        h2_frame.Goaway(last_stream_id, error_code, debug_data) -> {
-          parse_loop(
-            conn,
-            [
-              GoawayReceived(
-                last_stream_id: last_stream_id,
-                error_code: error_code,
-                debug_data: debug_data,
-              ),
-              ..events
-            ],
-            to_send,
-          )
-        }
-
-        // WINDOW_UPDATE
-        h2_frame.WindowUpdate(stream_id, window_size_increment) -> {
-          case stream_id {
-            0 -> {
-              let conn =
-                Connection(
-                  ..conn,
-                  send_window_size: conn.send_window_size
-                    + window_size_increment,
-                )
-              use <- bool.guard(
-                conn.send_window_size > 2_147_483_647,
-                Error(ConnectionError(h2_frame.FlowControlError)),
-              )
-              parse_loop(conn, events, to_send)
-            }
-            // Handle WindowUpdate on specific stream
-            stream_id -> {
-              case dict.get(conn.streams, stream_id) {
-                Ok(stream) -> {
-                  let stream =
-                    Stream(
-                      ..stream,
-                      send_window_size: stream.send_window_size
-                        + window_size_increment,
-                    )
-                  use <- bool.guard(stream.send_window_size > 2_147_483_647, {
-                    // Send RST_STREAM and bubble up StreamReset
-                    case
-                      h2_frame.encode_rst_stream(
-                        stream_id: stream_id,
-                        error_code: h2_frame.FlowControlError,
-                      )
-                    {
-                      Ok(encoded_frame) -> {
-                        parse_loop(
-                          conn,
-                          [
-                            StreamReset(
-                              stream_id: stream_id,
-                              error_code: h2_frame.FlowControlError,
-                            ),
-                            ..events
-                          ],
-                          <<to_send:bits, encoded_frame:bits>>,
+            h2_frame.Settings(ack: True, settings: _) -> {
+              case conn.pending_settings {
+                [settings, ..rest] -> {
+                  case
+                    apply_settings(conn.role, conn.local_settings, settings)
+                  {
+                    // Apply settings
+                    Ok(new_settings) -> {
+                      let old_settings = conn.local_settings
+                      let conn =
+                        Connection(
+                          ..conn,
+                          local_settings: new_settings,
+                          pending_settings: rest,
                         )
-                      }
-                      Error(error) -> Error(map_frame_error(error))
-                    }
-                  })
 
+                      use conn <- result.try(apply_recv_new_window_size(
+                        conn,
+                        new_settings.initial_window_size
+                          - old_settings.initial_window_size,
+                      ))
+
+                      parse_loop(
+                        conn,
+                        [SettingsAcknowledged(conn.local_settings), ..events],
+                        to_send,
+                      )
+                    }
+                    Error(error) -> Error(error)
+                  }
+                }
+                [] -> {
+                  Error(ConnectionError(h2_frame.ProtocolError))
+                }
+              }
+            }
+
+            // Goaway
+            h2_frame.Goaway(last_stream_id, error_code, debug_data) -> {
+              parse_loop(
+                conn,
+                [
+                  GoawayReceived(
+                    last_stream_id: last_stream_id,
+                    error_code: error_code,
+                    debug_data: debug_data,
+                  ),
+                  ..events
+                ],
+                to_send,
+              )
+            }
+
+            // WINDOW_UPDATE
+            h2_frame.WindowUpdate(stream_id, window_size_increment) -> {
+              case stream_id {
+                0 -> {
                   let conn =
                     Connection(
                       ..conn,
-                      streams: dict.insert(conn.streams, stream_id, stream),
+                      send_window_size: conn.send_window_size
+                        + window_size_increment,
                     )
-
+                  use <- bool.guard(
+                    conn.send_window_size > 2_147_483_647,
+                    Error(ConnectionError(h2_frame.FlowControlError)),
+                  )
                   parse_loop(conn, events, to_send)
                 }
-                Error(_) -> Error(ConnectionError(h2_frame.ProtocolError))
+                // Handle WindowUpdate on specific stream
+                stream_id -> {
+                  case dict.get(conn.streams, stream_id) {
+                    Ok(stream) -> {
+                      let stream =
+                        Stream(
+                          ..stream,
+                          send_window_size: stream.send_window_size
+                            + window_size_increment,
+                        )
+                      use <- bool.guard(
+                        stream.send_window_size > 2_147_483_647,
+                        {
+                          // Send RST_STREAM and bubble up StreamReset
+                          case
+                            h2_frame.encode_rst_stream(
+                              stream_id: stream_id,
+                              error_code: h2_frame.FlowControlError,
+                            )
+                          {
+                            Ok(encoded_frame) -> {
+                              parse_loop(
+                                conn,
+                                [
+                                  StreamReset(
+                                    stream_id: stream_id,
+                                    error_code: h2_frame.FlowControlError,
+                                  ),
+                                  ..events
+                                ],
+                                <<to_send:bits, encoded_frame:bits>>,
+                              )
+                            }
+                            Error(error) -> Error(map_frame_error(error))
+                          }
+                        },
+                      )
+
+                      let conn =
+                        Connection(
+                          ..conn,
+                          streams: dict.insert(conn.streams, stream_id, stream),
+                        )
+
+                      parse_loop(conn, events, to_send)
+                    }
+                    Error(_) -> Error(ConnectionError(h2_frame.ProtocolError))
+                  }
+                }
               }
             }
+            // RST_STREAM
+            h2_frame.RstStream(stream_id, error_code) -> {
+              use stream <- result.try(
+                dict.get(conn.streams, stream_id)
+                |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
+              )
+
+              let stream = Stream(..stream, state: Closed)
+
+              let conn =
+                Connection(
+                  ..conn,
+                  streams: dict.insert(conn.streams, stream_id, stream),
+                )
+
+              parse_loop(
+                conn,
+                [
+                  StreamReset(stream_id: stream_id, error_code: error_code),
+                  ..events
+                ],
+                to_send,
+              )
+            }
+            h2_frame.Headers(
+              stream_id,
+              end_stream,
+              end_headers,
+              _priority,
+              field_block_fragment,
+            ) -> {
+              case end_headers {
+                False -> {
+                  let conn =
+                    Connection(
+                      ..conn,
+                      pending_header_blocks: option.Some(#(
+                        stream_id,
+                        end_stream,
+                        field_block_fragment,
+                      )),
+                    )
+                  parse_loop(conn, events, to_send)
+                }
+                True -> {
+                  use #(conn, decoded_headers) <- result.try(decode_headers(
+                    conn,
+                    field_block_fragment,
+                  ))
+
+                  use #(conn, events, to_send) <- result.try(
+                    handle_decoded_headers(
+                      conn,
+                      stream_id,
+                      end_stream,
+                      decoded_headers,
+                      events,
+                      to_send,
+                    ),
+                  )
+                  parse_loop(conn, events, to_send)
+                }
+              }
+            }
+
+            h2_frame.Unknown(_, _, _, _) -> {
+              parse_loop(conn, events, to_send)
+            }
+
+            _ -> todo
           }
         }
-        // RST_STREAM
-        h2_frame.RstStream(stream_id, error_code) -> {
-          use stream <- result.try(
-            dict.get(conn.streams, stream_id)
-            |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
+        Error(h2_frame.StreamError(stream_id, error_code)) -> {
+          use encoded_frame <- result.try(
+            h2_frame.encode_rst_stream(stream_id, error_code)
+            |> result.map_error(map_frame_error),
           )
-
-          let stream = Stream(..stream, state: Closed)
-
-          let conn =
-            Connection(
-              ..conn,
-              streams: dict.insert(conn.streams, stream_id, stream),
-            )
 
           parse_loop(
             conn,
@@ -1035,57 +1120,21 @@ fn parse_loop(
               StreamReset(stream_id: stream_id, error_code: error_code),
               ..events
             ],
-            to_send,
+            <<to_send:bits, encoded_frame:bits>>,
           )
         }
-        h2_frame.Headers(
-          stream_id,
-          end_stream,
-          end_headers,
-          _priority,
-          field_block_fragment,
-        ) -> {
-          case end_headers {
-            False -> {
-              let conn =
-                Connection(
-                  ..conn,
-                  pending_header_blocks: option.Some(#(
-                    stream_id,
-                    end_stream,
-                    field_block_fragment,
-                  )),
-                )
-              parse_loop(conn, events, to_send)
-            }
-            True -> {
-              use #(conn, decoded_headers) <- result.try(decode_headers(
-                conn,
-                field_block_fragment,
-              ))
-
-              use #(conn, events, to_send) <- result.try(handle_decoded_headers(
-                conn,
-                stream_id,
-                end_stream,
-                decoded_headers,
-                events,
-                to_send,
-              ))
-              parse_loop(conn, events, to_send)
-            }
-          }
-        }
-
-        h2_frame.Unknown(_, _, _, _) -> {
-          parse_loop(conn, events, to_send)
-        }
-
-        _ -> todo
+        Error(h2_frame.MalformedFrame) ->
+          Error(ConnectionError(h2_frame.ProtocolError))
+        Error(error) -> Error(map_frame_error(error))
       }
     }
-    Error(h2_frame.Incomplete) -> Ok(#(conn, list.reverse(events), to_send))
-    Error(error) -> Error(map_frame_error(error))
+
+    Error(h2_frame.ConnectionError(error_code)) ->
+      Error(ConnectionError(error_code: error_code))
+
+    Error(h2_frame.NeedMoreData) -> Ok(#(conn, list.reverse(events), to_send))
+
+    _ -> todo
   }
 }
 

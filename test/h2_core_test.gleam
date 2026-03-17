@@ -97,20 +97,26 @@ pub fn receive_empty_data_test() {
 
 pub fn receive_partial_frame_buffers_data_test() {
   let conn = new_connection(Client)
-  // A few bytes that can't form a complete frame
-  let assert Ok(#(conn, events, to_send)) = receive_data(conn, <<1, 2, 3>>)
+  // A partial frame header: length=5, then 2 bytes of the remaining 6 header bytes.
+  // Not enough for a complete 9-byte header, so this should buffer.
+  let partial = <<0, 0, 5, 0x06, 0>>
+  let assert Ok(#(conn, events, to_send)) = receive_data(conn, partial)
   assert events == []
   assert to_send == <<>>
-  assert conn.recv_buffer == <<1, 2, 3>>
+  assert conn.recv_buffer == partial
 }
 
 pub fn receive_partial_frame_appends_to_buffer_test() {
   let conn = new_connection(Client)
-  let assert Ok(#(conn, _events, _to_send)) = receive_data(conn, <<1, 2, 3>>)
-  let assert Ok(#(conn, events, to_send)) = receive_data(conn, <<4, 5, 6>>)
+  // First chunk: length=5, partial header
+  let chunk1 = <<0, 0, 5, 0x06>>
+  let assert Ok(#(conn, _events, _to_send)) = receive_data(conn, chunk1)
+  // Second chunk: more header bytes but still incomplete frame
+  let chunk2 = <<0, 0, 0, 0, 0>>
+  let assert Ok(#(conn, events, to_send)) = receive_data(conn, chunk2)
   assert events == []
   assert to_send == <<>>
-  assert conn.recv_buffer == <<1, 2, 3, 4, 5, 6>>
+  assert conn.recv_buffer == <<chunk1:bits, chunk2:bits>>
 }
 
 // --- General frame processing (Section 4) ---
@@ -198,4 +204,3 @@ pub fn receive_frame_with_reserved_bit_set_is_accepted_test() {
   // Should have responded with PING ACK
   assert to_send != <<>>
 }
-

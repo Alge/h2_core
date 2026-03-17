@@ -68,7 +68,8 @@ pub fn send_headers_produces_parseable_frame_test() {
   ]
   let assert Ok(#(_conn, _events, to_send)) = send_headers(conn, headers, False)
   // Parse the frame back
-  let assert Ok(#(frame, _rest)) = h2_frame.parse(to_send)
+  let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
+  let assert Ok(frame) = h2_frame.decode_frame(frame_data)
   // Should be a Headers frame on stream 1
   let assert h2_frame.Headers(
     stream_id: 1,
@@ -84,7 +85,8 @@ pub fn send_headers_end_stream_in_frame_test() {
   let conn = new_connection(Client)
   let headers = [Header(":method", "GET", WithIndexing)]
   let assert Ok(#(_conn, _events, to_send)) = send_headers(conn, headers, True)
-  let assert Ok(#(frame, _rest)) = h2_frame.parse(to_send)
+  let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
+  let assert Ok(frame) = h2_frame.decode_frame(frame_data)
   let assert h2_frame.Headers(
     stream_id: 1,
     end_stream: True,

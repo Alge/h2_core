@@ -624,8 +624,9 @@ pub fn receive_headers_exceeding_max_concurrent_streams_test() {
   // Should get a RST_STREAM with REFUSED_STREAM
   let assert [StreamReset(stream_id: 3, error_code: h2_frame.RefusedStream)] =
     events
-  let assert Ok(#(h2_frame.RstStream(3, h2_frame.RefusedStream), _rest)) =
-    h2_frame.parse(to_send)
+  let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
+  let assert Ok(h2_frame.RstStream(3, h2_frame.RefusedStream)) =
+    h2_frame.decode_frame(frame_data)
 }
 
 // --- Stream ID parity validation ---

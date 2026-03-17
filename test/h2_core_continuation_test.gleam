@@ -57,7 +57,8 @@ pub fn send_headers_small_block_no_continuation_test() {
   let headers = [Header(":method", "GET", WithIndexing)]
   let assert Ok(#(_conn, _events, to_send)) = send_headers(conn, headers, False)
   // Should parse as a single HEADERS frame with end_headers=True
-  let assert Ok(#(frame, rest)) = h2_frame.parse(to_send)
+  let assert Ok(#(frame_data, rest)) = h2_frame.extract_frame(to_send, 16_384)
+  let assert Ok(frame) = h2_frame.decode_frame(frame_data)
   let assert h2_frame.Headers(
     stream_id: 1,
     end_stream: False,
@@ -75,7 +76,8 @@ pub fn send_headers_large_block_produces_continuation_test() {
   let assert Ok(#(_conn, _events, to_send)) = send_headers(conn, headers, False)
 
   // First frame should be HEADERS with end_headers=False
-  let assert Ok(#(frame, rest)) = h2_frame.parse(to_send)
+  let assert Ok(#(frame_data, rest)) = h2_frame.extract_frame(to_send, 16_384)
+  let assert Ok(frame) = h2_frame.decode_frame(frame_data)
   let assert h2_frame.Headers(
     stream_id: 1,
     end_stream: False,
@@ -227,8 +229,9 @@ pub fn receive_non_continuation_during_header_block_is_protocol_error_test() {
     send_headers(client, headers, False)
 
   // Parse just the first frame (HEADERS with end_headers=False)
-  let assert Ok(#(h2_frame.Headers(end_headers: False, ..), rest)) =
-    h2_frame.parse(to_send)
+  let assert Ok(#(frame_data, rest)) = h2_frame.extract_frame(to_send, 16_384)
+  let assert Ok(h2_frame.Headers(end_headers: False, ..)) =
+    h2_frame.decode_frame(frame_data)
 
   // Re-encode just that HEADERS frame (without continuations)
   // by taking the original bytes minus the rest
@@ -252,8 +255,9 @@ pub fn receive_settings_during_header_block_is_protocol_error_test() {
   let assert Ok(#(_client, _events, to_send)) =
     send_headers(client, headers, False)
 
-  let assert Ok(#(h2_frame.Headers(end_headers: False, ..), rest)) =
-    h2_frame.parse(to_send)
+  let assert Ok(#(frame_data, rest)) = h2_frame.extract_frame(to_send, 16_384)
+  let assert Ok(h2_frame.Headers(end_headers: False, ..)) =
+    h2_frame.decode_frame(frame_data)
 
   let headers_frame_size =
     bit_array.byte_size(to_send) - bit_array.byte_size(rest)
@@ -275,8 +279,9 @@ pub fn receive_continuation_wrong_stream_is_protocol_error_test() {
   let assert Ok(#(_client, _events, to_send)) =
     send_headers(client, headers, False)
 
-  let assert Ok(#(h2_frame.Headers(end_headers: False, ..), rest)) =
-    h2_frame.parse(to_send)
+  let assert Ok(#(frame_data, rest)) = h2_frame.extract_frame(to_send, 16_384)
+  let assert Ok(h2_frame.Headers(end_headers: False, ..)) =
+    h2_frame.decode_frame(frame_data)
 
   let headers_frame_size =
     bit_array.byte_size(to_send) - bit_array.byte_size(rest)
@@ -317,8 +322,9 @@ pub fn receive_continuation_across_calls_test() {
     send_headers(client, headers, False)
 
   // Split: first frame in one call, rest in another
-  let assert Ok(#(h2_frame.Headers(end_headers: False, ..), rest)) =
-    h2_frame.parse(to_send)
+  let assert Ok(#(frame_data, rest)) = h2_frame.extract_frame(to_send, 16_384)
+  let assert Ok(h2_frame.Headers(end_headers: False, ..)) =
+    h2_frame.decode_frame(frame_data)
   let headers_frame_size =
     bit_array.byte_size(to_send) - bit_array.byte_size(rest)
   let assert Ok(headers_only) = bit_array.slice(to_send, 0, headers_frame_size)
@@ -437,8 +443,9 @@ pub fn receive_continuation_invalid_hpack_is_compression_error_test() {
     send_headers(client, headers, False)
 
   // Parse the HEADERS frame, keep its bytes
-  let assert Ok(#(h2_frame.Headers(end_headers: False, ..), rest)) =
-    h2_frame.parse(to_send)
+  let assert Ok(#(frame_data, rest)) = h2_frame.extract_frame(to_send, 16_384)
+  let assert Ok(h2_frame.Headers(end_headers: False, ..)) =
+    h2_frame.decode_frame(frame_data)
   let headers_frame_size =
     bit_array.byte_size(to_send) - bit_array.byte_size(rest)
   let assert Ok(headers_only) = bit_array.slice(to_send, 0, headers_frame_size)
@@ -653,11 +660,9 @@ fn patch_all_frames_stream_id(data: BitArray, new_id: Int) -> BitArray {
 }
 
 fn patch_all_frames_loop(data: BitArray, new_id: Int, acc: BitArray) -> BitArray {
-  case h2_frame.parse(data) {
-    Ok(#(_frame, rest)) -> {
-      let frame_size = bit_array.byte_size(data) - bit_array.byte_size(rest)
-      let assert Ok(frame_bytes) = bit_array.slice(data, 0, frame_size)
-      let patched = patch_stream_id(frame_bytes, new_id)
+  case h2_frame.extract_frame(data, 16_384) {
+    Ok(#(frame_data, rest)) -> {
+      let patched = patch_stream_id(frame_data, new_id)
       patch_all_frames_loop(rest, new_id, <<acc:bits, patched:bits>>)
     }
     Error(_) -> acc
@@ -669,8 +674,11 @@ fn parse_all_frames(
   data: BitArray,
   acc: List(h2_frame.Frame),
 ) -> List(h2_frame.Frame) {
-  case h2_frame.parse(data) {
-    Ok(#(frame, rest)) -> parse_all_frames(rest, list.append(acc, [frame]))
+  case h2_frame.extract_frame(data, 16_384) {
+    Ok(#(frame_data, rest)) -> {
+      let assert Ok(frame) = h2_frame.decode_frame(frame_data)
+      parse_all_frames(rest, list.append(acc, [frame]))
+    }
     Error(_) -> acc
   }
 }
