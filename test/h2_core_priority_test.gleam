@@ -1,4 +1,6 @@
-import h2_core.{Client, ConnectionError, StreamReset, new_connection, receive_data}
+import h2_core.{
+  Client, ConnectionError, StreamReset, new_connection, receive_data,
+}
 import h2_frame
 
 // RFC 9113 Section 6.3 - PRIORITY
@@ -60,7 +62,8 @@ pub fn receive_priority_wrong_length_is_stream_error_test() {
     0:size(31),
   >>
   let assert Ok(#(_conn, events, to_send)) = receive_data(conn, bad_priority)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.FrameSizeError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.FrameSizeError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(
       stream_id: 1,

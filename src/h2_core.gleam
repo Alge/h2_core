@@ -1036,6 +1036,7 @@ fn parse_loop(
                 }
               }
             }
+
             // RST_STREAM
             h2_frame.RstStream(stream_id, error_code) -> {
               use stream <- result.try(
@@ -1060,6 +1061,8 @@ fn parse_loop(
                 to_send,
               )
             }
+
+            // HEADERS
             h2_frame.Headers(
               stream_id,
               end_stream,
@@ -1101,6 +1104,12 @@ fn parse_loop(
               }
             }
 
+            // Ignore PRIORITY frames
+            h2_frame.Priority(_, _, _, _) -> {
+              parse_loop(conn, events, to_send)
+            }
+
+            // Ignore unknown frames
             h2_frame.Unknown(_, _, _, _) -> {
               parse_loop(conn, events, to_send)
             }
@@ -1125,6 +1134,7 @@ fn parse_loop(
         }
         Error(h2_frame.MalformedFrame) ->
           Error(ConnectionError(h2_frame.ProtocolError))
+
         Error(error) -> Error(map_frame_error(error))
       }
     }
