@@ -502,3 +502,23 @@ pub fn receive_settings_initial_window_size_negative_window_tracked_test() {
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.send_window_size == -60_000
 }
+
+// RFC 9113 Section 6.5 - "A SETTINGS frame with a length other than a
+// multiple of 6 octets MUST be treated as a connection error (Section 5.4.1)
+// of type FRAME_SIZE_ERROR."
+pub fn receive_settings_non_multiple_of_six_length_is_frame_size_error_test() {
+  let conn = new_connection(Client)
+  // Manually craft a SETTINGS frame with 7 bytes payload (not a multiple of 6)
+  // Length=7, Type=0x04, Flags=0, Stream ID=0
+  let bad_settings = <<
+    7:size(24),
+    0x04:size(8),
+    0:size(8),
+    0:size(1),
+    0:size(31),
+    // 7 bytes of payload (invalid)
+    0:size(56),
+  >>
+  let assert Error(ConnectionError(h2_frame.FrameSizeError)) =
+    receive_data(conn, bad_settings)
+}
