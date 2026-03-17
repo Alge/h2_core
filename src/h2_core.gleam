@@ -620,6 +620,31 @@ pub fn send_headers(
   }
 }
 
+pub fn send_push_promise(
+  _conn: Connection,
+  _stream_id: Int,
+  _promised_stream_id: Int,
+  _headers: List(Header),
+) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+  todo
+}
+
+pub fn send_data(
+  _conn: Connection,
+  _stream_id: Int,
+  _data: BitArray,
+  _end_stream: Bool,
+) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+  todo
+}
+
+pub fn get_send_window_size(
+  _conn: Connection,
+  _stream_id: Int,
+) -> Result(Int, H2Error) {
+  todo
+}
+
 pub fn send_settings(
   conn: Connection,
   settings: List(h2_frame.Setting),
