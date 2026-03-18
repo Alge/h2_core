@@ -1,11 +1,12 @@
 import gleam/dict
 import gleam/option.{None}
 import h2_core.{
-  type Connection, Closed, Client, HalfClosedRemote, Header, ReservedLocal,
-  ReservedRemote, Server, Stream, StreamReset, WithIndexing, new_connection,
+  type Connection, Client, Closed, Connected, HalfClosedRemote, Header,
+  ReservedLocal, ReservedRemote, Server, Stream, StreamReset, WithIndexing,
   receive_data, send_headers, send_rst_stream,
 }
 import h2_frame
+import helper
 
 // =============================================================================
 // Helpers
@@ -13,8 +14,8 @@ import h2_frame
 
 // Helper: create a server with an open client-initiated stream 1
 fn server_with_open_stream() -> #(Connection, Connection) {
-  let server = new_connection(Server)
-  let client = new_connection(Client)
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, headers)) =
     send_headers(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
@@ -24,8 +25,8 @@ fn server_with_open_stream() -> #(Connection, Connection) {
 // Helper: create a server with a half-closed (remote) stream 1
 // (client sent END_STREAM with headers)
 fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
-  let server = new_connection(Server)
-  let client = new_connection(Client)
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, headers)) =
     send_headers(client, [Header(":method", "GET", WithIndexing)], True)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
@@ -61,7 +62,11 @@ fn server_with_reserved_local_stream() -> Connection {
       streams: dict.insert(
         server.streams,
         2,
-        Stream(state: ReservedLocal, send_window_size: 65_535, recv_window_size: 65_535),
+        Stream(
+          state: ReservedLocal,
+          send_window_size: 65_535,
+          recv_window_size: 65_535,
+        ),
       ),
     )
   server
@@ -94,8 +99,7 @@ pub fn send_data_on_reserved_local_stream_is_error_test() {
   assert stream.state == ReservedLocal
 
   // Attempt to send DATA on reserved (local) stream 2 — should fail
-  let assert Error(_) =
-    h2_core.send_data(server, 2, <<"illegal":utf8>>, False)
+  let assert Error(_) = h2_core.send_data(server, 2, <<"illegal":utf8>>, False)
 }
 
 // =============================================================================
@@ -118,8 +122,7 @@ pub fn send_data_on_reserved_remote_stream_is_error_test() {
   assert stream.state == ReservedRemote
 
   // Attempt to send DATA on reserved (remote) stream 2 — should fail
-  let assert Error(_) =
-    h2_core.send_data(client, 2, <<"illegal":utf8>>, False)
+  let assert Error(_) = h2_core.send_data(client, 2, <<"illegal":utf8>>, False)
 }
 
 // =============================================================================
@@ -140,10 +143,7 @@ pub fn receive_window_update_on_half_closed_remote_is_accepted_test() {
 
   // Receive WINDOW_UPDATE on half-closed (remote) stream 1 — should succeed
   let assert Ok(wu) =
-    h2_frame.encode_window_update(
-      stream_id: 1,
-      window_size_increment: 1024,
-    )
+    h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1024)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, wu)
 
   // Verify the stream's send_window_size was updated
@@ -164,10 +164,7 @@ pub fn receive_rst_stream_on_half_closed_remote_is_accepted_test() {
 
   // Receive RST_STREAM on half-closed (remote) stream 1 — should succeed
   let assert Ok(rst) =
-    h2_frame.encode_rst_stream(
-      stream_id: 1,
-      error_code: h2_frame.Cancel,
-    )
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
   let assert Ok(#(server, events, _to_send)) = receive_data(server, rst)
 
   // Should emit a StreamReset event and transition to Closed
@@ -190,8 +187,7 @@ pub fn send_data_on_closed_stream_is_error_test() {
   assert stream.state == Closed
 
   // Attempt to send DATA on closed stream 1 — should fail
-  let assert Error(_) =
-    h2_core.send_data(server, 1, <<"illegal":utf8>>, False)
+  let assert Error(_) = h2_core.send_data(server, 1, <<"illegal":utf8>>, False)
 }
 
 // RFC 9113 Section 5.1 (closed):
@@ -216,8 +212,7 @@ pub fn send_headers_on_closed_stream_is_error_test() {
   // TODO: When send_headers gains support for sending on existing streams
   // (e.g. trailers), add a test that sending headers on a closed stream
   // returns an error.
-  let assert Error(_) =
-    h2_core.send_data(server, 1, <<>>, True)
+  let assert Error(_) = h2_core.send_data(server, 1, <<>>, True)
 }
 
 // =============================================================================
@@ -242,10 +237,7 @@ pub fn receive_window_update_on_closed_stream_is_silently_discarded_test() {
 
   // Receive WINDOW_UPDATE on closed stream 1 — should be silently discarded
   let assert Ok(wu) =
-    h2_frame.encode_window_update(
-      stream_id: 1,
-      window_size_increment: 1024,
-    )
+    h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1024)
   let assert Ok(#(_server, events, to_send)) = receive_data(server, wu)
 
   // No events should be emitted and no frames should be sent
@@ -267,10 +259,7 @@ pub fn receive_rst_stream_on_closed_stream_is_silently_discarded_test() {
 
   // Receive RST_STREAM on closed stream 1 — should be silently discarded
   let assert Ok(rst) =
-    h2_frame.encode_rst_stream(
-      stream_id: 1,
-      error_code: h2_frame.Cancel,
-    )
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
   let assert Ok(#(_server, events, to_send)) = receive_data(server, rst)
 
   // No events should be emitted and no frames should be sent
