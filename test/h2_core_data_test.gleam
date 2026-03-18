@@ -1,16 +1,17 @@
 import gleam/dict
 import gleam/option.{None, Some}
 import h2_core.{
-  type Connection, Client, ConnectionError, DataReceived, Header,
+  type Connection, Client, Connected, ConnectionError, DataReceived, Header,
   HalfClosedRemote, Open, Server, Stream, StreamError, StreamReset, WithIndexing,
-  new_connection, receive_data, send_headers,
+  receive_data, send_headers,
 }
 import h2_frame
+import helper
 
 // Helper: create a server with an open client-initiated stream 1
 fn server_with_open_stream() -> #(Connection, Connection) {
-  let server = new_connection(Server)
-  let client = new_connection(Client)
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, headers)) =
     send_headers(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
@@ -20,8 +21,8 @@ fn server_with_open_stream() -> #(Connection, Connection) {
 // Helper: create a server with a half-closed (remote) stream 1
 // (client sent END_STREAM with headers)
 fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
-  let server = new_connection(Server)
-  let client = new_connection(Client)
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, headers)) =
     send_headers(client, [Header(":method", "GET", WithIndexing)], True)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
@@ -89,8 +90,8 @@ pub fn receive_data_with_end_stream_test() {
 // RFC 9113 Section 6.1 - DATA with END_STREAM on a half-closed (local)
 // stream transitions to closed.
 pub fn receive_data_with_end_stream_on_half_closed_local_closes_stream_test() {
-  let server = new_connection(Server)
-  let client = new_connection(Client)
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
   // Client opens stream 1
   let assert Ok(#(client, _events, headers)) =
     send_headers(client, [Header(":method", "GET", WithIndexing)], False)
@@ -145,7 +146,7 @@ pub fn receive_data_on_half_closed_remote_is_stream_closed_error_test() {
 }
 
 pub fn receive_data_on_idle_stream_is_protocol_error_test() {
-  let server = new_connection(Server)
+  let server = helper.new_connection(Server, Connected)
   // Stream 1 was never opened
   let assert Ok(data_frame) =
     h2_frame.encode_data(
@@ -435,7 +436,7 @@ pub fn get_send_window_size_default_values_test() {
 }
 
 pub fn get_send_window_size_unknown_stream_is_error_test() {
-  let server = new_connection(Server)
+  let server = helper.new_connection(Server, Connected)
   let assert Error(_) = h2_core.get_send_window_size(server, 99)
 }
 
