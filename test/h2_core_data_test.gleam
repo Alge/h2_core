@@ -1,9 +1,9 @@
 import gleam/dict
 import gleam/option.{None, Some}
 import h2_core.{
-  type Connection, Client, Connected, ConnectionError, DataReceived, Header,
-  HalfClosedRemote, Open, Server, Stream, StreamError, StreamReset, WithIndexing,
-  receive_data, send_headers,
+  type Connection, Client, Connected, ConnectionError, DataReceived,
+  HalfClosedRemote, Header, Open, Server, Stream, StreamError, StreamReset,
+  WithIndexing, receive_data, send_headers,
 }
 import h2_frame
 import helper
@@ -64,9 +64,9 @@ pub fn receive_data_on_open_stream_test() {
       data: <<"hello":utf8>>,
       padding: None,
     )
-  let assert Ok(#(_server, events, _to_send)) =
-    receive_data(server, data_frame)
-  assert events == [DataReceived(stream_id: 1, data: <<"hello":utf8>>, end_stream: False)]
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, data_frame)
+  assert events
+    == [DataReceived(stream_id: 1, data: <<"hello":utf8>>, end_stream: False)]
 }
 
 // RFC 9113 Section 6.1 - DATA with END_STREAM flag transitions stream to
@@ -80,9 +80,9 @@ pub fn receive_data_with_end_stream_test() {
       data: <<"goodbye":utf8>>,
       padding: None,
     )
-  let assert Ok(#(server, events, _to_send)) =
-    receive_data(server, data_frame)
-  assert events == [DataReceived(stream_id: 1, data: <<"goodbye":utf8>>, end_stream: True)]
+  let assert Ok(#(server, events, _to_send)) = receive_data(server, data_frame)
+  assert events
+    == [DataReceived(stream_id: 1, data: <<"goodbye":utf8>>, end_stream: True)]
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == h2_core.HalfClosedRemote
 }
@@ -113,8 +113,7 @@ pub fn receive_data_with_end_stream_on_half_closed_local_closes_stream_test() {
       data: <<"done":utf8>>,
       padding: None,
     )
-  let assert Ok(#(server, _events, _to_send)) =
-    receive_data(server, data_frame)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == h2_core.Closed
 }
@@ -134,15 +133,12 @@ pub fn receive_data_on_half_closed_remote_is_stream_closed_error_test() {
     )
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal. The endpoint
   // sends RST_STREAM and continues processing.
-  let assert Ok(#(_server, events, to_send)) =
-    receive_data(server, data_frame)
+  let assert Ok(#(_server, events, to_send)) = receive_data(server, data_frame)
   let assert Ok(expected_rst) =
-    h2_frame.encode_rst_stream(
-      stream_id: 1,
-      error_code: h2_frame.StreamClosed,
-    )
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.StreamClosed)
   assert to_send == expected_rst
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.StreamClosed)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.StreamClosed)]
 }
 
 pub fn receive_data_on_idle_stream_is_protocol_error_test() {
@@ -169,8 +165,7 @@ pub fn receive_empty_data_frame_test() {
       data: <<>>,
       padding: None,
     )
-  let assert Ok(#(_server, events, _to_send)) =
-    receive_data(server, data_frame)
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, data_frame)
   assert events == [DataReceived(stream_id: 1, data: <<>>, end_stream: False)]
 }
 
@@ -185,8 +180,7 @@ pub fn receive_empty_data_frame_with_end_stream_test() {
       data: <<>>,
       padding: None,
     )
-  let assert Ok(#(server, events, _to_send)) =
-    receive_data(server, data_frame)
+  let assert Ok(#(server, events, _to_send)) = receive_data(server, data_frame)
   assert events == [DataReceived(stream_id: 1, data: <<>>, end_stream: True)]
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == h2_core.HalfClosedRemote
@@ -217,8 +211,7 @@ pub fn receive_data_decrements_recv_window_test() {
       data: data,
       padding: None,
     )
-  let assert Ok(#(server, _events, _to_send)) =
-    receive_data(server, data_frame)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.recv_window_size == 65_535 - data_size
   assert server.recv_window_size == 65_535 - data_size
@@ -249,15 +242,15 @@ pub fn receive_data_exceeding_stream_window_is_flow_control_error_test() {
     )
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal. The endpoint
   // sends RST_STREAM and continues processing.
-  let assert Ok(#(_server, events, to_send)) =
-    receive_data(server, data_frame)
+  let assert Ok(#(_server, events, to_send)) = receive_data(server, data_frame)
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(
       stream_id: 1,
       error_code: h2_frame.FlowControlError,
     )
   assert to_send == expected_rst
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.FlowControlError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.FlowControlError)]
 }
 
 pub fn receive_data_exceeding_connection_window_is_flow_control_error_test() {
@@ -346,6 +339,14 @@ pub fn send_data_on_stream_zero_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
     h2_core.send_data(server, 0, <<"bad":utf8>>, False)
+}
+
+// RFC 9113 Section 6.1 - DATA can only be sent on open or half-closed (remote).
+// Sending on a stream that was never opened (idle state) must be an error.
+pub fn send_data_on_idle_stream_is_error_test() {
+  let server = helper.new_connection(Server, Connected)
+  // Stream 99 was never opened — it is in idle state
+  let assert Error(_) = h2_core.send_data(server, 99, <<"bad":utf8>>, False)
 }
 
 // send_data on a stream that is not open or half-closed (remote) should error
@@ -464,6 +465,36 @@ pub fn get_send_window_size_negative_window_returns_zero_test() {
 // MUST always account for its contribution against the connection
 // flow-control window, unless the receiver treats this as a connection error
 // (Section 5.4.1). This is necessary even if the frame is in error."
+//
+// When DATA exceeds the stream window (a stream error, not connection error),
+// the connection flow-control window MUST still be decremented.
+pub fn receive_data_exceeding_stream_window_still_decrements_connection_window_test() {
+  let #(server, _client) = server_with_open_stream()
+  // Set stream recv_window_size to 5 bytes, leaving connection window at default
+  let server =
+    h2_core.Connection(
+      ..server,
+      streams: dict.insert(
+        server.streams,
+        1,
+        Stream(state: Open, send_window_size: 65_535, recv_window_size: 5),
+      ),
+    )
+  let data = <<"too much data":utf8>>
+  let data_size = 13
+  let assert Ok(data_frame) =
+    h2_frame.encode_data(
+      stream_id: 1,
+      end_stream: False,
+      data: data,
+      padding: None,
+    )
+  // Stream error (not connection error) — receive_data returns Ok with RST_STREAM
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
+  // Connection window MUST still be decremented despite the stream error
+  assert server.recv_window_size == 65_535 - data_size
+}
+
 // RFC 9113 Section 6.9 - "A receiver that receives a flow-controlled frame
 // MUST always account for its contribution against the connection
 // flow-control window, unless the receiver treats this as a connection error
@@ -481,8 +512,7 @@ pub fn receive_data_on_closed_stream_still_counts_toward_connection_window_test(
       data: <<>>,
       padding: None,
     )
-  let assert Ok(#(server, _events, _to_send)) =
-    receive_data(server, data_frame)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
 
   // Now receive DATA on the closed stream — per RFC 5.1 closed state,
   // the endpoint MUST minimally process and discard. The DATA still
@@ -494,8 +524,7 @@ pub fn receive_data_on_closed_stream_still_counts_toward_connection_window_test(
       data: <<"stale":utf8>>,
       padding: None,
     )
-  let assert Ok(#(server, _events, _to_send)) =
-    receive_data(server, more_data)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, more_data)
   assert server.recv_window_size == 65_535 - 5
 }
 
@@ -521,10 +550,11 @@ pub fn receive_multiple_data_frames_test() {
     )
   let assert Ok(#(server, events, _to_send)) =
     receive_data(server, <<frame1:bits, frame2:bits>>)
-  assert events == [
-    DataReceived(stream_id: 1, data: <<"part1":utf8>>, end_stream: False),
-    DataReceived(stream_id: 1, data: <<"part2":utf8>>, end_stream: True),
-  ]
+  assert events
+    == [
+      DataReceived(stream_id: 1, data: <<"part1":utf8>>, end_stream: False),
+      DataReceived(stream_id: 1, data: <<"part2":utf8>>, end_stream: True),
+    ]
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == h2_core.HalfClosedRemote
 }
@@ -545,9 +575,9 @@ pub fn receive_padded_data_frame_test() {
       data: <<"hello":utf8>>,
       padding: Some(10),
     )
-  let assert Ok(#(_server, events, _to_send)) =
-    receive_data(server, data_frame)
-  assert events == [DataReceived(stream_id: 1, data: <<"hello":utf8>>, end_stream: False)]
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, data_frame)
+  assert events
+    == [DataReceived(stream_id: 1, data: <<"hello":utf8>>, end_stream: False)]
 }
 
 // RFC 9113 Section 6.1 - "The entire DATA frame payload is included in flow
@@ -562,8 +592,7 @@ pub fn receive_padded_data_counts_full_payload_for_flow_control_test() {
       data: <<"hello":utf8>>,
       padding: Some(10),
     )
-  let assert Ok(#(server, _events, _to_send)) =
-    receive_data(server, data_frame)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
   let assert Ok(stream) = dict.get(server.streams, 1)
   // Flow control counts the entire payload: pad_length(1) + data(5) + padding(10) = 16
   assert stream.recv_window_size == 65_535 - 16
@@ -599,8 +628,7 @@ pub fn receive_data_on_closed_stream_is_handled_gracefully_test() {
       data: <<>>,
       padding: None,
     )
-  let assert Ok(#(server, _events, _to_send)) =
-    receive_data(server, end_frame)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, end_frame)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == HalfClosedRemote
 
@@ -620,6 +648,35 @@ pub fn receive_data_on_closed_stream_is_handled_gracefully_test() {
     )
   let assert Ok(#(_server, _events, _to_send)) =
     receive_data(server, stale_data)
+}
+
+// RFC 9113 Section 6.1 - "A receiver is not obligated to verify padding but
+// MAY treat non-zero padding as a connection error (Section 5.4.1) of type
+// PROTOCOL_ERROR."
+//
+// By default, non-zero padding bytes MUST be silently accepted (the receiver
+// is not obligated to verify them).
+pub fn receive_data_nonzero_padding_bytes_accepted_by_default_test() {
+  let #(server, _client) = server_with_open_stream()
+  // Manually craft a DATA frame with PADDED flag, pad_length=3,
+  // 5 bytes of data, then 3 non-zero padding bytes (all 0xFF).
+  // Length=9 (1 pad_length + 5 data + 3 padding), Type=0x00, Flags=0x08 (PADDED), Stream ID=1
+  let non_zero_padded = <<
+    9:size(24),
+    0x00:size(8),
+    0x08:size(8),
+    0:size(1),
+    1:size(31),
+    3:size(8),
+    "hello":utf8,
+    0xFF,
+    0xFF,
+    0xFF,
+  >>
+  let assert Ok(#(_server, events, _to_send)) =
+    receive_data(server, non_zero_padded)
+  assert events
+    == [DataReceived(stream_id: 1, data: <<"hello":utf8>>, end_stream: False)]
 }
 
 // RFC 9113 Section 6.1 - "The total number of padding octets is determined
@@ -642,4 +699,30 @@ pub fn receive_data_invalid_padding_length_is_protocol_error_test() {
   >>
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
     receive_data(server, bad_padded)
+}
+
+// RFC 9113 Section 4.2 - "An endpoint MUST send an error code of
+// FRAME_SIZE_ERROR if a frame exceeds the size defined in
+// SETTINGS_MAX_FRAME_SIZE, exceeds any limit defined for the frame
+// type, or is too small to contain mandatory frame data. A frame size
+// error in a frame that could alter the state of the entire
+// connection MUST be treated as a connection error (Section 5.4.1)."
+//
+// A DATA frame exceeding SETTINGS_MAX_FRAME_SIZE (default 16384) must
+// be treated as a connection error of type FRAME_SIZE_ERROR.
+pub fn receive_data_exceeding_max_frame_size_is_frame_size_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  // Craft a DATA frame with payload of 16385 bytes — one above the default max
+  // Length=16385, Type=0x00, Flags=0, Stream ID=1
+  let oversized_payload = <<0:size(16_385)-unit(8)>>
+  let oversized_frame = <<
+    16_385:size(24),
+    0x00:size(8),
+    0:size(8),
+    0:size(1),
+    1:size(31),
+    oversized_payload:bits,
+  >>
+  let assert Error(ConnectionError(h2_frame.FrameSizeError)) =
+    receive_data(server, oversized_frame)
 }
