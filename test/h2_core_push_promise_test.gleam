@@ -1,16 +1,17 @@
 import gleam/dict
 import gleam/option.{None}
 import h2_core.{
-  type Connection, Client, ConnectionError, Header, PushPromiseReceived,
-  ReservedLocal, ReservedRemote, Server, StreamError, WithIndexing,
-  new_connection, receive_data, send_headers, send_settings,
+  type Connection, Client, Connected, ConnectionError, Header,
+  PushPromiseReceived, ReservedLocal, ReservedRemote, Server, StreamError,
+  WithIndexing, receive_data, send_headers, send_settings,
 }
 import h2_frame
+import helper
 
 // Helper: create a server connection with an open client-initiated stream 1
 fn server_with_open_stream() -> #(Connection, Connection) {
-  let server = new_connection(Server)
-  let client = new_connection(Client)
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, headers)) =
     send_headers(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
@@ -46,7 +47,7 @@ pub fn receive_push_promise_from_client_is_protocol_error_test() {
 // =============================================================================
 
 pub fn receive_push_promise_on_stream_zero_is_protocol_error_test() {
-  let client = new_connection(Client)
+  let client = helper.new_connection(Client, Connected)
   // Manually craft a PUSH_PROMISE on stream 0
   // Type=0x05, Flags=0x04 (END_HEADERS), Stream ID=0, Promised ID=2
   let bad_pp = <<
@@ -71,7 +72,7 @@ pub fn receive_push_promise_on_stream_zero_is_protocol_error_test() {
 // =============================================================================
 
 pub fn receive_push_promise_when_push_disabled_is_protocol_error_test() {
-  let client = new_connection(Client)
+  let client = helper.new_connection(Client, Connected)
   let #(server, _client) = server_with_open_stream()
 
   // Client disables push
@@ -111,7 +112,7 @@ pub fn receive_push_promise_when_push_disabled_is_protocol_error_test() {
 // =============================================================================
 
 pub fn receive_push_promise_on_idle_stream_is_protocol_error_test() {
-  let client = new_connection(Client)
+  let client = helper.new_connection(Client, Connected)
   // Stream 1 was never opened — it's idle
   let assert Ok(pp) =
     h2_frame.encode_push_promise(
@@ -138,19 +139,16 @@ pub fn receive_push_promise_on_open_stream_is_valid_test() {
     )
   let assert Ok(#(client, events, _to_send)) = receive_data(client, pp)
   // Should emit PushPromiseReceived event
-  assert events == [PushPromiseReceived(
-    stream_id: 1,
-    promised_stream_id: 2,
-    headers: [],
-  )]
+  assert events
+    == [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: [])]
   // Promised stream 2 should be in reserved (remote) state
   let assert Ok(stream) = dict.get(client.streams, 2)
   assert stream.state == ReservedRemote
 }
 
 pub fn receive_push_promise_on_half_closed_local_is_valid_test() {
-  let server = new_connection(Server)
-  let client = new_connection(Client)
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
   // Client sends headers with END_STREAM — stream 1 is half-closed (local)
   // on the client side
   let assert Ok(#(client, _events, headers)) =
@@ -168,11 +166,8 @@ pub fn receive_push_promise_on_half_closed_local_is_valid_test() {
       padding: None,
     )
   let assert Ok(#(_client, events, _to_send)) = receive_data(client, pp)
-  assert events == [PushPromiseReceived(
-    stream_id: 1,
-    promised_stream_id: 2,
-    headers: [],
-  )]
+  assert events
+    == [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: [])]
 }
 
 // =============================================================================
@@ -317,11 +312,8 @@ pub fn receive_push_promise_without_end_headers_expects_continuation_test() {
     )
   let assert Ok(#(_client, events, _to_send)) =
     receive_data(client, <<pp:bits, cont:bits>>)
-  assert events == [PushPromiseReceived(
-    stream_id: 1,
-    promised_stream_id: 2,
-    headers: [],
-  )]
+  assert events
+    == [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: [])]
 }
 
 pub fn receive_push_promise_without_end_headers_then_wrong_frame_is_protocol_error_test() {
@@ -384,11 +376,12 @@ pub fn receive_push_promise_updates_hpack_state_test() {
     )
   let assert Ok(#(_client, events, _to_send)) = receive_data(client, pp1)
   // Should have decoded the header
-  assert events == [PushPromiseReceived(
-    stream_id: 1,
-    promised_stream_id: 2,
-    headers: [Header(":method", "GET", WithIndexing)],
-  )]
+  assert events
+    == [
+      PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: [
+        Header(":method", "GET", WithIndexing),
+      ]),
+    ]
 }
 
 // =============================================================================
@@ -411,32 +404,26 @@ pub fn send_push_promise_on_open_peer_stream_test() {
   let #(server, _client) = server_with_open_stream()
   // Server pushes on stream 1 (client-initiated, open)
   let assert Ok(#(server, _events, _to_send)) =
-    h2_core.send_push_promise(
-      server,
-      1,
-      2,
-      [Header(":method", "GET", WithIndexing)],
-    )
+    h2_core.send_push_promise(server, 1, 2, [
+      Header(":method", "GET", WithIndexing),
+    ])
   // Promised stream 2 should be in reserved (local) on server side
   let assert Ok(stream) = dict.get(server.streams, 2)
   assert stream.state == ReservedLocal
 }
 
 pub fn send_push_promise_on_half_closed_remote_test() {
-  let server = new_connection(Server)
-  let client = new_connection(Client)
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
   // Client sends headers with END_STREAM
   let assert Ok(#(_client, _events, headers)) =
     send_headers(client, [Header(":method", "GET", WithIndexing)], True)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   // Stream 1 is half-closed (remote) on server — push should work
   let assert Ok(#(server, _events, _to_send)) =
-    h2_core.send_push_promise(
-      server,
-      1,
-      2,
-      [Header(":method", "GET", WithIndexing)],
-    )
+    h2_core.send_push_promise(server, 1, 2, [
+      Header(":method", "GET", WithIndexing),
+    ])
   let assert Ok(stream) = dict.get(server.streams, 2)
   assert stream.state == ReservedLocal
 }
@@ -444,14 +431,11 @@ pub fn send_push_promise_on_half_closed_remote_test() {
 // RFC 9113 Section 6.6 - "A sender MUST NOT send a PUSH_PROMISE on a stream
 // unless that stream is either 'open' or 'half-closed (remote)'"
 pub fn send_push_promise_on_idle_stream_is_error_test() {
-  let server = new_connection(Server)
+  let server = helper.new_connection(Server, Connected)
   let assert Error(_) =
-    h2_core.send_push_promise(
-      server,
-      1,
-      2,
-      [Header(":method", "GET", WithIndexing)],
-    )
+    h2_core.send_push_promise(server, 1, 2, [
+      Header(":method", "GET", WithIndexing),
+    ])
 }
 
 // RFC 9113 Section 6.6 - "the sender MUST ensure that the promised stream
@@ -461,32 +445,23 @@ pub fn send_push_promise_promised_id_must_be_even_test() {
   let #(server, _client) = server_with_open_stream()
   // Promised stream 3 is odd — invalid for server
   let assert Error(_) =
-    h2_core.send_push_promise(
-      server,
-      1,
-      3,
-      [Header(":method", "GET", WithIndexing)],
-    )
+    h2_core.send_push_promise(server, 1, 3, [
+      Header(":method", "GET", WithIndexing),
+    ])
 }
 
 pub fn send_push_promise_promised_id_must_be_increasing_test() {
   let #(server, _client) = server_with_open_stream()
   // First push reserves stream 4
   let assert Ok(#(server, _events, _to_send)) =
-    h2_core.send_push_promise(
-      server,
-      1,
-      4,
-      [Header(":method", "GET", WithIndexing)],
-    )
+    h2_core.send_push_promise(server, 1, 4, [
+      Header(":method", "GET", WithIndexing),
+    ])
   // Second push tries stream 2 — lower than 4
   let assert Error(_) =
-    h2_core.send_push_promise(
-      server,
-      1,
-      2,
-      [Header(":method", "GET", WithIndexing)],
-    )
+    h2_core.send_push_promise(server, 1, 2, [
+      Header(":method", "GET", WithIndexing),
+    ])
 }
 
 // RFC 9113 Section 6.6 - "PUSH_PROMISE MUST NOT be sent if the
@@ -502,41 +477,32 @@ pub fn send_push_promise_when_peer_disabled_push_is_error_test() {
     receive_data(server, settings_frame)
   // Server tries to push — should fail
   let assert Error(_) =
-    h2_core.send_push_promise(
-      server,
-      1,
-      2,
-      [Header(":method", "GET", WithIndexing)],
-    )
+    h2_core.send_push_promise(server, 1, 2, [
+      Header(":method", "GET", WithIndexing),
+    ])
 }
 
 // RFC 9113 Section 8.4 - "A client cannot push."
 // Clients should not be able to send PUSH_PROMISE.
 pub fn client_send_push_promise_is_error_test() {
-  let client = new_connection(Client)
-  let server = new_connection(Server)
+  let client = helper.new_connection(Client, Connected)
+  let server = helper.new_connection(Server, Connected)
   // Open stream 1 from client
   let assert Ok(#(client, _events, headers)) =
     send_headers(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
   // Client tries to push — must be rejected
   let assert Error(_) =
-    h2_core.send_push_promise(
-      client,
-      1,
-      2,
-      [Header(":method", "GET", WithIndexing)],
-    )
+    h2_core.send_push_promise(client, 1, 2, [
+      Header(":method", "GET", WithIndexing),
+    ])
 }
 
 // RFC 9113 Section 6.6 - Stream ID 0 is invalid for PUSH_PROMISE
 pub fn send_push_promise_on_stream_zero_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Error(_) =
-    h2_core.send_push_promise(
-      server,
-      0,
-      2,
-      [Header(":method", "GET", WithIndexing)],
-    )
+    h2_core.send_push_promise(server, 0, 2, [
+      Header(":method", "GET", WithIndexing),
+    ])
 }
