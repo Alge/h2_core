@@ -24,6 +24,76 @@ pub type Settings {
   )
 }
 
+fn validate_settings(settings: Settings) -> Result(Nil, H2Error) {
+  use <- bool.guard(
+    settings.initial_window_size < 0
+      || settings.initial_window_size > 2_147_483_647,
+    Error(ConnectionError(h2_frame.FlowControlError)),
+  )
+  use <- bool.guard(
+    settings.max_frame_size < 16_384 || settings.max_frame_size > 16_777_215,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  use <- bool.guard(
+    settings.header_table_size < 0,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  use <- bool.guard(
+    settings.max_concurrent_streams
+      |> option.map(fn(v) { v < 0 })
+      |> option.unwrap(False),
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+  use <- bool.guard(
+    settings.max_header_list_size
+      |> option.map(fn(v) { v < 0 })
+      |> option.unwrap(False),
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+  Ok(Nil)
+}
+
+/// Helper function to convert a settings object to a list of h2_frame.Setting
+/// Useful when sending the current settings as a frame
+fn to_settings_list(
+  settings settings: Settings,
+  role role: Role,
+) -> List(h2_frame.Setting) {
+  let settings_list = [
+    h2_frame.HeaderTableSize(settings.header_table_size),
+    h2_frame.InitialWindowSize(settings.initial_window_size),
+    h2_frame.MaxFrameSize(settings.max_frame_size),
+  ]
+  let settings_list = case role {
+    Client -> [
+      h2_frame.EnablePush(case settings.enable_push {
+        True -> 1
+        False -> 0
+      }),
+      ..settings_list
+    ]
+    Server -> settings_list
+  }
+
+  let settings_list = case settings.max_concurrent_streams {
+    option.Some(value) -> {
+      [h2_frame.MaxConcurrentStreams(value), ..settings_list]
+    }
+    option.None -> settings_list
+  }
+
+  let settings_list = case settings.max_header_list_size {
+    option.Some(value) -> {
+      [h2_frame.MaxHeaderListSize(value), ..settings_list]
+    }
+    option.None -> settings_list
+  }
+
+  settings_list
+}
+
 fn apply_send_new_window_size(
   conn: Connection,
   delta: Int,
@@ -137,7 +207,7 @@ fn apply_settings(
   }
 }
 
-fn default_settings() -> Settings {
+pub fn default_settings() -> Settings {
   Settings(
     header_table_size: 4096,
     enable_push: True,
@@ -197,7 +267,16 @@ pub type Connection {
   )
 }
 
-pub fn new_connection(role: Role) -> Connection {
+/// Creates a new HTTP/2 connection for the given role and initial settings.
+///
+/// Returns the connection and the preface bytes that MUST be sent to the peer
+/// before any other data. The provided settings are advertised to the peer in
+/// the preface SETTINGS frame but do not take effect locally until a
+/// `SettingsAcknowledged` event is received.
+pub fn new_connection(
+  role role: Role,
+  settings settings: Settings,
+) -> Result(#(Connection, BitArray), H2Error) {
   let next_stream_id = case role {
     Client -> 1
     Server -> 2
@@ -208,22 +287,37 @@ pub fn new_connection(role: Role) -> Connection {
     Server -> AwaitingPreface
   }
 
-  Connection(
-    state: state,
-    role: role,
-    local_settings: default_settings(),
-    pending_settings: [],
-    remote_settings: default_settings(),
-    streams: dict.new(),
-    last_remote_stream_id: 0,
-    next_stream_id: next_stream_id,
-    recv_buffer: <<>>,
-    send_window_size: 65_535,
-    recv_window_size: 65_535,
-    hpack_encoder: HpackContext(alpacki.new_dynamic(4096)),
-    hpack_decoder: HpackContext(alpacki.new_dynamic(4096)),
-    pending_header_blocks: option.None,
-  )
+  let conn =
+    Connection(
+      state: state,
+      role: role,
+      local_settings: default_settings(),
+      pending_settings: [],
+      remote_settings: default_settings(),
+      streams: dict.new(),
+      last_remote_stream_id: 0,
+      next_stream_id: next_stream_id,
+      recv_buffer: <<>>,
+      send_window_size: 65_535,
+      recv_window_size: 65_535,
+      hpack_encoder: HpackContext(alpacki.new_dynamic(4096)),
+      hpack_decoder: HpackContext(alpacki.new_dynamic(4096)),
+      pending_header_blocks: option.None,
+    )
+
+  use _ <- result.try(validate_settings(settings))
+
+  use #(conn, _events, encoded_settings) <- result.try(send_settings(
+    conn,
+    to_settings_list(settings, role),
+  ))
+
+  let initial_bytes = case role {
+    Client -> <<client_preface_magic:bits, encoded_settings:bits>>
+    Server -> encoded_settings
+  }
+
+  Ok(#(conn, initial_bytes))
 }
 
 fn count_inbound_streams(conn: Connection) -> Int {
@@ -918,7 +1012,12 @@ fn parse_loop(
                   let old_settings = conn.remote_settings
 
                   // Apply new settings and update the state
-                  let conn = Connection(..conn, remote_settings: new_settings, state: Connected)
+                  let conn =
+                    Connection(
+                      ..conn,
+                      remote_settings: new_settings,
+                      state: Connected,
+                    )
 
                   use conn <- result.try(apply_send_new_window_size(
                     conn,

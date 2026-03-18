@@ -6,7 +6,9 @@ import h2_core.{
 import h2_frame
 
 pub fn new_connection(role: h2_core.Role, state: ConnectionState) -> Connection {
-  Connection(..h2_core.new_connection(role), state: state)
+  let assert Ok(#(conn, _)) =
+    h2_core.new_connection(role, h2_core.default_settings())
+  Connection(..conn, state: state, pending_settings: [])
 }
 
 /// Override the state of a stream on a connection.
