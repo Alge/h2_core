@@ -1,12 +1,12 @@
 import h2_core.{
-  Client, ConnectionError, PingAcknowledged, new_connection, receive_data,
-  send_ping,
+  Client, Connected, ConnectionError, PingAcknowledged, receive_data, send_ping,
 }
 import h2_frame
+import helper
 
 // RFC 9113 Section 6.7 - PING
 pub fn receive_ping_sends_ack_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let ping_data = <<1, 2, 3, 4, 5, 6, 7, 8>>
   let assert Ok(ping_frame) = h2_frame.encode_ping(ack: False, data: ping_data)
   let assert Ok(#(conn, events, to_send)) = receive_data(conn, ping_frame)
@@ -17,7 +17,7 @@ pub fn receive_ping_sends_ack_test() {
 }
 
 pub fn receive_ping_ack_emits_event_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let ping_data = <<1, 2, 3, 4, 5, 6, 7, 8>>
   let assert Ok(ping_ack) = h2_frame.encode_ping(ack: True, data: ping_data)
   let assert Ok(#(_conn, events, to_send)) = receive_data(conn, ping_ack)
@@ -27,7 +27,7 @@ pub fn receive_ping_ack_emits_event_test() {
 
 // RFC 9113 Section 6.7 - PING with wrong length is FRAME_SIZE_ERROR
 pub fn receive_ping_wrong_length_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   // Manually craft a PING frame with 4 bytes payload instead of 8
   // Length=4, Type=0x06 (PING), Flags=0, Reserved=0, Stream ID=0
   let bad_ping = <<
@@ -47,7 +47,7 @@ pub fn receive_ping_wrong_length_test() {
 
 // RFC 9113 Section 6.7 - PING on non-zero stream is PROTOCOL_ERROR
 pub fn receive_ping_nonzero_stream_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   // Manually craft a PING frame on stream 1
   // Length=8, Type=0x06 (PING), Flags=0, Reserved=0, Stream ID=1
   let bad_ping = <<
@@ -70,7 +70,7 @@ pub fn receive_ping_nonzero_stream_test() {
 }
 
 pub fn send_ping_returns_encoded_frame_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let ping_data = <<1, 2, 3, 4, 5, 6, 7, 8>>
   let assert Ok(#(_conn, events, to_send)) = send_ping(conn, ping_data)
   assert events == []
@@ -80,7 +80,7 @@ pub fn send_ping_returns_encoded_frame_test() {
 
 // PING round-trip: send ping, receive ack, verify event
 pub fn ping_round_trip_test() {
-  let conn = new_connection(Client)
+  let conn = helper.new_connection(Client, Connected)
   let ping_data = <<10, 20, 30, 40, 50, 60, 70, 80>>
   // Send a ping
   let assert Ok(#(conn, _events, _to_send)) = send_ping(conn, ping_data)
