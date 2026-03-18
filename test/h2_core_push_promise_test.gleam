@@ -506,3 +506,107 @@ pub fn send_push_promise_on_stream_zero_is_error_test() {
       Header(":method", "GET", WithIndexing),
     ])
 }
+
+// RFC 9113 Section 6.6 - "PUSH_PROMISE frames MUST only be sent on a
+// peer-initiated stream that is in either the 'open' or 'half-closed
+// (remote)' state."
+//
+// A half-closed (local) stream has had END_STREAM sent by the server,
+// so it is no longer open or half-closed (remote) — sending a
+// PUSH_PROMISE on it must be an error.
+pub fn send_push_promise_on_half_closed_local_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  // Server sends response headers with END_STREAM — stream becomes
+  // half-closed (local) from the server's perspective
+  let assert Ok(#(server, _events, _to_send)) =
+    send_headers(server, [Header(":status", "200", WithIndexing)], True)
+  let assert Error(_) =
+    h2_core.send_push_promise(server, 1, 2, [
+      Header(":method", "GET", WithIndexing),
+    ])
+}
+
+// RFC 9113 Section 6.6 - "A receiver MUST treat the receipt of a
+// PUSH_PROMISE on a stream that is neither 'open' nor 'half-closed
+// (local)' as a connection error (Section 5.4.1) of type
+// PROTOCOL_ERROR."
+//
+// A closed stream is neither open nor half-closed (local).
+pub fn receive_push_promise_on_closed_stream_is_protocol_error_test() {
+  let #(_server, client) = server_with_open_stream()
+  // Client sends headers with END_STREAM — stream 1 is half-closed (local)
+  // Then server RST_STREAMs it — stream 1 is now closed on client
+  let assert Ok(rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.NoError)
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, rst)
+  let assert Ok(stream) = dict.get(client.streams, 1)
+  assert stream.state == h2_core.Closed
+
+  let assert Ok(pp) =
+    h2_frame.encode_push_promise(
+      stream_id: 1,
+      end_headers: True,
+      promised_stream_id: 2,
+      field_block_fragment: <<>>,
+      padding: None,
+    )
+  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+    receive_data(client, pp)
+}
+
+// RFC 9113 Section 6.6 - "The total number of padding octets is
+// determined by the value of the Pad Length field. If the length of
+// the padding is the length of the frame payload or greater, the
+// recipient MUST treat this as a connection error (Section 5.4.1) of
+// type PROTOCOL_ERROR."
+pub fn receive_push_promise_invalid_padding_length_is_protocol_error_test() {
+  let #(_server, client) = server_with_open_stream()
+  // Manually craft a PUSH_PROMISE with PADDED flag where pad_length
+  // equals the remaining payload — invalid.
+  // Length=5 (1 pad_length + 4 promised_stream_id), Type=0x05,
+  // Flags=0x0C (PADDED | END_HEADERS), Stream ID=1
+  // Pad Length=4 — remaining after pad_length field is 4 bytes (the
+  // promised stream ID), so padding (4) >= remaining payload (4).
+  let bad_pp = <<
+    5:size(24),
+    0x05:size(8),
+    0x0C:size(8),
+    0:size(1),
+    1:size(31),
+    4:size(8),
+    0:size(1),
+    2:size(31),
+  >>
+  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+    receive_data(client, bad_pp)
+}
+
+// RFC 9113 Section 6.6 - "A receiver is not obligated to verify
+// padding but MAY treat non-zero padding as a connection error
+// (Section 5.4.1) of type PROTOCOL_ERROR."
+//
+// By default, non-zero padding bytes MUST be silently accepted.
+pub fn receive_push_promise_nonzero_padding_bytes_accepted_by_default_test() {
+  let #(_server, client) = server_with_open_stream()
+  // Manually craft a PUSH_PROMISE with PADDED flag, pad_length=3,
+  // promised_stream_id=2, then 3 non-zero padding bytes.
+  // Length=8 (1 pad_length + 4 promised_id + 3 padding), Type=0x05,
+  // Flags=0x0C (PADDED | END_HEADERS), Stream ID=1
+  let non_zero_padded = <<
+    8:size(24),
+    0x05:size(8),
+    0x0C:size(8),
+    0:size(1),
+    1:size(31),
+    3:size(8),
+    0:size(1),
+    2:size(31),
+    0xFF,
+    0xFF,
+    0xFF,
+  >>
+  let assert Ok(#(_client, events, _to_send)) =
+    receive_data(client, non_zero_padded)
+  assert events
+    == [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: [])]
+}
