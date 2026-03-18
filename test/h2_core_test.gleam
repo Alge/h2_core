@@ -20,7 +20,6 @@ pub fn new_server_connection_test() {
   assert conn.role == Server
 }
 
-
 pub fn new_connection_remote_settings_match_defaults_test() {
   let assert Ok(#(conn, _)) = new_connection(Client, default_settings())
   assert conn.local_settings == conn.remote_settings
