@@ -141,6 +141,9 @@ pub fn receive_data_on_half_closed_remote_is_stream_closed_error_test() {
     == [StreamReset(stream_id: 1, error_code: h2_frame.StreamClosed)]
 }
 
+// RFC 9113 Section 5.1 - "Receiving any frame other than HEADERS or PRIORITY
+// on a stream in this [idle] state MUST be treated as a connection error
+// (Section 5.4.1) of type PROTOCOL_ERROR."
 pub fn receive_data_on_idle_stream_is_protocol_error_test() {
   let server = helper.new_connection(Server, Connected)
   // Stream 1 was never opened
@@ -253,6 +256,14 @@ pub fn receive_data_exceeding_stream_window_is_flow_control_error_test() {
     == [StreamReset(stream_id: 1, error_code: h2_frame.FlowControlError)]
 }
 
+// RFC 9113 Section 6.9 - "A change to SETTINGS_INITIAL_WINDOW_SIZE can cause
+// the available space in a flow-control window to become negative... A sender
+// MUST NOT allow a flow-control window to exceed 2^31-1 octets."
+// Section 5.2.1 - "A sender MUST NOT send flow-controlled frames beyond the
+// limits set by its peer."
+//
+// Receiving DATA that exceeds the connection flow-control window is a
+// connection error of type FLOW_CONTROL_ERROR.
 pub fn receive_data_exceeding_connection_window_is_flow_control_error_test() {
   let #(server, _client) = server_with_open_stream()
   // Set connection recv_window_size to 5 bytes
