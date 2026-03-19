@@ -697,21 +697,25 @@ pub fn send_headers(
   headers headers: List(Header),
   end_stream end_stream: Bool,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+  // headers cannot be sent on the connection level, it must be on a stream
   use <- bool.guard(
     stream_id == 0,
     Error(ConnectionError(h2_frame.ProtocolError)),
   )
 
+  // headers must be sent on a existing stream
   use stream <- result.try(
     dict.get(conn.streams, stream_id)
     |> result.replace_error(StreamError(stream_id, h2_frame.StreamClosed)),
   )
 
+  // headers cannot be sent on a ReservedRemote stream, those are initiated by the other party!
   use <- bool.guard(
     stream.state == ReservedRemote,
     Error(ConnectionError(h2_frame.ProtocolError)),
   )
 
+  // Headers must not be sent on a stream we have initiated closing of or a closed stream
   use <- bool.guard(
     stream.state == HalfClosedLocal || stream.state == Closed,
     Error(StreamError(stream_id, h2_frame.StreamClosed)),
