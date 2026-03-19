@@ -752,6 +752,11 @@ pub fn send_data(
 
   case dict.get(conn.streams, stream_id) {
     Ok(stream) -> {
+      // use <- bool.guard(
+      //   stream.state == HalfClosedLocal,
+      //   Error(StreamError(stream_id, h2_frame.StreamClosed)),
+      // )
+
       todo
     }
     Error(Nil) ->
