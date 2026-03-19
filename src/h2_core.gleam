@@ -748,10 +748,13 @@ pub fn send_data(
 }
 
 pub fn get_send_window_size(
-  _conn: Connection,
-  _stream_id: Int,
-) -> Result(Int, H2Error) {
-  todo
+  conn conn: Connection,
+  stream_id stream_id: Int,
+) -> Result(Int, Nil) {
+  case dict.get(conn.streams, stream_id) {
+    Ok(stream) -> Ok(stream.send_window_size)
+    Error(Nil) -> Error(Nil)
+  }
 }
 
 pub fn send_settings(
