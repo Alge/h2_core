@@ -708,6 +708,11 @@ pub fn send_headers(
   )
 
   use <- bool.guard(
+    stream.state == ReservedRemote,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  use <- bool.guard(
     stream.state == HalfClosedLocal || stream.state == Closed,
     Error(StreamError(stream_id, h2_frame.StreamClosed)),
   )
