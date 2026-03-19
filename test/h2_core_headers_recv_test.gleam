@@ -4,7 +4,7 @@ import gleam/option
 import h2_core.{
   Client, Closed, Connected, Connection, ConnectionError, HalfClosedLocal,
   HalfClosedRemote, Header, HeadersReceived, NeverIndexed, Open, Server,
-  StreamReset, WithIndexing, WithoutIndexing, receive_data, send_headers,
+  StreamReset, WithIndexing, WithoutIndexing, open_stream, receive_data,
   send_settings,
 }
 import h2_frame
@@ -21,7 +21,7 @@ pub fn receive_headers_emits_event_test() {
     Header(":path", "/", WithIndexing),
   ]
   let assert Ok(#(_client, _events, encoded)) =
-    send_headers(client, headers, False)
+    open_stream(client, headers, False)
 
   // Feed it to a server connection
   let server = helper.new_connection(Server, Connected)
@@ -39,7 +39,7 @@ pub fn receive_headers_opens_stream_test() {
   let client = helper.new_connection(Client, Connected)
   let headers = [Header(":method", "GET", WithIndexing)]
   let assert Ok(#(_client, _events, encoded)) =
-    send_headers(client, headers, False)
+    open_stream(client, headers, False)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded)
@@ -52,7 +52,7 @@ pub fn receive_headers_end_stream_test() {
   let client = helper.new_connection(Client, Connected)
   let headers = [Header(":method", "GET", WithIndexing)]
   let assert Ok(#(_client, _events, encoded)) =
-    send_headers(client, headers, True)
+    open_stream(client, headers, True)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, events, _to_send)) = receive_data(server, encoded)
@@ -71,9 +71,9 @@ pub fn receive_headers_updates_hpack_decoder_test() {
   ]
   // Send headers twice from the same client (HPACK state accumulates)
   let assert Ok(#(client, _events, first_encoded)) =
-    send_headers(client, headers, False)
+    open_stream(client, headers, False)
   let assert Ok(#(_client, _events, second_encoded)) =
-    send_headers(client, headers, False)
+    open_stream(client, headers, False)
 
   // Feed both to the server sequentially - both should decode successfully
   let server = helper.new_connection(Server, Connected)
@@ -103,9 +103,9 @@ pub fn receive_headers_hpack_compression_works_test() {
     Header("custom-header", "custom-value", WithIndexing),
   ]
   let assert Ok(#(client, _events, first_encoded)) =
-    send_headers(client, headers, False)
+    open_stream(client, headers, False)
   let assert Ok(#(_client, _events, second_encoded)) =
-    send_headers(client, headers, False)
+    open_stream(client, headers, False)
 
   // Second should be smaller due to dynamic table indexing
   assert bit_array.byte_size(second_encoded)
@@ -143,7 +143,7 @@ pub fn receive_headers_no_response_test() {
   let client = helper.new_connection(Client, Connected)
   let headers = [Header(":method", "GET", WithIndexing)]
   let assert Ok(#(_client, _events, encoded)) =
-    send_headers(client, headers, False)
+    open_stream(client, headers, False)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(_server, _events, to_send)) = receive_data(server, encoded)
@@ -153,7 +153,7 @@ pub fn receive_headers_no_response_test() {
 // Receiving HEADERS with empty field block fragment
 pub fn receive_headers_empty_block_test() {
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, _events, encoded)) = send_headers(client, [], False)
+  let assert Ok(#(_client, _events, encoded)) = open_stream(client, [], False)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, events, _to_send)) = receive_data(server, encoded)
@@ -167,9 +167,9 @@ pub fn receive_headers_empty_block_test() {
 pub fn receive_multiple_headers_creates_streams_test() {
   let client = helper.new_connection(Client, Connected)
   let h1 = [Header(":method", "GET", WithIndexing)]
-  let assert Ok(#(client, _events, encoded1)) = send_headers(client, h1, False)
+  let assert Ok(#(client, _events, encoded1)) = open_stream(client, h1, False)
   let h2 = [Header(":method", "POST", WithIndexing)]
-  let assert Ok(#(_client, _events, encoded2)) = send_headers(client, h2, False)
+  let assert Ok(#(_client, _events, encoded2)) = open_stream(client, h2, False)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, events1, _to_send)) = receive_data(server, encoded1)
@@ -190,9 +190,9 @@ pub fn receive_multiple_headers_creates_streams_test() {
 pub fn receive_multiple_headers_in_one_call_test() {
   let client = helper.new_connection(Client, Connected)
   let h1 = [Header(":method", "GET", WithIndexing)]
-  let assert Ok(#(client, _events, encoded1)) = send_headers(client, h1, False)
+  let assert Ok(#(client, _events, encoded1)) = open_stream(client, h1, False)
   let h2 = [Header(":method", "POST", WithIndexing)]
-  let assert Ok(#(_client, _events, encoded2)) = send_headers(client, h2, False)
+  let assert Ok(#(_client, _events, encoded2)) = open_stream(client, h2, False)
 
   let server = helper.new_connection(Server, Connected)
   // Feed both frames at once
@@ -214,9 +214,9 @@ pub fn receive_headers_updates_last_remote_stream_id_test() {
   let client = helper.new_connection(Client, Connected)
   let headers = [Header(":method", "GET", WithIndexing)]
   let assert Ok(#(client, _events, encoded1)) =
-    send_headers(client, headers, False)
+    open_stream(client, headers, False)
   let assert Ok(#(_client, _events, encoded2)) =
-    send_headers(client, headers, False)
+    open_stream(client, headers, False)
 
   let server = helper.new_connection(Server, Connected)
   assert server.last_remote_stream_id == 0
@@ -234,9 +234,9 @@ pub fn receive_headers_decreasing_stream_id_is_protocol_error_test() {
   let headers = [Header(":method", "GET", WithIndexing)]
   // Open streams 1 and 3
   let assert Ok(#(client, _events, encoded1)) =
-    send_headers(client, headers, False)
+    open_stream(client, headers, False)
   let assert Ok(#(_client, _events, encoded3)) =
-    send_headers(client, headers, False)
+    open_stream(client, headers, False)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
@@ -246,7 +246,7 @@ pub fn receive_headers_decreasing_stream_id_is_protocol_error_test() {
   // Craft a HEADERS frame for stream 2 (even = server-initiated, never opened)
   // stream 2 doesn't exist in conn.streams and 2 < 3 = last_remote_stream_id
   let assert Ok(#(_fresh, _events, encoded_new)) =
-    send_headers(helper.new_connection(Client, Connected), headers, False)
+    open_stream(helper.new_connection(Client, Connected), headers, False)
   let patched = helper.patch_stream_id(encoded_new, 2)
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
     receive_data(server, patched)
@@ -258,10 +258,10 @@ pub fn receive_headers_on_open_stream_is_valid_test() {
   let client = helper.new_connection(Client, Connected)
   let headers = [Header(":method", "GET", WithIndexing)]
   let assert Ok(#(client, _events, encoded1)) =
-    send_headers(client, headers, False)
+    open_stream(client, headers, False)
   // Produce a second HEADERS for stream 3, then patch to stream 1
   let assert Ok(#(_client, _events, encoded2)) =
-    send_headers(client, [Header("x-trailer", "value", WithIndexing)], False)
+    open_stream(client, [Header("x-trailer", "value", WithIndexing)], False)
   let patched = helper.patch_stream_id(encoded2, 1)
 
   let server = helper.new_connection(Server, Connected)
@@ -284,9 +284,9 @@ pub fn receive_headers_on_open_stream_is_valid_test() {
 pub fn receive_headers_on_half_closed_local_stream_is_valid_test() {
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, encoded1)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(_client, _events, encoded2)) =
-    send_headers(client, [Header("x-trailer", "value", WithIndexing)], False)
+    open_stream(client, [Header("x-trailer", "value", WithIndexing)], False)
   let patched = helper.patch_stream_id(encoded2, 1)
 
   let server = helper.new_connection(Server, Connected)
@@ -308,9 +308,9 @@ pub fn receive_headers_on_half_closed_local_stream_is_valid_test() {
 pub fn receive_headers_end_stream_on_open_stream_transitions_state_test() {
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, encoded1)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(_client, _events, encoded2)) =
-    send_headers(client, [Header("x-trailer", "done", WithIndexing)], True)
+    open_stream(client, [Header("x-trailer", "done", WithIndexing)], True)
   let patched = helper.patch_stream_id(encoded2, 1)
 
   let server = helper.new_connection(Server, Connected)
@@ -330,9 +330,9 @@ pub fn receive_headers_end_stream_on_open_stream_transitions_state_test() {
 pub fn receive_headers_end_stream_on_half_closed_local_transitions_to_closed_test() {
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, encoded1)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(_client, _events, encoded2)) =
-    send_headers(client, [Header("x-trailer", "done", WithIndexing)], True)
+    open_stream(client, [Header("x-trailer", "done", WithIndexing)], True)
   let patched = helper.patch_stream_id(encoded2, 1)
 
   let server = helper.new_connection(Server, Connected)
@@ -375,7 +375,7 @@ pub fn receive_headers_without_indexing_test() {
     Header("authorization", "Bearer secret", WithoutIndexing),
   ]
   let assert Ok(#(_client, _events, encoded)) =
-    send_headers(client, headers, False)
+    open_stream(client, headers, False)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, encoded)
@@ -395,7 +395,7 @@ pub fn receive_headers_never_indexed_test() {
     Header("secret-token", "abc123", NeverIndexed),
   ]
   let assert Ok(#(_client, _events, encoded)) =
-    send_headers(client, headers, False)
+    open_stream(client, headers, False)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, encoded)
@@ -418,13 +418,13 @@ pub fn receive_headers_on_closed_stream_is_discarded_test() {
   let headers = [Header(":method", "GET", WithIndexing)]
   // Open stream 1
   let assert Ok(#(client, _events, encoded1)) =
-    send_headers(client, headers, False)
+    open_stream(client, headers, False)
   // Encode a RST_STREAM to close stream 1
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
   // Produce a second HEADERS, patch to stream 1
   let assert Ok(#(_client, _events, encoded2)) =
-    send_headers(client, headers, False)
+    open_stream(client, headers, False)
   let patched = helper.patch_stream_id(encoded2, 1)
 
   let server = helper.new_connection(Server, Connected)
@@ -454,9 +454,9 @@ pub fn receive_headers_on_closed_stream_is_discarded_test() {
 pub fn receive_headers_on_half_closed_remote_is_stream_error_test() {
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, encoded1)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], True)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], True)
   let assert Ok(#(_client, _events, encoded2)) =
-    send_headers(client, [Header(":method", "POST", WithIndexing)], False)
+    open_stream(client, [Header(":method", "POST", WithIndexing)], False)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
@@ -474,9 +474,9 @@ pub fn receive_headers_on_half_closed_remote_is_stream_error_test() {
 pub fn receive_headers_on_half_closed_remote_sends_rst_stream_test() {
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, encoded1)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], True)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], True)
   let assert Ok(#(_client, _events, encoded2)) =
-    send_headers(client, [Header(":method", "POST", WithIndexing)], False)
+    open_stream(client, [Header(":method", "POST", WithIndexing)], False)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
@@ -493,11 +493,11 @@ pub fn receive_headers_on_half_closed_remote_sends_rst_stream_test() {
 pub fn receive_headers_after_stream_error_succeeds_test() {
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, encoded1)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], True)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], True)
   let assert Ok(#(client, _events, encoded2)) =
-    send_headers(client, [Header(":method", "POST", WithIndexing)], False)
+    open_stream(client, [Header(":method", "POST", WithIndexing)], False)
   let assert Ok(#(_client, _events, encoded3)) =
-    send_headers(client, [Header(":method", "PUT", WithIndexing)], False)
+    open_stream(client, [Header(":method", "PUT", WithIndexing)], False)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
@@ -523,11 +523,11 @@ pub fn receive_headers_after_stream_error_succeeds_test() {
 pub fn rejected_headers_must_still_update_hpack_state_test() {
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, encoded1)) =
-    send_headers(client, [Header("x-custom", "value1", WithIndexing)], True)
+    open_stream(client, [Header("x-custom", "value1", WithIndexing)], True)
   let assert Ok(#(client, _events, encoded2)) =
-    send_headers(client, [Header("x-custom", "value2", WithIndexing)], False)
+    open_stream(client, [Header("x-custom", "value2", WithIndexing)], False)
   let assert Ok(#(_client, _events, encoded3)) =
-    send_headers(client, [Header("x-custom", "value3", WithIndexing)], False)
+    open_stream(client, [Header("x-custom", "value3", WithIndexing)], False)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
@@ -576,14 +576,14 @@ pub fn receive_headers_exceeding_max_concurrent_streams_test() {
 
   // Open stream 1
   let assert Ok(#(client, _events, encoded1)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == Open
 
   // Open stream 3 — should be refused (exceeds MAX_CONCURRENT_STREAMS=1)
   let assert Ok(#(_client, _events, encoded3)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(_server, events, to_send)) = receive_data(server, encoded3)
 
   // Should get a RST_STREAM with REFUSED_STREAM
@@ -607,7 +607,7 @@ pub fn receive_headers_exceeding_max_concurrent_streams_test() {
 pub fn receive_headers_on_even_stream_id_is_protocol_error_test() {
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, encoded)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   // Patch stream ID from 1 (odd/client) to 2 (even/server)
   let patched = helper.patch_stream_id(encoded, 2)
 
@@ -621,7 +621,7 @@ pub fn receive_headers_on_even_stream_id_is_protocol_error_test() {
 pub fn client_receive_headers_on_odd_stream_id_is_protocol_error_test() {
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(_server, _events, encoded)) =
-    send_headers(server, [Header(":status", "200", WithIndexing)], False)
+    open_stream(server, [Header(":status", "200", WithIndexing)], False)
   // Patch stream ID from 2 (even/server) to 1 (odd/client)
   let patched = helper.patch_stream_id(encoded, 1)
 

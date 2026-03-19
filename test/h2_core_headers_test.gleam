@@ -3,71 +3,71 @@ import gleam/dict
 import gleam/option.{None}
 import h2_core.{
   Client, Connected, HalfClosedLocal, Header, Open, Server, WithIndexing,
-  send_headers,
+  open_stream,
 }
 import h2_frame
 import helper
 
 // RFC 9113 Section 6.2 - Sending HEADERS
 
-// send_headers encodes headers and produces a HEADERS frame
-pub fn send_headers_produces_encoded_frame_test() {
+// open_stream encodes headers and produces a HEADERS frame
+pub fn open_stream_produces_encoded_frame_test() {
   let conn = helper.new_connection(Client, Connected)
   let headers = [
     Header(":method", "GET", WithIndexing),
     Header(":path", "/", WithIndexing),
     Header(":scheme", "https", WithIndexing),
   ]
-  let assert Ok(#(_conn, _events, to_send)) = send_headers(conn, headers, False)
+  let assert Ok(#(_conn, _events, to_send)) = open_stream(conn, headers, False)
   // The output should be non-empty (actual HPACK-encoded HEADERS frame)
   assert to_send != <<>>
 }
 
-// send_headers opens a new stream in Open state
-pub fn send_headers_opens_stream_test() {
+// open_stream opens a new stream in Open state
+pub fn open_stream_opens_stream_test() {
   let conn = helper.new_connection(Client, Connected)
   let headers = [Header(":method", "GET", WithIndexing)]
-  let assert Ok(#(conn, _events, _to_send)) = send_headers(conn, headers, False)
+  let assert Ok(#(conn, _events, _to_send)) = open_stream(conn, headers, False)
   let assert Ok(stream) = dict.get(conn.streams, 1)
   assert stream.state == Open
 }
 
-// send_headers increments next_stream_id by 2
-pub fn send_headers_increments_stream_id_test() {
+// open_stream increments next_stream_id by 2
+pub fn open_stream_increments_stream_id_test() {
   let conn = helper.new_connection(Client, Connected)
   let headers = [Header(":method", "GET", WithIndexing)]
-  let assert Ok(#(conn, _events, _to_send)) = send_headers(conn, headers, False)
+  let assert Ok(#(conn, _events, _to_send)) = open_stream(conn, headers, False)
   assert conn.next_stream_id == 3
-  let assert Ok(#(conn, _events, _to_send)) = send_headers(conn, headers, False)
+  let assert Ok(#(conn, _events, _to_send)) = open_stream(conn, headers, False)
   assert conn.next_stream_id == 5
 }
 
 // Server uses even stream IDs
-pub fn send_headers_server_uses_even_stream_ids_test() {
+pub fn open_stream_server_uses_even_stream_ids_test() {
   let conn = helper.new_connection(Server, Connected)
   let headers = [Header(":status", "200", WithIndexing)]
-  let assert Ok(#(conn, _events, _to_send)) = send_headers(conn, headers, False)
+  let assert Ok(#(conn, _events, _to_send)) = open_stream(conn, headers, False)
   let assert Ok(_stream) = dict.get(conn.streams, 2)
   assert conn.next_stream_id == 4
 }
 
 // RFC 9113 Section 6.2 - END_STREAM flag transitions stream to half-closed (local)
-pub fn send_headers_with_end_stream_test() {
+pub fn open_stream_with_end_stream_test() {
   let conn = helper.new_connection(Client, Connected)
   let headers = [Header(":method", "GET", WithIndexing)]
-  let assert Ok(#(conn, _events, _to_send)) = send_headers(conn, headers, True)
+  let assert Ok(#(conn, _events, _to_send)) = open_stream(conn, headers, True)
   let assert Ok(stream) = dict.get(conn.streams, 1)
   assert stream.state == HalfClosedLocal
 }
 
 // The encoded frame can be parsed back by h2_frame
-pub fn send_headers_produces_parseable_frame_test() {
+pub fn open_stream_produces_parseable_frame_test() {
   let conn = helper.new_connection(Client, Connected)
   let headers = [
     Header(":method", "GET", WithIndexing),
     Header(":path", "/", WithIndexing),
   ]
-  let assert Ok(#(_conn, _events, to_send)) = send_headers(conn, headers, False)
+  let assert Ok(#(_conn, _events, to_send)) = open_stream(conn, headers, False)
   // Parse the frame back
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(frame) = h2_frame.decode_frame(frame_data)
@@ -82,10 +82,10 @@ pub fn send_headers_produces_parseable_frame_test() {
 }
 
 // END_STREAM is reflected in the encoded frame
-pub fn send_headers_end_stream_in_frame_test() {
+pub fn open_stream_end_stream_in_frame_test() {
   let conn = helper.new_connection(Client, Connected)
   let headers = [Header(":method", "GET", WithIndexing)]
-  let assert Ok(#(_conn, _events, to_send)) = send_headers(conn, headers, True)
+  let assert Ok(#(_conn, _events, to_send)) = open_stream(conn, headers, True)
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(frame) = h2_frame.decode_frame(frame_data)
   let assert h2_frame.Headers(
@@ -98,25 +98,25 @@ pub fn send_headers_end_stream_in_frame_test() {
 }
 
 // HPACK encoder state is updated after sending headers
-pub fn send_headers_updates_hpack_encoder_test() {
+pub fn open_stream_updates_hpack_encoder_test() {
   let conn = helper.new_connection(Client, Connected)
   let headers = [
     Header(":method", "GET", WithIndexing),
     Header("custom-header", "custom-value", WithIndexing),
   ]
   let assert Ok(#(conn, _events, first_send)) =
-    send_headers(conn, headers, False)
+    open_stream(conn, headers, False)
   // Send the same headers again - HPACK should produce smaller output
   // because "custom-header: custom-value" is now in the dynamic table
   let assert Ok(#(_conn, _events, second_send)) =
-    send_headers(conn, headers, False)
+    open_stream(conn, headers, False)
   assert bit_array.byte_size(second_send) < bit_array.byte_size(first_send)
 }
 
 // Sending headers with empty list produces a valid frame
-pub fn send_headers_empty_headers_test() {
+pub fn open_stream_empty_headers_test() {
   let conn = helper.new_connection(Client, Connected)
-  let assert Ok(#(conn, _events, to_send)) = send_headers(conn, [], False)
+  let assert Ok(#(conn, _events, to_send)) = open_stream(conn, [], False)
   assert to_send != <<>>
   let assert Ok(stream) = dict.get(conn.streams, 1)
   assert stream.state == Open

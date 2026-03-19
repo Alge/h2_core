@@ -2,7 +2,7 @@ import gleam/dict
 import gleam/option.{None, Some}
 import h2_core.{
   Client, Connected, ConnectionError, Header, RemoteSettingsChanged, Server,
-  SettingsAcknowledged, Stream, WithIndexing, receive_data, send_headers,
+  SettingsAcknowledged, Stream, WithIndexing, open_stream, receive_data,
   send_settings,
 }
 import h2_frame
@@ -280,7 +280,7 @@ pub fn receive_settings_initial_window_size_adjusts_existing_streams_test() {
 
   // Open stream 1 on the server
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.send_window_size == 65_535
@@ -307,7 +307,7 @@ pub fn receive_settings_initial_window_size_overflow_is_flow_control_error_test(
 
   // Open stream 1 on the server (default send_window_size = 65535)
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   // Peer sends SETTINGS with INITIAL_WINDOW_SIZE = 2^31-1
@@ -323,7 +323,7 @@ pub fn receive_settings_initial_window_size_overflow_is_flow_control_error_test(
   // Start fresh with a known state
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(_client2, _events, headers2)) =
-    send_headers(
+    open_stream(
       helper.new_connection(Client, Connected),
       [Header(":method", "GET", WithIndexing)],
       False,
@@ -410,7 +410,7 @@ pub fn settings_ack_initial_window_size_adjusts_recv_window_test() {
 
   // Client opens stream 1
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.recv_window_size == 65_535
@@ -443,7 +443,7 @@ pub fn receive_settings_initial_window_size_can_go_negative_test() {
 
   // Client opens stream 1 (default send_window_size = 65535)
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   // Peer sends SETTINGS with INITIAL_WINDOW_SIZE=0
@@ -474,7 +474,7 @@ pub fn receive_settings_initial_window_size_negative_window_tracked_test() {
 
   // Client opens stream 1 (send_window_size = 65535)
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   // Simulate having sent 60000 bytes: send_window_size = 65535 - 60000 = 5535
