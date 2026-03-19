@@ -740,11 +740,15 @@ pub fn send_push_promise(
 }
 
 pub fn send_data(
-  _conn: Connection,
-  _stream_id: Int,
-  _data: BitArray,
-  _end_stream: Bool,
+  conn _conn: Connection,
+  stream_id stream_id: Int,
+  data _data: BitArray,
+  end_stream _end_stream: Bool,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+  use <- bool.guard(
+    stream_id == 0,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
   todo
 }
 
