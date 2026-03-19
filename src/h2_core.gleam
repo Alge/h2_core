@@ -1,3 +1,4 @@
+import gleam/int
 import alpacki
 import gleam/bit_array
 import gleam/bool
@@ -752,7 +753,7 @@ pub fn get_send_window_size(
   stream_id stream_id: Int,
 ) -> Result(Int, Nil) {
   case dict.get(conn.streams, stream_id) {
-    Ok(stream) -> Ok(stream.send_window_size)
+    Ok(stream) -> Ok(int.min(stream.send_window_size, conn.send_window_size))
     Error(Nil) -> Error(Nil)
   }
 }
