@@ -684,7 +684,6 @@ pub fn open_stream(
   headers: List(Header),
   end_stream: Bool,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
-
   let stream = new_stream()
   let #(conn, stream_id) = add_stream(conn, stream)
 
@@ -698,16 +697,19 @@ pub fn send_headers(
   headers headers: List(Header),
   end_stream end_stream: Bool,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
-  use <- bool.guard(stream_id == 0, Error(ConnectionError(h2_frame.ProtocolError)))
+  use <- bool.guard(
+    stream_id == 0,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
 
   use stream <- result.try(
     dict.get(conn.streams, stream_id)
-    |> result.replace_error(StreamError(stream_id, h2_frame.StreamClosed))
+    |> result.replace_error(StreamError(stream_id, h2_frame.StreamClosed)),
   )
 
   use <- bool.guard(
     stream.state == HalfClosedLocal || stream.state == Closed,
-    Error(StreamError(stream_id, h2_frame.StreamClosed))
+    Error(StreamError(stream_id, h2_frame.StreamClosed)),
   )
 
   use #(conn, encoded_headers) <- result.try(encode_headers(conn, headers))
@@ -717,7 +719,8 @@ pub fn send_headers(
     False -> Stream(..new_stream(), state: Open)
   }
 
-  let conn = Connection(..conn, streams: dict.insert(conn.streams, stream_id, stream))
+  let conn =
+    Connection(..conn, streams: dict.insert(conn.streams, stream_id, stream))
 
   case chunk_bytes(encoded_headers, conn.remote_settings.max_frame_size, []) {
     [] -> {
