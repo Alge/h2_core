@@ -226,7 +226,7 @@ pub fn server_receives_preface_magic_followed_by_headers_test() {
   let conn = helper.new_connection(Server, AwaitingPreface)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, headers_frame)) =
-    h2_core.send_headers(
+    h2_core.open_stream(
       client,
       [h2_core.Header(":method", "GET", h2_core.WithIndexing)],
       False,

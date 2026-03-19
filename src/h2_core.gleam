@@ -684,24 +684,40 @@ pub fn open_stream(
   headers: List(Header),
   end_stream: Bool,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
-  // This is incorrect behavior, but will make tests pass for now
-  // We need to refactor send_headers to take in the stream ID, allowing servers to send headers on existing streams
-  send_headers(conn, headers, end_stream)
+
+  let stream = new_stream()
+  let #(conn, stream_id) = add_stream(conn, stream)
+
+  // Send initial headers
+  send_headers(conn, stream_id, headers, end_stream)
 }
 
 pub fn send_headers(
-  conn: Connection,
-  headers: List(Header),
-  end_stream: Bool,
+  conn conn: Connection,
+  stream_id stream_id: Int,
+  headers headers: List(Header),
+  end_stream end_stream: Bool,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+  use <- bool.guard(stream_id == 0, Error(ConnectionError(h2_frame.ProtocolError)))
+
+  use stream <- result.try(
+    dict.get(conn.streams, stream_id)
+    |> result.replace_error(StreamError(stream_id, h2_frame.StreamClosed))
+  )
+
+  use <- bool.guard(
+    stream.state == HalfClosedLocal || stream.state == Closed,
+    Error(StreamError(stream_id, h2_frame.StreamClosed))
+  )
+
+  use #(conn, encoded_headers) <- result.try(encode_headers(conn, headers))
+
   let stream = case end_stream {
     True -> Stream(..new_stream(), state: HalfClosedLocal)
     False -> Stream(..new_stream(), state: Open)
   }
 
-  let #(conn, stream_id) = add_stream(conn, stream)
-
-  use #(conn, encoded_headers) <- result.try(encode_headers(conn, headers))
+  let conn = Connection(..conn, streams: dict.insert(conn.streams, stream_id, stream))
 
   case chunk_bytes(encoded_headers, conn.remote_settings.max_frame_size, []) {
     [] -> {

@@ -1,8 +1,8 @@
 import gleam/dict
 import h2_core.{
   Client, Connected, ConnectionError, HalfClosedLocal, HalfClosedRemote, Header,
-  HeadersReceived, Open, Server, StreamReset, WithIndexing, receive_data,
-  open_stream, send_window_update,
+  HeadersReceived, Open, Server, StreamReset, WithIndexing, open_stream,
+  receive_data, send_window_update,
 }
 import h2_frame
 import helper
