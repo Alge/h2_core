@@ -740,7 +740,7 @@ pub fn send_push_promise(
 }
 
 pub fn send_data(
-  conn _conn: Connection,
+  conn conn: Connection,
   stream_id stream_id: Int,
   data _data: BitArray,
   end_stream _end_stream: Bool,
@@ -749,7 +749,14 @@ pub fn send_data(
     stream_id == 0,
     Error(ConnectionError(h2_frame.ProtocolError)),
   )
-  todo
+
+  case dict.get(conn.streams, stream_id) {
+    Ok(stream) -> {
+      todo
+    }
+    Error(Nil) ->
+      Error(StreamError(stream_id: stream_id, error_code: h2_frame.StreamClosed))
+  }
 }
 
 pub fn get_send_window_size(
