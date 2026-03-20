@@ -1,9 +1,10 @@
 import gleam/dict
 import gleam/option.{None, Some}
 import h2_core.{
-  type Connection, Client, Connected, ConnectionError, DataReceived,
-  HalfClosedRemote, Header, Open, Server, Stream, StreamError, StreamReset,
-  WithIndexing, open_stream, receive_data, send_headers,
+  type Connection, Client, Closed, Connected, ConnectionError, DataReceived,
+  HalfClosedRemote, Header, Open, ReservedLocal, ReservedRemote, Server, Stream,
+  StreamError, StreamReset, WithIndexing, open_stream, receive_data,
+  send_headers,
 }
 import h2_frame
 import helper
@@ -292,7 +293,7 @@ pub fn send_data_on_open_stream_test() {
   let assert Ok(#(server, _events, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(#(server, _events, to_send)) =
-    h2_core.send_data(server, 1, <<"hello":utf8>>, False)
+    h2_core.send_data(server, 1, <<"hello":utf8>>, False, None)
   let assert Ok(expected) =
     h2_frame.encode_data(
       stream_id: 1,
@@ -311,7 +312,7 @@ pub fn send_data_with_end_stream_test() {
   let assert Ok(#(server, _events, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) =
-    h2_core.send_data(server, 1, <<"done":utf8>>, True)
+    h2_core.send_data(server, 1, <<"done":utf8>>, True, None)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == h2_core.HalfClosedLocal
 }
@@ -332,7 +333,7 @@ pub fn send_data_exceeding_stream_window_is_error_test() {
       ),
     )
   let assert Error(ConnectionError(h2_frame.FlowControlError)) =
-    h2_core.send_data(server, 1, <<"too much data":utf8>>, False)
+    h2_core.send_data(server, 1, <<"too much data":utf8>>, False, None)
 }
 
 pub fn send_data_exceeding_connection_window_is_error_test() {
@@ -342,14 +343,14 @@ pub fn send_data_exceeding_connection_window_is_error_test() {
   // Set connection send_window_size to 5
   let server = h2_core.Connection(..server, send_window_size: 5)
   let assert Error(ConnectionError(h2_frame.FlowControlError)) =
-    h2_core.send_data(server, 1, <<"too much data":utf8>>, False)
+    h2_core.send_data(server, 1, <<"too much data":utf8>>, False, None)
 }
 
 // send_data on stream 0 should error
 pub fn send_data_on_stream_zero_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
-    h2_core.send_data(server, 0, <<"bad":utf8>>, False)
+    h2_core.send_data(server, 0, <<"bad":utf8>>, False, None)
 }
 
 // RFC 9113 Section 6.1 - DATA can only be sent on open or half-closed (remote).
@@ -357,7 +358,8 @@ pub fn send_data_on_stream_zero_is_error_test() {
 pub fn send_data_on_idle_stream_is_error_test() {
   let server = helper.new_connection(Server, Connected)
   // Stream 99 was never opened — it is in idle state
-  let assert Error(_) = h2_core.send_data(server, 99, <<"bad":utf8>>, False)
+  let assert Error(_) =
+    h2_core.send_data(server, 99, <<"bad":utf8>>, False, None)
 }
 
 // send_data on a stream that is not open or half-closed (remote) should error
@@ -369,18 +371,59 @@ pub fn send_data_on_half_closed_local_is_error_test() {
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == h2_core.HalfClosedLocal
   let assert Error(StreamError(1, h2_frame.StreamClosed)) =
-    h2_core.send_data(server, 1, <<"bad":utf8>>, False)
+    h2_core.send_data(server, 1, <<"bad":utf8>>, False, None)
 }
 
-// send_data should decrement both stream and connection send_window_size
-pub fn send_data_decrements_send_window_test() {
+// RFC 9113 Section 5.1 (closed) - "An endpoint MUST NOT send frames other
+// than PRIORITY on a closed stream."
+pub fn send_data_on_closed_stream_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let server = helper.set_stream_state(server, 1, Closed)
+  let assert Error(StreamError(1, h2_frame.StreamClosed)) =
+    h2_core.send_data(server, 1, <<"bad":utf8>>, False, None)
+}
+
+// RFC 9113 Section 5.1 (reserved local) - "An endpoint MUST NOT send any
+// type of frame other than HEADERS, RST_STREAM, or PRIORITY in this state."
+pub fn send_data_on_reserved_local_stream_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let server = helper.set_stream_state(server, 2, ReservedLocal)
+  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+    h2_core.send_data(server, 2, <<"bad":utf8>>, False, None)
+}
+
+// RFC 9113 Section 5.1 (reserved remote) - "An endpoint MUST NOT send any
+// type of frame other than RST_STREAM, WINDOW_UPDATE, or PRIORITY in this
+// state."
+pub fn send_data_on_reserved_remote_stream_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let server = helper.set_stream_state(server, 2, ReservedRemote)
+  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+    h2_core.send_data(server, 2, <<"bad":utf8>>, False, None)
+}
+
+// RFC 9113 Section 5.2.1 - "A sender that sends a FLOW_CONTROLLED frame
+// reduces the available space in both flow-control windows."
+// send_data should decrement the stream send_window_size.
+pub fn send_data_decrements_stream_send_window_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _events, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) =
-    h2_core.send_data(server, 1, <<"hello world":utf8>>, False)
+    h2_core.send_data(server, 1, <<"hello world":utf8>>, False, None)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.send_window_size == 65_535 - 11
+}
+
+// RFC 9113 Section 5.2.1 - "A sender that sends a FLOW_CONTROLLED frame
+// reduces the available space in both flow-control windows."
+// send_data should decrement the connection send_window_size.
+pub fn send_data_decrements_connection_send_window_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(#(server, _events, _to_send)) =
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) =
+    h2_core.send_data(server, 1, <<"hello world":utf8>>, False, None)
   assert server.send_window_size == 65_535 - 11
 }
 
@@ -390,7 +433,7 @@ pub fn send_data_empty_payload_test() {
   let assert Ok(#(server, _events, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(#(_server, _events, to_send)) =
-    h2_core.send_data(server, 1, <<>>, False)
+    h2_core.send_data(server, 1, <<>>, False, None)
   let assert Ok(expected) =
     h2_frame.encode_data(
       stream_id: 1,
@@ -407,9 +450,213 @@ pub fn send_data_empty_with_end_stream_closes_test() {
   let assert Ok(#(server, _events, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) =
-    h2_core.send_data(server, 1, <<>>, True)
+    h2_core.send_data(server, 1, <<>>, True, None)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == h2_core.HalfClosedLocal
+}
+
+// =============================================================================
+// Sending DATA with padding
+// =============================================================================
+
+// RFC 9113 Section 6.1 - "DATA frames MAY also contain padding."
+// A padded DATA frame should be correctly encoded with the padding included.
+pub fn send_padded_data_frame_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(#(server, _events, _to_send)) =
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+  let assert Ok(#(_server, _events, to_send)) =
+    h2_core.send_data(server, 1, <<"hello":utf8>>, False, Some(10))
+  // Manually crafted padded DATA frame:
+  // Length=16 (1 pad_length + 5 data + 10 padding), Type=0x00,
+  // Flags=0x08 (PADDED), Stream ID=1, Pad Length=10, then data, then 10 zero bytes
+  let expected = <<
+    16:size(24),
+    0x00:size(8),
+    0x08:size(8),
+    0:size(1),
+    1:size(31),
+    10:size(8),
+    "hello":utf8,
+    0:size(80),
+  >>
+  assert to_send == expected
+}
+
+// RFC 9113 Section 6.1 - "The entire DATA frame payload is included in flow
+// control, including the Pad Length and Padding fields if present."
+// When sending a padded DATA frame, the stream flow-control window MUST be
+// decremented by the entire payload: pad_length(1) + data + padding.
+pub fn send_padded_data_decrements_stream_send_window_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(#(server, _events, _to_send)) =
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+  // 5 bytes data + 1 byte pad_length + 10 bytes padding = 16 bytes total payload
+  let assert Ok(#(server, _events, _to_send)) =
+    h2_core.send_data(server, 1, <<"hello":utf8>>, False, Some(10))
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.send_window_size == 65_535 - 16
+}
+
+// RFC 9113 Section 6.1 - "The entire DATA frame payload is included in flow
+// control, including the Pad Length and Padding fields if present."
+// When sending a padded DATA frame, the connection flow-control window MUST be
+// decremented by the entire payload: pad_length(1) + data + padding.
+pub fn send_padded_data_decrements_connection_send_window_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(#(server, _events, _to_send)) =
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+  // 5 bytes data + 1 byte pad_length + 10 bytes padding = 16 bytes total payload
+  let assert Ok(#(server, _events, _to_send)) =
+    h2_core.send_data(server, 1, <<"hello":utf8>>, False, Some(10))
+  assert server.send_window_size == 65_535 - 16
+}
+
+// RFC 9113 Section 4.2 - "An endpoint MUST send an error code of
+// FRAME_SIZE_ERROR if a frame exceeds the size defined in
+// SETTINGS_MAX_FRAME_SIZE"
+// Data alone exceeding the max frame size (default 16384) must be rejected.
+pub fn send_data_exceeding_max_frame_size_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(#(server, _events, _to_send)) =
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+  // Default max frame size is 16384. Send 16385 bytes — one over the limit.
+  let big_data = <<0:size(16_385)-unit(8)>>
+  let assert Error(ConnectionError(h2_frame.FrameSizeError)) =
+    h2_core.send_data(server, 1, big_data, False, None)
+}
+
+// RFC 9113 Section 4.2 - "An endpoint MUST send an error code of
+// FRAME_SIZE_ERROR if a frame exceeds the size defined in
+// SETTINGS_MAX_FRAME_SIZE"
+// Section 6.1 - The entire DATA frame payload (including Pad Length and
+// Padding fields) counts toward the frame size limit.
+// When data + padding + pad_length field exceeds SETTINGS_MAX_FRAME_SIZE,
+// send_data MUST fail rather than produce an oversized frame.
+pub fn send_padded_data_exceeding_max_frame_size_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(#(server, _events, _to_send)) =
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+  // Default max frame size is 16384.
+  // Send 16380 bytes of data with 10 bytes of padding:
+  // payload = 1 (pad_length) + 16380 (data) + 10 (padding) = 16391 > 16384
+  let big_data = <<0:size(16_380)-unit(8)>>
+  let assert Error(ConnectionError(h2_frame.FrameSizeError)) =
+    h2_core.send_data(server, 1, big_data, False, Some(10))
+}
+
+// RFC 9113 Section 6.1 - "The entire DATA frame payload is included in flow
+// control, including the Pad Length and Padding fields if present."
+// When sending padded DATA that would exceed the stream flow-control window
+// (counting the full payload including padding), it MUST be rejected.
+pub fn send_padded_data_exceeding_stream_window_is_flow_control_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(#(server, _events, _to_send)) =
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+  // Set stream send_window_size to 10 bytes
+  let server =
+    h2_core.Connection(
+      ..server,
+      streams: dict.insert(
+        server.streams,
+        1,
+        Stream(state: Open, send_window_size: 10, recv_window_size: 65_535),
+      ),
+    )
+  // 3 bytes data fits in the window alone, but with padding:
+  // payload = 1 (pad_length) + 3 (data) + 10 (padding) = 14 > 10
+  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+    h2_core.send_data(server, 1, <<"hey":utf8>>, False, Some(10))
+}
+
+// RFC 9113 Section 6.1 - "The entire DATA frame payload is included in flow
+// control, including the Pad Length and Padding fields if present."
+// The Pad Length field itself (1 byte) counts toward flow control. This test
+// ensures that data + padding fits in the window but the extra pad_length
+// byte pushes it over.
+pub fn send_padded_data_pad_length_field_counts_toward_flow_control_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(#(server, _events, _to_send)) =
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+  // Set stream send_window_size to exactly 13 bytes
+  let server =
+    h2_core.Connection(
+      ..server,
+      streams: dict.insert(
+        server.streams,
+        1,
+        Stream(state: Open, send_window_size: 13, recv_window_size: 65_535),
+      ),
+    )
+  // 3 bytes data + 10 bytes padding = 13, which fits the window.
+  // But the full payload is 1 (pad_length) + 3 (data) + 10 (padding) = 14 > 13.
+  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+    h2_core.send_data(server, 1, <<"hey":utf8>>, False, Some(10))
+}
+
+// RFC 9113 Section 6.1 - "The entire DATA frame payload is included in flow
+// control, including the Pad Length and Padding fields if present."
+// When sending padded DATA that would exceed the connection flow-control window
+// (counting the full payload including padding), it MUST be rejected.
+pub fn send_padded_data_exceeding_connection_window_is_flow_control_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(#(server, _events, _to_send)) =
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+  // Set connection send_window_size to 10 bytes
+  let server = h2_core.Connection(..server, send_window_size: 10)
+  // 3 bytes data fits in the window alone, but with padding:
+  // payload = 1 (pad_length) + 3 (data) + 10 (padding) = 14 > 10
+  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+    h2_core.send_data(server, 1, <<"hey":utf8>>, False, Some(10))
+}
+
+// RFC 9113 Section 5.2.1 - "A sender MUST NOT allow a flow-control window
+// to exceed 2^31-1 octets."
+// Sending data exactly equal to the window size should succeed.
+pub fn send_data_exactly_at_window_boundary_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(#(server, _events, _to_send)) =
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+  // Set both windows to exactly 5 bytes
+  let server =
+    h2_core.Connection(
+      ..server,
+      send_window_size: 5,
+      streams: dict.insert(
+        server.streams,
+        1,
+        Stream(state: Open, send_window_size: 5, recv_window_size: 65_535),
+      ),
+    )
+  let assert Ok(#(server, _events, _to_send)) =
+    h2_core.send_data(server, 1, <<"hello":utf8>>, False, None)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.send_window_size == 0
+  assert server.send_window_size == 0
+}
+
+// RFC 9113 Section 5.2 - Flow control is based on both stream and connection
+// windows. When the connection window is smaller than the stream window,
+// sending data that fits the stream window but exceeds the connection window
+// MUST be rejected.
+pub fn send_data_connection_window_smaller_than_stream_window_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(#(server, _events, _to_send)) =
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+  // Stream window is large, but connection window is only 5 bytes
+  let server =
+    h2_core.Connection(
+      ..server,
+      send_window_size: 5,
+      streams: dict.insert(
+        server.streams,
+        1,
+        Stream(state: Open, send_window_size: 65_535, recv_window_size: 65_535),
+      ),
+    )
+  // 13 bytes > 5 byte connection window
+  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+    h2_core.send_data(server, 1, <<"too much data":utf8>>, False, None)
 }
 
 // =============================================================================
@@ -623,7 +870,7 @@ pub fn send_data_on_half_closed_remote_succeeds_test() {
   let assert Ok(#(server, _events, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(#(_server, _events, _to_send)) =
-    h2_core.send_data(server, 1, <<"response":utf8>>, False)
+    h2_core.send_data(server, 1, <<"response":utf8>>, False, None)
 }
 
 // RFC 9113 Section 6.1 - DATA on a closed stream.

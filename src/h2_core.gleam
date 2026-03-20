@@ -792,26 +792,74 @@ pub fn send_push_promise(
 pub fn send_data(
   conn conn: Connection,
   stream_id stream_id: Int,
-  data _data: BitArray,
-  end_stream _end_stream: Bool,
+  data data: BitArray,
+  end_stream end_stream: Bool,
+  padding padding: option.Option(Int),
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+
   use <- bool.guard(
     stream_id == 0,
     Error(ConnectionError(h2_frame.ProtocolError)),
   )
 
-  case dict.get(conn.streams, stream_id) {
+  use _stream <- result.try(case dict.get(conn.streams, stream_id) {
     Ok(stream) -> {
-      // use <- bool.guard(
-      //   stream.state == HalfClosedLocal,
-      //   Error(StreamError(stream_id, h2_frame.StreamClosed)),
-      // )
-
-      todo
+      use <- bool.guard(
+        stream.state == HalfClosedLocal || stream.state == Closed,
+        Error(StreamError(stream_id, h2_frame.StreamClosed)),
+      )
+      use <- bool.guard(
+        stream.state == ReservedLocal || stream.state == ReservedRemote,
+        Error(ConnectionError(h2_frame.ProtocolError)),
+      )
+      Ok(stream)
     }
     Error(Nil) ->
       Error(StreamError(stream_id: stream_id, error_code: h2_frame.StreamClosed))
+  })
+
+
+  use max_allowed_window_size <- result.try(
+    get_send_window_size(conn: conn, stream_id: stream_id)
+    |> result.replace_error(StreamError(
+      stream_id: stream_id,
+      error_code: h2_frame.StreamClosed,
+    )),
+  )
+
+  let padding_length = case padding {
+    // We need to count both the actual padding bytes and
+    // the extra pad length byte that gets added
+    option.Some(value) -> value + 1
+    option.None -> 0
   }
+
+  use <- bool.guard(
+    bit_array.byte_size(data) + padding_length > conn.remote_settings.max_frame_size,
+    Error(ConnectionError(h2_frame.FrameSizeError))
+  )
+
+  use <- bool.guard(
+    bit_array.byte_size(data) + padding_length > max_allowed_window_size,
+    Error(ConnectionError(h2_frame.FlowControlError)),
+  )
+
+  use encoded_frame <- result.try(
+    h2_frame.encode_data(
+      stream_id: stream_id,
+      end_stream: end_stream,
+      data: data,
+      padding: option.None,
+    )
+    |> result.map_error(map_frame_error),
+  )
+
+  Ok(#(
+    conn,
+    [],
+    encoded_frame
+  ))
+
 }
 
 pub fn get_send_window_size(
