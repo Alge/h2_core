@@ -680,19 +680,69 @@ fn handle_decoded_headers(
   ))
 }
 
-pub fn send_headers(
+pub fn open_stream(
   conn: Connection,
   headers: List(Header),
   end_stream: Bool,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
-  let stream = case end_stream {
-    True -> Stream(..new_stream(), state: HalfClosedLocal)
-    False -> Stream(..new_stream(), state: Open)
-  }
-
+  let stream = new_stream()
   let #(conn, stream_id) = add_stream(conn, stream)
 
+  // Send initial headers
+  send_headers(conn, stream_id, headers, end_stream)
+}
+
+pub fn send_headers(
+  conn conn: Connection,
+  stream_id stream_id: Int,
+  headers headers: List(Header),
+  end_stream end_stream: Bool,
+) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+  // headers cannot be sent on the connection level, it must be on a stream
+  use <- bool.guard(
+    stream_id == 0,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  // headers must be sent on a existing stream
+  use stream <- result.try(
+    dict.get(conn.streams, stream_id)
+    |> result.replace_error(StreamError(stream_id, h2_frame.StreamClosed)),
+  )
+
+  // headers cannot be sent on a ReservedRemote stream, those are initiated by the other party!
+  use <- bool.guard(
+    stream.state == ReservedRemote,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  // Headers must not be sent on a stream we have initiated closing of or a closed stream
+  use <- bool.guard(
+    stream.state == HalfClosedLocal || stream.state == Closed,
+    Error(StreamError(stream_id, h2_frame.StreamClosed)),
+  )
+
   use #(conn, encoded_headers) <- result.try(encode_headers(conn, headers))
+
+  let new_state = case stream.state {
+    HalfClosedRemote -> {
+      case end_stream {
+        True -> Closed
+        False -> stream.state
+      }
+    }
+    ReservedLocal -> HalfClosedRemote
+    _ ->
+      case end_stream {
+        True -> HalfClosedLocal
+        False -> Open
+      }
+  }
+
+  let stream = Stream(..stream, state: new_state)
+
+  let conn =
+    Connection(..conn, streams: dict.insert(conn.streams, stream_id, stream))
 
   case chunk_bytes(encoded_headers, conn.remote_settings.max_frame_size, []) {
     [] -> {
