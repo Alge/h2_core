@@ -3,7 +3,7 @@ import gleam/option.{None, Some}
 import h2_core.{
   type Connection, Client, Connected, ConnectionError, DataReceived,
   HalfClosedRemote, Header, Open, Server, Stream, StreamError, StreamReset,
-  WithIndexing, receive_data, send_headers,
+  WithIndexing, open_stream, receive_data, send_headers,
 }
 import h2_frame
 import helper
@@ -13,7 +13,7 @@ fn server_with_open_stream() -> #(Connection, Connection) {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   #(server, client)
 }
@@ -24,7 +24,7 @@ fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], True)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], True)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   #(server, client)
 }
@@ -94,12 +94,12 @@ pub fn receive_data_with_end_stream_on_half_closed_local_closes_stream_test() {
   let client = helper.new_connection(Client, Connected)
   // Client opens stream 1
   let assert Ok(#(client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   // Server sends headers with END_STREAM, making it half-closed (local)
   let assert Ok(#(server, _events, response_headers)) =
-    send_headers(server, [Header(":status", "200", WithIndexing)], True)
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
   let assert Ok(#(_client, _events, _to_send)) =
     receive_data(client, response_headers)
   let assert Ok(stream) = dict.get(server.streams, 1)
@@ -290,7 +290,7 @@ pub fn send_data_on_open_stream_test() {
   let #(server, _client) = server_with_open_stream()
   // Server sends response headers first (non-END_STREAM)
   let assert Ok(#(server, _events, _to_send)) =
-    send_headers(server, [Header(":status", "200", WithIndexing)], False)
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(#(server, _events, to_send)) =
     h2_core.send_data(server, 1, <<"hello":utf8>>, False)
   let assert Ok(expected) =
@@ -309,7 +309,7 @@ pub fn send_data_on_open_stream_test() {
 pub fn send_data_with_end_stream_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _events, _to_send)) =
-    send_headers(server, [Header(":status", "200", WithIndexing)], False)
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) =
     h2_core.send_data(server, 1, <<"done":utf8>>, True)
   let assert Ok(stream) = dict.get(server.streams, 1)
@@ -320,7 +320,7 @@ pub fn send_data_with_end_stream_test() {
 pub fn send_data_exceeding_stream_window_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _events, _to_send)) =
-    send_headers(server, [Header(":status", "200", WithIndexing)], False)
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   // Set stream send_window_size to 5
   let server =
     h2_core.Connection(
@@ -338,7 +338,7 @@ pub fn send_data_exceeding_stream_window_is_error_test() {
 pub fn send_data_exceeding_connection_window_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _events, _to_send)) =
-    send_headers(server, [Header(":status", "200", WithIndexing)], False)
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   // Set connection send_window_size to 5
   let server = h2_core.Connection(..server, send_window_size: 5)
   let assert Error(ConnectionError(h2_frame.FlowControlError)) =
@@ -365,7 +365,7 @@ pub fn send_data_on_half_closed_local_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   // Server sends headers with END_STREAM
   let assert Ok(#(server, _events, _to_send)) =
-    send_headers(server, [Header(":status", "200", WithIndexing)], True)
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == h2_core.HalfClosedLocal
   let assert Error(StreamError(1, h2_frame.StreamClosed)) =
@@ -376,7 +376,7 @@ pub fn send_data_on_half_closed_local_is_error_test() {
 pub fn send_data_decrements_send_window_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _events, _to_send)) =
-    send_headers(server, [Header(":status", "200", WithIndexing)], False)
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) =
     h2_core.send_data(server, 1, <<"hello world":utf8>>, False)
   let assert Ok(stream) = dict.get(server.streams, 1)
@@ -388,7 +388,7 @@ pub fn send_data_decrements_send_window_test() {
 pub fn send_data_empty_payload_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _events, _to_send)) =
-    send_headers(server, [Header(":status", "200", WithIndexing)], False)
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(#(_server, _events, to_send)) =
     h2_core.send_data(server, 1, <<>>, False)
   let assert Ok(expected) =
@@ -405,7 +405,7 @@ pub fn send_data_empty_payload_test() {
 pub fn send_data_empty_with_end_stream_closes_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _events, _to_send)) =
-    send_headers(server, [Header(":status", "200", WithIndexing)], False)
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) =
     h2_core.send_data(server, 1, <<>>, True)
   let assert Ok(stream) = dict.get(server.streams, 1)
@@ -621,7 +621,7 @@ pub fn send_data_on_half_closed_remote_succeeds_test() {
   let #(server, _client) = server_with_half_closed_remote_stream()
   // Stream 1 is half-closed (remote) — server can still send
   let assert Ok(#(server, _events, _to_send)) =
-    send_headers(server, [Header(":status", "200", WithIndexing)], False)
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(#(_server, _events, _to_send)) =
     h2_core.send_data(server, 1, <<"response":utf8>>, False)
 }
