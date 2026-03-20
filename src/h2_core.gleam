@@ -723,10 +723,22 @@ pub fn send_headers(
 
   use #(conn, encoded_headers) <- result.try(encode_headers(conn, headers))
 
-  let stream = case end_stream {
-    True -> Stream(..new_stream(), state: HalfClosedLocal)
-    False -> Stream(..new_stream(), state: Open)
+  let new_state = case stream.state {
+    HalfClosedRemote -> {
+      case end_stream {
+        True -> Closed
+        False -> stream.state
+      }
+    }
+    ReservedLocal -> HalfClosedRemote
+    _ ->
+      case end_stream {
+        True -> HalfClosedLocal
+        False -> Open
+      }
   }
+
+  let stream = Stream(..stream, state: new_state)
 
   let conn =
     Connection(..conn, streams: dict.insert(conn.streams, stream_id, stream))
