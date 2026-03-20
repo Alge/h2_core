@@ -16,7 +16,7 @@ import helper
 fn server_with_open_stream() -> #(Connection, Connection) {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, _events, request)) =
+  let assert Ok(#(client, _events, request)) =
     open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, request)
   #(server, client)
@@ -210,7 +210,7 @@ pub fn send_headers_updates_hpack_encoder_test() {
   let assert Ok(#(server, _events, first)) =
     send_headers(server, 1, headers, False)
   // Same headers on stream 3 — HPACK should produce smaller output
-  let assert Ok(#(_server, _events, second)) =
+  let assert Ok(#(server, _events, second)) =
     send_headers(server, 3, headers, False)
   // Second encoding should be smaller due to HPACK dynamic table
   let assert Ok(#(first_frame, _)) = h2_frame.extract_frame(first, 16_384)
