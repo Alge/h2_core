@@ -1560,6 +1560,29 @@ fn parse_loop(
               )
             }
 
+            h2_frame.PushPromise(
+              stream_id,
+              end_headers,
+              promised_stream_id,
+              field_block_fragment,
+            ) -> {
+              // Can only be received by clients
+              use <- bool.guard(
+                conn.role == Server,
+                Error(ConnectionError(h2_frame.ProtocolError)),
+              )
+
+              parse_loop(
+                conn,
+                [
+                  // TODO add acual headers
+                  PushPromiseReceived(stream_id, promised_stream_id, []),
+                  ..events
+                ],
+                to_send,
+              )
+            }
+
             // Ignore PRIORITY frames
             h2_frame.Priority(_, _, _, _) -> {
               parse_loop(conn, events, to_send)
