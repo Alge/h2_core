@@ -14,6 +14,10 @@ pub fn request_headers() -> List(Header) {
   ]
 }
 
+pub fn response_headers() -> List(Header) {
+  [Header(":status", "200", WithIndexing)]
+}
+
 pub fn new_connection(role: h2_core.Role, state: ConnectionState) -> Connection {
   let assert Ok(#(conn, _)) =
     h2_core.new_connection(role, h2_core.default_settings())

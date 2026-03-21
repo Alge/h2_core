@@ -1,5 +1,6 @@
 import gleam/bit_array
 import gleam/dict
+import gleam/list
 import gleam/option.{None}
 import h2_core.{
   Client, Connected, ConnectionError, HalfClosedLocal, Header, Open, Server,
@@ -63,10 +64,7 @@ pub fn open_stream_with_end_stream_test() {
 // The encoded frame can be parsed back by h2_frame
 pub fn open_stream_produces_parseable_frame_test() {
   let conn = helper.new_connection(Client, Connected)
-  let headers = [
-    Header(":method", "GET", WithIndexing),
-    Header(":path", "/", WithIndexing),
-  ]
+  let headers = helper.request_headers()
   let assert Ok(#(_conn, _events, to_send)) = open_stream(conn, headers, False)
   // Parse the frame back
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
@@ -100,10 +98,9 @@ pub fn open_stream_end_stream_in_frame_test() {
 // HPACK encoder state is updated after sending headers
 pub fn open_stream_updates_hpack_encoder_test() {
   let conn = helper.new_connection(Client, Connected)
-  let headers = [
-    Header(":method", "GET", WithIndexing),
+  let headers = list.append(helper.request_headers(), [
     Header("custom-header", "custom-value", WithIndexing),
-  ]
+  ])
   let assert Ok(#(conn, _events, first_send)) =
     open_stream(conn, headers, False)
   // Send the same headers again - HPACK should produce smaller output

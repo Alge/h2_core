@@ -931,6 +931,19 @@ pub fn send_headers(
     Error(StreamError(stream_id, h2_frame.StreamClosed)),
   )
 
+  // Validate outbound headers — clients send requests (validate with
+  // Server rules), servers send responses (validate with Client rules).
+  // RFC 9113 Section 8.3.1 / 8.3.2.
+  let outbound_role = case conn.role {
+    Server -> Client
+    Client -> Server
+  }
+  let is_trailer = end_stream && stream.state == Open
+  use <- bool.guard(
+    validate_headers(outbound_role, headers, is_trailer) == Error(Nil),
+    Error(StreamError(stream_id, h2_frame.ProtocolError)),
+  )
+
   use #(conn, encoded_headers) <- result.try(encode_headers(conn, headers))
 
   let new_state = case stream.state {
