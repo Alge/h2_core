@@ -1379,19 +1379,6 @@ fn parse_loop(
                 Error(Nil) -> Error(ConnectionError(h2_frame.ProtocolError))
               })
 
-              // Receiving data frames on a already HalfClosedRemote stream
-              // triggers a RST_STREAM
-              use <- bool.guard(
-                stream.state == HalfClosedRemote,
-                handle_rst_stream(
-                  conn: conn,
-                  stream_id: stream_id,
-                  error_code: h2_frame.StreamClosed,
-                  events: events,
-                  to_send: to_send,
-                ),
-              )
-
               let new_stream_state = case end_stream {
                 True -> {
                   case stream.state {
@@ -1432,6 +1419,19 @@ fn parse_loop(
                   ),
                   recv_window_size: new_conn_recv_window,
                 )
+
+              // Receiving data frames on a already HalfClosedRemote stream
+              // triggers a RST_STREAM
+              use <- bool.guard(
+                stream.state == HalfClosedRemote,
+                handle_rst_stream(
+                  conn: conn,
+                  stream_id: stream_id,
+                  error_code: h2_frame.StreamClosed,
+                  events: events,
+                  to_send: to_send,
+                ),
+              )
 
               use <- bool.guard(
                 new_stream_recv_window < 0,
