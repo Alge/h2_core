@@ -782,3 +782,44 @@ pub fn receive_multiple_push_promises_reserves_all_streams_test() {
   assert s4.state == ReservedRemote
   assert s6.state == ReservedRemote
 }
+
+// RFC 9113 Section 8.4.1 - "The header fields in PUSH_PROMISE and any
+// subsequent CONTINUATION frames MUST be a valid and complete set of
+// request header fields (Section 8.3.1)."
+//
+// A PUSH_PROMISE missing mandatory request pseudo-headers is malformed.
+pub fn receive_push_promise_missing_method_is_malformed_test() {
+  let #(_server, client) = server_with_open_stream()
+  // HPACK: :scheme https, :path / — missing :method
+  let bad_hpack = <<0x87, 0x84>>
+  let assert Ok(pp) =
+    h2_frame.encode_push_promise(
+      stream_id: 1,
+      end_headers: True,
+      promised_stream_id: 2,
+      field_block_fragment: bad_hpack,
+      padding: None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(client, pp)
+}
+
+// RFC 9113 Section 8.4.1 - PUSH_PROMISE with pseudo-header after
+// regular header is malformed.
+pub fn receive_push_promise_pseudo_after_regular_is_malformed_test() {
+  let #(_server, client) = server_with_open_stream()
+  // HPACK: regular header first, then pseudo-header
+  let bad_hpack = <<
+    0x40, 0x05, "x-foo":utf8, 0x03, "bar":utf8, 0x82,
+  >>
+  let assert Ok(pp) =
+    h2_frame.encode_push_promise(
+      stream_id: 1,
+      end_headers: True,
+      promised_stream_id: 2,
+      field_block_fragment: bad_hpack,
+      padding: None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(client, pp)
+}
