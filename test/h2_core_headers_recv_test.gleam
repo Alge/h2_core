@@ -993,6 +993,13 @@ pub fn receive_response_missing_status_is_malformed_test() {
 // (Section 8.1.1)."
 //
 // An unrecognized pseudo-header like :unknown is invalid.
+//
+// NOTE: This test currently fails because alpacki rejects literal header
+// names starting with ":" at the HPACK layer (InvalidHeaderName →
+// CompressionError), before our header validation runs. This is an
+// alpacki bug — HPACK (RFC 7541) allows any byte in header names.
+// The correct behavior is a stream error (PROTOCOL_ERROR), not a
+// connection error (COMPRESSION_ERROR).
 pub fn receive_headers_with_unrecognized_pseudo_header_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   let bad_hpack = <<

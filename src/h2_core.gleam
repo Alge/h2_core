@@ -439,6 +439,31 @@ fn validate_headers(
 
       use <- bool.guard(is_pseudo && is_trailer, Error(Nil))
 
+      // TODO: Enable this when non-valid headers are allowed through alpacki
+      // use <- bool.guard(
+      //   is_pseudo
+      //     && !list.contains(
+      //     [":method", ":scheme", ":path", ":authority", ":status", ":protocol"],
+      //     header.name,
+      //   ),
+      //   Error(Nil),
+      // )
+
+      use <- bool.guard(
+        !is_pseudo
+          && list.contains(
+          [
+            "connection",
+            "transfer-encoding",
+            "keep-alive",
+            "proxy-connection",
+            "upgrade",
+          ],
+          header.name,
+        ),
+        Error(Nil),
+      )
+
       let #(seen_pseudos, seen_regular) = case is_pseudo {
         True -> #([header.name, ..seen_pseudos], seen_regular)
         False -> #(seen_pseudos, True)
