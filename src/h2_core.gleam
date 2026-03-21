@@ -786,6 +786,11 @@ pub fn send_push_promise(
     Error(ConnectionError(h2_frame.ProtocolError)),
   )
 
+  use <- bool.guard(
+    !conn.remote_settings.enable_push,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
   todo
 }
 
