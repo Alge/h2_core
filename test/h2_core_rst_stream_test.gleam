@@ -36,6 +36,19 @@ pub fn send_rst_stream_on_stream_zero_is_error_test() {
     send_rst_stream(conn, 0, h2_frame.Cancel)
 }
 
+// RFC 9113 Section 5.1 - "Either endpoint can send a RST_STREAM frame
+// from this state, causing it to transition immediately to 'closed'."
+pub fn send_rst_stream_transitions_to_closed_test() {
+  let conn = helper.new_connection(Client, Connected)
+  let assert Ok(#(conn, _events, _to_send)) = open_stream(conn, [], False)
+  let assert Ok(stream) = dict.get(conn.streams, 1)
+  assert stream.state == Open
+  let assert Ok(#(conn, _events, _to_send)) =
+    send_rst_stream(conn, 1, h2_frame.Cancel)
+  let assert Ok(stream) = dict.get(conn.streams, 1)
+  assert stream.state == Closed
+}
+
 // RFC 9113 Section 6.4 - RST_STREAM MUST NOT be sent for idle stream
 pub fn send_rst_stream_on_idle_stream_is_error_test() {
   let conn = helper.new_connection(Client, Connected)

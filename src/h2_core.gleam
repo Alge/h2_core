@@ -983,6 +983,12 @@ pub fn send_rst_stream(
     Error(ConnectionError(h2_frame.ProtocolError)),
   )
 
+  // Close the stream
+  let stream = Stream(..stream, state: Closed)
+
+  let conn =
+    Connection(..conn, streams: dict.insert(conn.streams, stream_id, stream))
+
   case
     h2_frame.encode_rst_stream(stream_id: stream_id, error_code: error_code)
   {
