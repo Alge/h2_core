@@ -981,8 +981,16 @@ pub fn receive_padded_data_pad_length_field_counts_toward_flow_control_test() {
       data: <<"hey":utf8>>,
       padding: Some(10),
     )
-  let assert Error(StreamError(1, h2_frame.FlowControlError)) =
-    receive_data(server, data_frame)
+  // Stream error (not connection error) — receive_data returns Ok with RST_STREAM
+  let assert Ok(#(_server, events, to_send)) = receive_data(server, data_frame)
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(
+      stream_id: 1,
+      error_code: h2_frame.FlowControlError,
+    )
+  assert to_send == expected_rst
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.FlowControlError)]
 }
 
 // =============================================================================

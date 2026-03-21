@@ -1382,6 +1382,16 @@ fn parse_loop(
                 ),
               )
 
+              let new_stream_state = case end_stream {
+                True -> {
+                  case stream.state {
+                    HalfClosedLocal -> Closed
+                    _ -> HalfClosedRemote
+                  }
+                }
+                False -> stream.state
+              }
+
               let payload_length = case padding {
                 option.Some(pad_length) ->
                   1 + bit_array.byte_size(data) + pad_length
@@ -1398,18 +1408,7 @@ fn parse_loop(
 
               let new_stream_recv_window =
                 stream.recv_window_size - payload_length
-
-              let new_stream_state = case end_stream {
-                True -> {
-                  case stream.state {
-                    HalfClosedLocal -> Closed
-                    _ -> HalfClosedRemote
-                  }
-                }
-                False -> stream.state
-              }
-
-              Ok(#(
+              let conn =
                 Connection(
                   ..conn,
                   streams: dict.insert(
@@ -1422,7 +1421,21 @@ fn parse_loop(
                     ),
                   ),
                   recv_window_size: new_conn_recv_window,
+                )
+
+              use <- bool.guard(
+                new_stream_recv_window < 0,
+                handle_rst_stream(
+                  conn: conn,
+                  stream_id: stream_id,
+                  error_code: h2_frame.FlowControlError,
+                  events: events,
+                  to_send: to_send,
                 ),
+              )
+
+              Ok(#(
+                conn,
                 [
                   DataReceived(
                     stream_id: stream_id,
