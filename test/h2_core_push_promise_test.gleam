@@ -3,7 +3,7 @@ import gleam/option.{None}
 import h2_core.{
   type Connection, Client, Connected, ConnectionError, Header,
   PushPromiseReceived, ReservedLocal, ReservedRemote, Server, StreamError,
-  WithIndexing, receive_data, send_headers, send_settings,
+  WithIndexing, open_stream, receive_data, send_headers, send_settings,
 }
 import h2_frame
 import helper
@@ -13,7 +13,7 @@ fn server_with_open_stream() -> #(Connection, Connection) {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   #(server, client)
 }
@@ -152,7 +152,7 @@ pub fn receive_push_promise_on_half_closed_local_is_valid_test() {
   // Client sends headers with END_STREAM — stream 1 is half-closed (local)
   // on the client side
   let assert Ok(#(client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], True)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], True)
   let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
 
   // Server pushes on stream 1 — valid because it's half-closed (local)
@@ -417,7 +417,7 @@ pub fn send_push_promise_on_half_closed_remote_test() {
   let client = helper.new_connection(Client, Connected)
   // Client sends headers with END_STREAM
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], True)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], True)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   // Stream 1 is half-closed (remote) on server — push should work
   let assert Ok(#(server, _events, _to_send)) =
@@ -489,7 +489,7 @@ pub fn client_send_push_promise_is_error_test() {
   let server = helper.new_connection(Server, Connected)
   // Open stream 1 from client
   let assert Ok(#(client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
   // Client tries to push — must be rejected
   let assert Error(_) =
@@ -519,7 +519,7 @@ pub fn send_push_promise_on_half_closed_local_is_error_test() {
   // Server sends response headers with END_STREAM — stream becomes
   // half-closed (local) from the server's perspective
   let assert Ok(#(server, _events, _to_send)) =
-    send_headers(server, [Header(":status", "200", WithIndexing)], True)
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
   let assert Error(_) =
     h2_core.send_push_promise(server, 1, 2, [
       Header(":method", "GET", WithIndexing),
