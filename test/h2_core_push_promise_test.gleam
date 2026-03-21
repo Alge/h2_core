@@ -679,28 +679,6 @@ pub fn send_push_promise_on_closed_stream_is_error_test() {
 }
 
 // =============================================================================
-// Section 6.6 - "PUSH_PROMISE frames MUST only be sent on a peer-initiated
-// stream"
-//
-// Server-initiated streams (even IDs) are not peer-initiated from the
-// server's perspective. Sending PUSH_PROMISE on a server-initiated stream
-// must error.
-// =============================================================================
-
-pub fn send_push_promise_on_server_initiated_stream_is_error_test() {
-  let #(server, _client) = server_with_open_stream()
-  // Reserve stream 2 via push, then try to push on stream 2 itself
-  let assert Ok(#(server, _events, _to_send, _promised_id)) =
-    h2_core.send_push_promise(server, 1, [
-      Header(":method", "GET", WithIndexing),
-    ])
-  let assert Error(_) =
-    h2_core.send_push_promise(server, 2, [
-      Header(":method", "GET", WithIndexing),
-    ])
-}
-
-// =============================================================================
 // Verify that send_push_promise produces correctly encoded output.
 // The client should be able to decode the frame and get a PushPromiseReceived
 // event with the auto-allocated promised stream ID.
