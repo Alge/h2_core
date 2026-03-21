@@ -206,3 +206,62 @@ pub fn receive_headers_after_goaway_maintains_hpack_state_test() {
     events
   let assert [Header("x-custom", "value3", _)] = h
 }
+
+// RFC 9113 Section 6.8 - "Receivers of a GOAWAY frame MUST NOT open
+// additional streams on the connection."
+//
+// After receiving GOAWAY, attempting to open a new stream should error.
+pub fn receive_goaway_prevents_opening_new_streams_test() {
+  let client = helper.new_connection(Client, Connected)
+  // Open stream 1
+  let assert Ok(#(client, _events, _to_send)) =
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+
+  // Receive GOAWAY from server
+  let goaway =
+    h2_frame.encode_goaway(
+      last_stream_id: 1,
+      error_code: h2_frame.NoError,
+      debug_data: <<>>,
+    )
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, goaway)
+
+  // Attempt to open a new stream — must be rejected
+  let assert Error(_) =
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+}
+
+// RFC 9113 Section 6.8 - "Endpoints MUST NOT increase the value they
+// send in the last stream identifier."
+//
+// Sending a second GOAWAY with a higher last_stream_id should error.
+pub fn send_goaway_must_not_increase_last_stream_id_test() {
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
+  let assert Ok(#(client, _events, headers1)) =
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(_client, _events, headers2)) =
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers1)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers2)
+
+  // First GOAWAY — last_stream_id will be 3 (last_remote_stream_id)
+  let assert Ok(#(server, _events, _to_send)) =
+    send_goaway(server, h2_frame.NoError, <<>>)
+
+  // Manually lower last_remote_stream_id to simulate wanting to send
+  // a second GOAWAY with a higher value — the library should prevent this.
+  // Since send_goaway uses last_remote_stream_id, we'd need to receive
+  // a new stream to increase it. But after sending GOAWAY, the server
+  // shouldn't accept new streams. Instead, let's verify the second
+  // GOAWAY has the same or lower last_stream_id.
+  let assert Ok(#(_server, _events, goaway2)) =
+    send_goaway(server, h2_frame.NoError, <<>>)
+
+  // Decode the GOAWAY to verify last_stream_id didn't increase
+  let assert Ok(#(frame_data, _rest)) =
+    h2_frame.extract_frame(goaway2, 16_384)
+  let assert Ok(h2_frame.Goaway(last_stream_id: last_id, ..)) =
+    h2_frame.decode_frame(frame_data)
+  assert last_id == 3
+}

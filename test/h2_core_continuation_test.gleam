@@ -273,6 +273,35 @@ pub fn receive_settings_during_header_block_is_protocol_error_test() {
     receive_data(server, bad_data)
 }
 
+// RFC 9113 Section 5.5 - "Extension frames that appear in the middle of
+// a field block (Section 4.3) are not permitted; these MUST be treated
+// as a connection error (Section 5.4.1) of type PROTOCOL_ERROR."
+//
+// An unknown/extension frame type during a header block must be rejected.
+pub fn receive_extension_frame_during_header_block_is_protocol_error_test() {
+  let client = connection_with_small_frame_size(Client)
+  let headers = large_headers()
+  let assert Ok(#(_client, _events, to_send)) =
+    open_stream(client, headers, False)
+
+  let assert Ok(#(frame_data, rest)) = h2_frame.extract_frame(to_send, 16_384)
+  let assert Ok(h2_frame.Headers(end_headers: False, ..)) =
+    h2_frame.decode_frame(frame_data)
+
+  let headers_frame_size =
+    bit_array.byte_size(to_send) - bit_array.byte_size(rest)
+  let assert Ok(headers_only) = bit_array.slice(to_send, 0, headers_frame_size)
+
+  // Append an unknown frame type (0xFF) instead of CONTINUATION
+  // Length=4, Type=0xFF, Flags=0, Stream ID=1
+  let unknown_frame = <<4:size(24), 0xFF:size(8), 0:size(8), 0:size(1), 1:size(31), 0:size(32)>>
+  let bad_data = <<headers_only:bits, unknown_frame:bits>>
+
+  let server = helper.new_connection(Server, Connected)
+  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+    receive_data(server, bad_data)
+}
+
 // Receiving CONTINUATION on a different stream is PROTOCOL_ERROR
 pub fn receive_continuation_wrong_stream_is_protocol_error_test() {
   let client = connection_with_small_frame_size(Client)

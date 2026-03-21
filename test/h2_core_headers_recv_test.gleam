@@ -347,6 +347,36 @@ pub fn receive_headers_end_stream_on_half_closed_local_transitions_to_closed_tes
   assert stream.state == Closed
 }
 
+// RFC 9113 Section 6.2 - "A receiver is not obligated to verify padding
+// but MAY treat non-zero padding as a connection error (Section 5.4.1) of
+// type PROTOCOL_ERROR."
+//
+// By default, non-zero padding bytes in HEADERS frames MUST be silently
+// accepted (the receiver is not obligated to verify them).
+pub fn receive_headers_nonzero_padding_bytes_accepted_by_default_test() {
+  let server = helper.new_connection(Server, Connected)
+  // Manually craft a padded HEADERS frame with non-zero padding bytes.
+  // Length=5 (1 pad_length + 1 HPACK data + 3 padding), Type=0x01,
+  // Flags=0x0C (PADDED | END_HEADERS), Stream ID=1
+  // HPACK: 0x82 = :method GET (indexed)
+  let non_zero_padded = <<
+    5:size(24),
+    0x01:size(8),
+    0x0C:size(8),
+    0:size(1),
+    1:size(31),
+    3:size(8),
+    0x82,
+    0xFF,
+    0xFF,
+    0xFF,
+  >>
+  let assert Ok(#(_server, events, _to_send)) =
+    receive_data(server, non_zero_padded)
+  let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: False)] =
+    events
+}
+
 // RFC 9113 Section 4.3 - Invalid HPACK data is COMPRESSION_ERROR
 pub fn receive_headers_invalid_hpack_is_compression_error_test() {
   let server = helper.new_connection(Server, Connected)
@@ -628,4 +658,513 @@ pub fn client_receive_headers_on_odd_stream_id_is_protocol_error_test() {
   let client = helper.new_connection(Client, Connected)
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
     receive_data(client, patched)
+}
+
+// RFC 9113 Section 5.1.1 - "The identifier of a newly established stream
+// MUST be numerically greater than all streams that the initiating endpoint
+// has opened or reserved."
+//
+// A server receiving HEADERS on stream 3 after already having received
+// stream 5 must reject it as out-of-order.
+pub fn receive_headers_with_decreasing_stream_id_is_protocol_error_test() {
+  let client = helper.new_connection(Client, Connected)
+  let assert Ok(#(client, _events, encoded1)) =
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(_client, _events, encoded2)) =
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+
+  let server = helper.new_connection(Server, Connected)
+  // Receive stream 1 normally
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
+  // Patch stream 5's frame to use stream ID 5, then receive it
+  let patched5 = helper.patch_stream_id(encoded2, 5)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, patched5)
+
+  // Now send HEADERS on stream 3 (lower than 5) — must be rejected
+  let assert Ok(#(_client2, _events, encoded3)) =
+    open_stream(
+      helper.new_connection(Client, Connected),
+      [Header(":method", "GET", WithIndexing)],
+      False,
+    )
+  let patched3 = helper.patch_stream_id(encoded3, 3)
+  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+    receive_data(server, patched3)
+}
+
+// =============================================================================
+// Section 8 — HTTP semantic validation
+// =============================================================================
+
+// RFC 9113 Section 8.3 - "All pseudo-header fields MUST appear in a field
+// block before all regular field lines. Any request or response that
+// contains a pseudo-header field that appears in a field block after a
+// regular field line MUST be treated as malformed (Section 8.1.1)."
+//
+// A malformed message is a stream error of type PROTOCOL_ERROR.
+pub fn receive_headers_pseudo_after_regular_is_malformed_test() {
+  let server = helper.new_connection(Server, Connected)
+  // HPACK: regular header first, then pseudo-header
+  // 0x40 0x05 "x-foo" 0x03 "bar" = literal with indexing: x-foo: bar
+  // 0x82 = :method GET (indexed)
+  let bad_hpack = <<
+    0x40, 0x05, "x-foo":utf8, 0x03, "bar":utf8, 0x82,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(server, headers_frame)
+}
+
+// RFC 9113 Section 8.3 - "The same pseudo-header field name MUST NOT
+// appear more than once in a field block. A field block for an HTTP
+// request or response that contains a repeated pseudo-header field name
+// MUST be treated as malformed (Section 8.1.1)."
+pub fn receive_headers_duplicate_pseudo_header_is_malformed_test() {
+  let server = helper.new_connection(Server, Connected)
+  // HPACK: :method GET twice
+  // 0x82 = :method GET, 0x82 = :method GET (duplicate)
+  let bad_hpack = <<0x82, 0x82>>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(server, headers_frame)
+}
+
+// RFC 9113 Section 8.3 - "Pseudo-header fields MUST NOT appear in a
+// trailer section." and "Endpoints MUST treat a request or response
+// that contains undefined or invalid pseudo-header fields as malformed."
+//
+// Receive trailing HEADERS (with END_STREAM) containing a pseudo-header
+// — must be treated as a stream error of type PROTOCOL_ERROR.
+pub fn receive_trailers_with_pseudo_header_is_malformed_test() {
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
+  // Open stream 1 with valid headers
+  let assert Ok(#(_client, _events, headers)) =
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  // Trailers with pseudo-header :method GET — invalid
+  // END_STREAM=True marks this as trailers
+  let bad_hpack = <<0x82>>
+  let assert Ok(trailer_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: True,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(server, trailer_frame)
+}
+
+// RFC 9113 Section 8.2.2 - "Any message containing connection-specific
+// header fields MUST be treated as malformed (Section 8.1.1)."
+//
+// Connection-specific headers: Connection, Transfer-Encoding, Keep-Alive,
+// Proxy-Connection, Upgrade.
+pub fn receive_headers_with_connection_header_is_malformed_test() {
+  let server = helper.new_connection(Server, Connected)
+  // HPACK: :method GET, :scheme https, :path /, then "connection: close"
+  let bad_hpack = <<
+    0x82, 0x87, 0x84,
+    0x40, 0x0A, "connection":utf8, 0x05, "close":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(server, headers_frame)
+}
+
+pub fn receive_headers_with_transfer_encoding_is_malformed_test() {
+  let server = helper.new_connection(Server, Connected)
+  let bad_hpack = <<
+    0x82, 0x87, 0x84,
+    0x40, 0x11, "transfer-encoding":utf8, 0x07, "chunked":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(server, headers_frame)
+}
+
+// RFC 9113 Section 8.1 - "A HEADERS frame with the END_STREAM flag set
+// that carries an informational status code is malformed (Section 8.1.1)."
+//
+// A 1xx response with END_STREAM is invalid.
+pub fn receive_informational_response_with_end_stream_is_malformed_test() {
+  let #(_server, client) = {
+    let server = helper.new_connection(Server, Connected)
+    let client = helper.new_connection(Client, Connected)
+    let assert Ok(#(client, _events, headers)) =
+      open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+    let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+    #(server, client)
+  }
+  // 1xx status with END_STREAM — malformed
+  // 0x48 0x03 "100" = :status 100 (literal with indexing, name index 8)
+  let bad_hpack = <<0x48, 0x03, "100":utf8>>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: True,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(client, headers_frame)
+}
+
+// RFC 9113 Section 8.3.1 - "All HTTP/2 requests MUST include exactly one
+// valid value for the ':method', ':scheme', and ':path' pseudo-header
+// fields, unless they are CONNECT requests (Section 8.5)."
+//
+// "An HTTP request that omits mandatory pseudo-header fields is
+// malformed (Section 8.1.1)."
+pub fn receive_request_missing_method_is_malformed_test() {
+  let server = helper.new_connection(Server, Connected)
+  // HPACK: :scheme https + :path / — missing :method
+  let bad_hpack = <<0x87, 0x84>>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(server, headers_frame)
+}
+
+pub fn receive_request_missing_scheme_is_malformed_test() {
+  let server = helper.new_connection(Server, Connected)
+  // HPACK: :method GET + :path / — missing :scheme
+  let bad_hpack = <<0x82, 0x84>>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(server, headers_frame)
+}
+
+pub fn receive_request_missing_path_is_malformed_test() {
+  let server = helper.new_connection(Server, Connected)
+  // HPACK: :method GET + :scheme https — missing :path
+  let bad_hpack = <<0x82, 0x87>>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(server, headers_frame)
+}
+
+// RFC 9113 Section 8.3.2 - "This pseudo-header field [:status] MUST be
+// included in all responses, including interim responses; otherwise,
+// the response is malformed (Section 8.1.1)."
+pub fn receive_response_missing_status_is_malformed_test() {
+  let #(_server, client) = {
+    let server = helper.new_connection(Server, Connected)
+    let client = helper.new_connection(Client, Connected)
+    let assert Ok(#(client, _events, headers)) =
+      open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+    let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+    #(server, client)
+  }
+  // Response HEADERS with no :status — just a regular header
+  // 0x40 0x0C "content-type" 0x09 "text/html"
+  let bad_hpack = <<
+    0x40, 0x0C, "content-type":utf8, 0x09, "text/html":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(client, headers_frame)
+}
+
+// =============================================================================
+// Section 8 — Additional header validation
+// =============================================================================
+
+// RFC 9113 Section 8.3 - "Endpoints MUST treat a request or response
+// that contains undefined or invalid pseudo-header fields as malformed
+// (Section 8.1.1)."
+//
+// An unrecognized pseudo-header like :unknown is invalid.
+pub fn receive_headers_with_unrecognized_pseudo_header_is_malformed_test() {
+  let server = helper.new_connection(Server, Connected)
+  let bad_hpack = <<
+    0x82, 0x87, 0x84,
+    0x40, 0x08, ":unknown":utf8, 0x03, "foo":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(server, headers_frame)
+}
+
+// RFC 9113 Section 8.2.2 - "The only exception to this is the TE header
+// field, which MAY be present in an HTTP/2 request; when it is, it MUST
+// NOT contain any value other than 'trailers'."
+pub fn receive_headers_with_te_non_trailers_is_malformed_test() {
+  let server = helper.new_connection(Server, Connected)
+  let bad_hpack = <<
+    0x82, 0x87, 0x84,
+    0x40, 0x02, "te":utf8, 0x07, "chunked":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(server, headers_frame)
+}
+
+// RFC 9113 Section 8.2.2 - TE header with value "trailers" is allowed.
+pub fn receive_headers_with_te_trailers_is_accepted_test() {
+  let server = helper.new_connection(Server, Connected)
+  let valid_hpack = <<
+    0x82, 0x87, 0x84,
+    0x40, 0x02, "te":utf8, 0x08, "trailers":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: valid_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_server, events, _to_send)) =
+    receive_data(server, headers_frame)
+  let assert [HeadersReceived(stream_id: 1, ..)] = events
+}
+
+// RFC 9113 Section 8.1 - "An endpoint that receives a HEADERS frame
+// without the END_STREAM flag set after receiving the HEADERS frame
+// that opens a request or after receiving a final (non-informational)
+// status code MUST treat the corresponding request or response as
+// malformed (Section 8.1.1)."
+pub fn receive_informational_response_after_final_is_malformed_test() {
+  let #(_server, client) = {
+    let server = helper.new_connection(Server, Connected)
+    let client = helper.new_connection(Client, Connected)
+    let assert Ok(#(client, _events, headers)) =
+      open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+    let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+    #(server, client)
+  }
+  // Final response: 200 OK (0x88 = :status 200 indexed)
+  let assert Ok(final_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: <<0x88>>,
+      padding: option.None,
+    )
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, final_frame)
+  // 100 Continue after final response — malformed
+  let assert Ok(informational_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: <<0x48, 0x03, "100":utf8>>,
+      padding: option.None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(client, informational_frame)
+}
+
+// RFC 9113 Section 8.1 - "a server MAY send any number of interim
+// responses before the HEADERS frame containing a final response."
+pub fn receive_multiple_informational_responses_before_final_test() {
+  let #(_server, client) = {
+    let server = helper.new_connection(Server, Connected)
+    let client = helper.new_connection(Client, Connected)
+    let assert Ok(#(client, _events, headers)) =
+      open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+    let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+    #(server, client)
+  }
+  let assert Ok(info1) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: <<0x48, 0x03, "100":utf8>>,
+      padding: option.None,
+    )
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, info1)
+  let assert Ok(info2) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: <<0x48, 0x03, "100":utf8>>,
+      padding: option.None,
+    )
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, info2)
+  // Final 200 OK
+  let assert Ok(final_resp) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: <<0x88>>,
+      padding: option.None,
+    )
+  let assert Ok(#(_client, events, _to_send)) = receive_data(client, final_resp)
+  let assert [HeadersReceived(stream_id: 1, ..)] = events
+}
+
+// =============================================================================
+// Section 8.3.1 / 8.5 — Path and CONNECT validation
+// =============================================================================
+
+// RFC 9113 Section 8.3.1 - "This pseudo-header field [:path] MUST NOT
+// be empty for 'http' or 'https' URIs; 'http' or 'https' URIs that do
+// not contain a path component MUST include a value of '/'."
+pub fn receive_request_with_empty_path_is_malformed_test() {
+  let server = helper.new_connection(Server, Connected)
+  // HPACK: :method GET, :scheme https, :path "" (empty)
+  // 0x44 = literal with indexing, name index 4 (:path)
+  // 0x00 = value length 0
+  let bad_hpack = <<0x82, 0x87, 0x44, 0x00>>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(server, headers_frame)
+}
+
+// RFC 9113 Section 8.5 - "The ':scheme' and ':path' pseudo-header
+// fields MUST be omitted" for CONNECT requests.
+// "A CONNECT request that does not conform to these restrictions is
+// malformed (Section 8.1.1)."
+//
+// A CONNECT request with :path present is malformed.
+pub fn receive_connect_request_with_path_is_malformed_test() {
+  let server = helper.new_connection(Server, Connected)
+  // HPACK: :method CONNECT, :authority example.com, :path /
+  // 0x86 = :method CONNECT? No — not in static table. Use literal.
+  // Literal with indexing, name index 2 (:method), value "CONNECT"
+  let bad_hpack = <<
+    0x42, 0x07, "CONNECT":utf8,
+    0x41, 0x0B, "example.com":utf8,
+    0x84,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(server, headers_frame)
+}
+
+// RFC 9113 Section 8.5 - A valid CONNECT request has only :method and
+// :authority (no :scheme, no :path).
+pub fn receive_valid_connect_request_is_accepted_test() {
+  let server = helper.new_connection(Server, Connected)
+  // HPACK: :method CONNECT, :authority example.com
+  let valid_hpack = <<
+    0x42, 0x07, "CONNECT":utf8,
+    0x41, 0x0B, "example.com":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: valid_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_server, events, _to_send)) =
+    receive_data(server, headers_frame)
+  let assert [HeadersReceived(stream_id: 1, ..)] = events
 }

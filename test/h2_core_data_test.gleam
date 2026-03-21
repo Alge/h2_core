@@ -755,6 +755,33 @@ pub fn send_data_exactly_at_window_boundary_test() {
   assert server.send_window_size == 0
 }
 
+// RFC 9113 Section 6.9.1 - "Frames with zero length with the END_STREAM
+// flag set (that is, an empty DATA frame) MAY be sent if there is no
+// available space in either flow-control window."
+//
+// When the flow-control window is exhausted, an empty DATA frame with
+// END_STREAM should still be allowed to close the stream.
+pub fn send_empty_data_with_end_stream_when_window_exhausted_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(#(server, _events, _to_send)) =
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+  // Set both windows to 0
+  let server =
+    h2_core.Connection(
+      ..server,
+      send_window_size: 0,
+      streams: dict.insert(
+        server.streams,
+        1,
+        Stream(state: Open, send_window_size: 0, recv_window_size: 65_535),
+      ),
+    )
+  let assert Ok(#(server, _events, _to_send)) =
+    h2_core.send_data(server, 1, <<>>, True, None)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == h2_core.HalfClosedLocal
+}
+
 // RFC 9113 Section 5.2 - Flow control is based on both stream and connection
 // windows. When the connection window is smaller than the stream window,
 // sending data that fits the stream window but exceeds the connection window
@@ -1199,4 +1226,62 @@ pub fn receive_data_exceeding_max_frame_size_is_frame_size_error_test() {
   >>
   let assert Error(ConnectionError(h2_frame.FrameSizeError)) =
     receive_data(server, oversized_frame)
+}
+
+// =============================================================================
+// Content-length validation
+// =============================================================================
+
+// RFC 9113 Section 8.1.1 - "A request or response is also malformed if
+// the value of a content-length header field does not equal the sum of
+// the DATA frame payload lengths that form the content, unless the
+// message is defined as having no content."
+//
+// Receiving more DATA than declared in content-length is malformed.
+pub fn receive_data_exceeding_content_length_is_malformed_test() {
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
+  // Client sends request with content-length: 5
+  let assert Ok(#(client, _events, headers)) =
+    open_stream(client, [
+      Header(":method", "POST", WithIndexing),
+      Header("content-length", "5", WithIndexing),
+    ], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  // Send 10 bytes of data — exceeds content-length of 5
+  let assert Ok(data_frame) =
+    h2_frame.encode_data(
+      stream_id: 1,
+      end_stream: True,
+      data: <<"0123456789":utf8>>,
+      padding: None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(server, data_frame)
+}
+
+// RFC 9113 Section 8.1.1 - Receiving less DATA than declared in
+// content-length with END_STREAM is malformed.
+pub fn receive_data_less_than_content_length_with_end_stream_is_malformed_test() {
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
+  // Client sends request with content-length: 10
+  let assert Ok(#(client, _events, headers)) =
+    open_stream(client, [
+      Header(":method", "POST", WithIndexing),
+      Header("content-length", "10", WithIndexing),
+    ], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  // Send only 5 bytes with END_STREAM — less than content-length of 10
+  let assert Ok(data_frame) =
+    h2_frame.encode_data(
+      stream_id: 1,
+      end_stream: True,
+      data: <<"hello":utf8>>,
+      padding: None,
+    )
+  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+    receive_data(server, data_frame)
 }

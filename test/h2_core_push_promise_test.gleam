@@ -509,11 +509,10 @@ pub fn send_push_promise_on_half_closed_local_is_error_test() {
 //
 // NOTE: The RFC is ambiguous about whether "handle" means "accept
 // normally" or just "don't crash". It also doesn't distinguish between
-// streams closed by our RST_STREAM vs the peer's RST_STREAM. Most
-// implementations (Mint/Elixir) strictly reject closed streams. We follow
-// hyper-h2's more lenient approach: accept PUSH_PROMISE on any closed
-// stream, decode HPACK, reserve the promised stream, and emit the event.
-// The caller can RST_STREAM the promised stream if unwanted.
+// streams closed by our RST_STREAM vs the peer's RST_STREAM. We take
+// the lenient approach: accept PUSH_PROMISE on any closed stream, decode
+// HPACK, reserve the promised stream, and emit the event. The caller can
+// RST_STREAM the promised stream if unwanted.
 pub fn receive_push_promise_on_closed_stream_is_handled_gracefully_test() {
   let #(_server, client) = server_with_open_stream()
   // Server RST_STREAMs stream 1 — now closed on client
