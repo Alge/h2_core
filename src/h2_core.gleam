@@ -1434,7 +1434,7 @@ fn parse_loop(
                 ),
               )
 
-              Ok(#(
+              parse_loop(
                 conn,
                 [
                   DataReceived(
@@ -1442,9 +1442,10 @@ fn parse_loop(
                     data: data,
                     end_stream: end_stream,
                   ),
+                  ..events
                 ],
                 to_send,
-              ))
+              )
             }
 
             // Ignore PRIORITY frames
