@@ -1,6 +1,6 @@
 import h2_core.{
   Client, Connected, Connection, ConnectionError, GoawayReceived, Header,
-  HeadersReceived, Server, WithIndexing, receive_data, send_goaway, send_headers,
+  HeadersReceived, Server, WithIndexing, open_stream, receive_data, send_goaway,
 }
 import h2_frame
 import helper
@@ -182,11 +182,11 @@ pub fn receive_headers_after_goaway_maintains_hpack_state_test() {
 
   // Client sends three HEADERS frames — HPACK state accumulates across all three
   let assert Ok(#(client, _events, encoded1)) =
-    send_headers(client, [Header("x-custom", "value1", WithIndexing)], False)
+    open_stream(client, [Header("x-custom", "value1", WithIndexing)], False)
   let assert Ok(#(client, _events, encoded2)) =
-    send_headers(client, [Header("x-custom", "value2", WithIndexing)], False)
+    open_stream(client, [Header("x-custom", "value2", WithIndexing)], False)
   let assert Ok(#(_client, _events, encoded3)) =
-    send_headers(client, [Header("x-custom", "value3", WithIndexing)], False)
+    open_stream(client, [Header("x-custom", "value3", WithIndexing)], False)
 
   // Server receives stream 1
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)

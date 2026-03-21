@@ -2,7 +2,7 @@ import gleam/dict
 import gleeunit
 import h2_core.{
   Client, Connected, Header, Idle, Open, Server, Stream, WithIndexing,
-  default_settings, new_connection, receive_data, send_headers,
+  default_settings, new_connection, open_stream, receive_data,
 }
 import helper
 
@@ -49,22 +49,22 @@ pub fn server_next_stream_id_starts_at_2_test() {
 }
 
 // RFC 9113 Section 5.1 - send HEADERS transitions idle -> open
-pub fn send_headers_opens_stream_test() {
+pub fn open_stream_opens_stream_test() {
   let conn = helper.new_connection(Client, Connected)
-  let assert Ok(#(conn, _events, _to_send)) = send_headers(conn, [], False)
+  let assert Ok(#(conn, _events, _to_send)) = open_stream(conn, [], False)
   let assert Ok(stream) = dict.get(conn.streams, 1)
   assert stream.state == Open
 }
 
-pub fn send_headers_increments_stream_id_test() {
+pub fn open_stream_increments_stream_id_test() {
   let conn = helper.new_connection(Client, Connected)
-  let assert Ok(#(conn, _events, _to_send)) = send_headers(conn, [], False)
+  let assert Ok(#(conn, _events, _to_send)) = open_stream(conn, [], False)
   assert conn.next_stream_id == 3
 }
 
-pub fn send_headers_returns_no_events_test() {
+pub fn open_stream_returns_no_events_test() {
   let conn = helper.new_connection(Client, Connected)
-  let assert Ok(#(_conn, events, _to_send)) = send_headers(conn, [], False)
+  let assert Ok(#(_conn, events, _to_send)) = open_stream(conn, [], False)
   assert events == []
 }
 
@@ -139,7 +139,7 @@ pub fn receive_unknown_frame_type_on_stream_is_ignored_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   // Unknown frame type 0xFE on stream 1

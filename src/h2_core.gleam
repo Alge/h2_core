@@ -3,6 +3,7 @@ import gleam/bit_array
 import gleam/bool
 import gleam/bytes_tree
 import gleam/dict
+import gleam/int
 import gleam/list
 import gleam/option
 import gleam/result
@@ -220,7 +221,12 @@ pub fn default_settings() -> Settings {
 
 pub type Event {
   HeadersReceived(stream_id: Int, headers: List(Header), end_stream: Bool)
-  DataReceived(stream_id: Int, data: BitArray, end_stream: Bool)
+  DataReceived(
+    stream_id: Int,
+    data: BitArray,
+    end_stream: Bool,
+    flow_controlled_length: Int,
+  )
   StreamReset(stream_id: Int, error_code: ErrorCode)
   StreamEnded(stream_id: Int)
   PushPromiseReceived(
@@ -248,6 +254,15 @@ pub type ConnectionState {
   Connected
 }
 
+pub type PendingHeaderBlock {
+  PendingHeaders(stream_id: Int, end_stream: Bool, fragment: BitArray)
+  PendingPushPromise(
+    stream_id: Int,
+    promised_stream_id: Int,
+    fragment: BitArray,
+  )
+}
+
 pub type Connection {
   Connection(
     state: ConnectionState,
@@ -263,7 +278,7 @@ pub type Connection {
     recv_window_size: Int,
     hpack_encoder: HpackContext,
     hpack_decoder: HpackContext,
-    pending_header_blocks: option.Option(#(Int, Bool, BitArray)),
+    pending_header_blocks: option.Option(PendingHeaderBlock),
   )
 }
 
@@ -512,6 +527,37 @@ pub fn encode_headers(
   Ok(#(conn, bytes_tree.to_bit_array(encoded_headers)))
 }
 
+fn handle_decoded_push_promise(
+  conn: Connection,
+  stream_id: Int,
+  promised_stream_id: Int,
+  decoded_headers: List(Header),
+  events: List(Event),
+  to_send: BitArray,
+) -> Result(#(Connection, List(Event), BitArray), H2Error) {
+  let promised_stream = Stream(..new_stream(), state: ReservedRemote)
+
+  let conn =
+    Connection(
+      ..conn,
+      streams: dict.insert(conn.streams, promised_stream_id, promised_stream),
+      last_remote_stream_id: promised_stream_id,
+    )
+
+  Ok(#(
+    conn,
+    [
+      PushPromiseReceived(
+        stream_id: stream_id,
+        promised_stream_id: promised_stream_id,
+        headers: decoded_headers,
+      ),
+      ..events
+    ],
+    to_send,
+  ))
+}
+
 fn handle_decoded_headers(
   conn: Connection,
   stream_id,
@@ -520,96 +566,84 @@ fn handle_decoded_headers(
   events,
   to_send,
 ) -> Result(#(Connection, List(Event), BitArray), H2Error) {
-  use <- bool.guard(stream_id <= conn.last_remote_stream_id, {
-    case dict.get(conn.streams, stream_id) {
-      Ok(existing_stream) -> {
-        case existing_stream.state {
-          // Open / HalfClosedLocal: HEADERS is valid (e.g. trailers)
-          Open | HalfClosedLocal -> {
-            // Fall through to the normal path: emit HeadersReceived
-            // (don't update last_remote_stream_id or create a new stream)
+  use <- bool.guard(
+    stream_id <= conn.last_remote_stream_id
+      || dict.has_key(conn.streams, stream_id),
+    {
+      case dict.get(conn.streams, stream_id) {
+        Ok(existing_stream) -> {
+          case existing_stream.state {
+            // Open / HalfClosedLocal: HEADERS is valid (e.g. trailers)
+            Open | HalfClosedLocal -> {
+              // Fall through to the normal path: emit HeadersReceived
+              // (don't update last_remote_stream_id or create a new stream)
 
-            // If end_stream is set, update the stream state
-            let conn = case end_stream {
-              False -> conn
-              True -> {
-                let new_state = case existing_stream.state {
-                  Open -> HalfClosedRemote
-                  HalfClosedLocal -> Closed
-                  // can't happen
-                  _ -> existing_stream.state
+              // If end_stream is set, update the stream state
+              let conn = case end_stream {
+                False -> conn
+                True -> {
+                  let new_state = case existing_stream.state {
+                    Open -> HalfClosedRemote
+                    HalfClosedLocal -> Closed
+                    // can't happen
+                    _ -> existing_stream.state
+                  }
+
+                  Connection(
+                    ..conn,
+                    streams: dict.insert(
+                      conn.streams,
+                      stream_id,
+                      Stream(..existing_stream, state: new_state),
+                    ),
+                  )
                 }
-
-                Connection(
-                  ..conn,
-                  streams: dict.insert(
-                    conn.streams,
-                    stream_id,
-                    Stream(..existing_stream, state: new_state),
-                  ),
-                )
               }
-            }
 
-            Ok(#(
-              conn,
-              [
-                HeadersReceived(
-                  stream_id: stream_id,
-                  headers: decoded_headers,
-                  end_stream: end_stream,
-                ),
-                ..events
-              ],
-              to_send,
-            ))
-          }
-          // RFC 9113 Section 5.1 (half-closed remote) - "If an endpoint
-          // receives additional frames, other than WINDOW_UPDATE, PRIORITY,
-          // or RST_STREAM, for a stream that is in this state, it MUST
-          // respond with a stream error of type STREAM_CLOSED."
-          HalfClosedRemote -> {
-            case
-              h2_frame.encode_rst_stream(
-                stream_id: stream_id,
+              Ok(#(
+                conn,
+                [
+                  HeadersReceived(
+                    stream_id: stream_id,
+                    headers: decoded_headers,
+                    end_stream: end_stream,
+                  ),
+                  ..events
+                ],
+                to_send,
+              ))
+            }
+            // RFC 9113 Section 5.1 (half-closed remote) - "If an endpoint
+            // receives additional frames, other than WINDOW_UPDATE, PRIORITY,
+            // or RST_STREAM, for a stream that is in this state, it MUST
+            // respond with a stream error of type STREAM_CLOSED."
+            HalfClosedRemote ->
+              handle_rst_stream(
+                conn:,
+                stream_id:,
                 error_code: h2_frame.StreamClosed,
+                flow_controlled_length: 0,
+                events:,
+                to_send:,
               )
-            {
-              Ok(encoded_frame) -> {
-                Ok(
-                  #(
-                    conn,
-                    [
-                      StreamReset(
-                        stream_id: stream_id,
-                        error_code: h2_frame.StreamClosed,
-                      ),
-                      ..events
-                    ],
-                    <<to_send:bits, encoded_frame:bits>>,
-                  ),
-                )
-              }
-              Error(error) -> Error(map_frame_error(error))
+            // RFC 9113 Section 5.1 (closed state) - "An endpoint MUST
+            // minimally process and then discard any frames it receives
+            // in this state." HPACK decoding already happened above.
+            Closed -> {
+              Ok(#(conn, events, to_send))
             }
+            // Should never happen
+            Idle | ReservedLocal | ReservedRemote ->
+              Error(ConnectionError(h2_frame.ProtocolError))
           }
-          // RFC 9113 Section 5.1 (closed state) - "An endpoint MUST
-          // minimally process and then discard any frames it receives
-          // in this state." HPACK decoding already happened above.
-          Closed -> {
-            Ok(#(conn, events, to_send))
-          }
-          // Should never happen
-          Idle | ReservedLocal | ReservedRemote ->
-            Error(ConnectionError(h2_frame.ProtocolError))
+        }
+        Error(Nil) -> {
+          // Stream doesn't exist
+          Error(ConnectionError(h2_frame.ProtocolError))
         }
       }
-      Error(Nil) -> {
-        // Stream doesn't exist
-        Error(ConnectionError(h2_frame.ProtocolError))
-      }
-    }
-  })
+    },
+  )
 
   // RFC 9113 Section 5.1.1 - Client streams are odd, server streams are even.
   // The peer's streams must have the opposite parity from our role.
@@ -627,29 +661,14 @@ fn handle_decoded_headers(
       option.Some(max) -> count_inbound_streams(conn) >= max
       option.None -> False
     },
-    {
-      use encoded_frame <- result.try(
-        h2_frame.encode_rst_stream(
-          stream_id: stream_id,
-          error_code: h2_frame.RefusedStream,
-        )
-        |> result.map_error(map_frame_error),
-      )
-
-      Ok(
-        #(
-          conn,
-          [
-            StreamReset(
-              stream_id: stream_id,
-              error_code: h2_frame.RefusedStream,
-            ),
-            ..events
-          ],
-          <<to_send:bits, encoded_frame:bits>>,
-        ),
-      )
-    },
+    handle_rst_stream(
+      conn:,
+      stream_id:,
+      error_code: h2_frame.RefusedStream,
+      flow_controlled_length: 0,
+      events:,
+      to_send:,
+    ),
   )
 
   // Create new stream
@@ -679,19 +698,69 @@ fn handle_decoded_headers(
   ))
 }
 
-pub fn send_headers(
+pub fn open_stream(
   conn: Connection,
   headers: List(Header),
   end_stream: Bool,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
-  let stream = case end_stream {
-    True -> Stream(..new_stream(), state: HalfClosedLocal)
-    False -> Stream(..new_stream(), state: Open)
-  }
-
+  let stream = new_stream()
   let #(conn, stream_id) = add_stream(conn, stream)
 
+  // Send initial headers
+  send_headers(conn, stream_id, headers, end_stream)
+}
+
+pub fn send_headers(
+  conn conn: Connection,
+  stream_id stream_id: Int,
+  headers headers: List(Header),
+  end_stream end_stream: Bool,
+) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+  // headers cannot be sent on the connection level, it must be on a stream
+  use <- bool.guard(
+    stream_id == 0,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  // headers must be sent on a existing stream
+  use stream <- result.try(
+    dict.get(conn.streams, stream_id)
+    |> result.replace_error(StreamError(stream_id, h2_frame.StreamClosed)),
+  )
+
+  // headers cannot be sent on a ReservedRemote stream, those are initiated by the other party!
+  use <- bool.guard(
+    stream.state == ReservedRemote,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  // Headers must not be sent on a stream we have initiated closing of or a closed stream
+  use <- bool.guard(
+    stream.state == HalfClosedLocal || stream.state == Closed,
+    Error(StreamError(stream_id, h2_frame.StreamClosed)),
+  )
+
   use #(conn, encoded_headers) <- result.try(encode_headers(conn, headers))
+
+  let new_state = case stream.state {
+    HalfClosedRemote -> {
+      case end_stream {
+        True -> Closed
+        False -> stream.state
+      }
+    }
+    ReservedLocal -> HalfClosedRemote
+    _ ->
+      case end_stream {
+        True -> HalfClosedLocal
+        False -> Open
+      }
+  }
+
+  let stream = Stream(..stream, state: new_state)
+
+  let conn =
+    Connection(..conn, streams: dict.insert(conn.streams, stream_id, stream))
 
   case chunk_bytes(encoded_headers, conn.remote_settings.max_frame_size, []) {
     [] -> {
@@ -730,28 +799,187 @@ pub fn send_headers(
 }
 
 pub fn send_push_promise(
-  _conn: Connection,
-  _stream_id: Int,
-  _promised_stream_id: Int,
-  _headers: List(Header),
-) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
-  todo
+  conn: Connection,
+  stream_id: Int,
+  headers: List(Header),
+) -> Result(#(Connection, List(StreamEvent), BitArray, Int), H2Error) {
+  // Must only be sent by server
+  use <- bool.guard(
+    conn.role == Client,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  // Must not be sent on stream 0 (the connection level)
+  use <- bool.guard(
+    stream_id == 0,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  // Stream must exist
+  use stream <- result.try(
+    dict.get(conn.streams, stream_id)
+    |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  use <- bool.guard(
+    stream.state != Open && stream.state != HalfClosedRemote,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  use <- bool.guard(
+    !conn.remote_settings.enable_push,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  let #(conn, promised_stream_id) =
+    add_stream(conn, Stream(..new_stream(), state: ReservedLocal))
+
+  use #(conn, encoded_headers) <- result.try(encode_headers(
+    conn: conn,
+    headers: headers,
+  ))
+
+  case chunk_bytes(encoded_headers, conn.remote_settings.max_frame_size, []) {
+    [] -> {
+      use push_promise_frame <- result.try(
+        h2_frame.encode_push_promise(
+          stream_id: stream_id,
+          promised_stream_id: promised_stream_id,
+          end_headers: True,
+          field_block_fragment: <<>>,
+          padding: option.None,
+        )
+        |> result.map_error(map_frame_error),
+      )
+      Ok(#(conn, [], push_promise_frame, promised_stream_id))
+    }
+
+    [header_chunk, ..rest] -> {
+      use push_promise_frame <- result.try(
+        h2_frame.encode_push_promise(
+          stream_id: stream_id,
+          promised_stream_id: promised_stream_id,
+          end_headers: True,
+          field_block_fragment: header_chunk,
+          padding: option.None,
+        )
+        |> result.map_error(map_frame_error),
+      )
+      use continuation_frames <- result.try(
+        encode_header_continuations(rest, stream_id, <<>>),
+      )
+      Ok(#(
+        conn,
+        [],
+        <<push_promise_frame:bits, continuation_frames:bits>>,
+        promised_stream_id,
+      ))
+    }
+  }
 }
 
 pub fn send_data(
-  _conn: Connection,
-  _stream_id: Int,
-  _data: BitArray,
-  _end_stream: Bool,
+  conn conn: Connection,
+  stream_id stream_id: Int,
+  data data: BitArray,
+  end_stream end_stream: Bool,
+  padding padding: option.Option(Int),
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
-  todo
+  use <- bool.guard(
+    stream_id == 0,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  use stream <- result.try(case dict.get(conn.streams, stream_id) {
+    Ok(stream) -> {
+      use <- bool.guard(
+        stream.state == HalfClosedLocal || stream.state == Closed,
+        Error(StreamError(stream_id, h2_frame.StreamClosed)),
+      )
+      use <- bool.guard(
+        stream.state == ReservedLocal || stream.state == ReservedRemote,
+        Error(ConnectionError(h2_frame.ProtocolError)),
+      )
+      Ok(stream)
+    }
+    Error(Nil) ->
+      Error(StreamError(stream_id: stream_id, error_code: h2_frame.StreamClosed))
+  })
+
+  use max_allowed_window_size <- result.try(
+    get_send_window_size(conn: conn, stream_id: stream_id)
+    |> result.replace_error(StreamError(
+      stream_id: stream_id,
+      error_code: h2_frame.StreamClosed,
+    )),
+  )
+
+  let padding_length = case padding {
+    // We need to count both the actual padding bytes and
+    // the extra pad length byte that gets added
+    option.Some(value) -> value + 1
+    option.None -> 0
+  }
+
+  let payload_length = bit_array.byte_size(data) + padding_length
+
+  use <- bool.guard(
+    payload_length > conn.remote_settings.max_frame_size,
+    Error(ConnectionError(h2_frame.FrameSizeError)),
+  )
+
+  use <- bool.guard(
+    payload_length > max_allowed_window_size,
+    Error(ConnectionError(h2_frame.FlowControlError)),
+  )
+
+  use encoded_frame <- result.try(
+    h2_frame.encode_data(
+      stream_id: stream_id,
+      end_stream: end_stream,
+      data: data,
+      padding: padding,
+    )
+    |> result.map_error(map_frame_error),
+  )
+
+  let new_stream_state = case end_stream {
+    True ->
+      case stream.state {
+        HalfClosedRemote -> Closed
+        _ -> HalfClosedLocal
+      }
+    False -> stream.state
+  }
+
+  // Update the window size of the stream, and set the new state
+  let stream =
+    Stream(
+      ..stream,
+      send_window_size: stream.send_window_size - payload_length,
+      state: new_stream_state,
+    )
+
+  // Update the window sizes of the connection, and add the updated stream
+  let conn =
+    Connection(
+      ..conn,
+      send_window_size: conn.send_window_size - payload_length,
+      streams: dict.insert(conn.streams, stream_id, stream),
+    )
+
+  Ok(#(conn, [], encoded_frame))
 }
 
 pub fn get_send_window_size(
-  _conn: Connection,
-  _stream_id: Int,
-) -> Result(Int, H2Error) {
-  todo
+  conn conn: Connection,
+  stream_id stream_id: Int,
+) -> Result(Int, Nil) {
+  case dict.get(conn.streams, stream_id) {
+    Ok(stream) ->
+      Ok(int.max(0, int.min(stream.send_window_size, conn.send_window_size)))
+    Error(Nil) -> Error(Nil)
+  }
 }
 
 pub fn send_settings(
@@ -873,11 +1101,58 @@ pub fn send_rst_stream(
     Error(ConnectionError(h2_frame.ProtocolError)),
   )
 
+  // Close the stream
+  let stream = Stream(..stream, state: Closed)
+
+  let conn =
+    Connection(..conn, streams: dict.insert(conn.streams, stream_id, stream))
+
   case
     h2_frame.encode_rst_stream(stream_id: stream_id, error_code: error_code)
   {
     Ok(encoded_frame) -> Ok(#(conn, [], encoded_frame))
     Error(error) -> Error(map_frame_error(error))
+  }
+}
+
+fn handle_rst_stream(
+  conn conn: Connection,
+  stream_id stream_id: Int,
+  error_code error_code: h2_frame.ErrorCode,
+  flow_controlled_length flow_controlled_length: Int,
+  events events: List(Event),
+  to_send to_send: BitArray,
+) -> Result(#(Connection, List(Event), BitArray), H2Error) {
+  use encoded_rst_stream_frame <- result.try(
+    h2_frame.encode_rst_stream(stream_id: stream_id, error_code: error_code)
+    |> result.map_error(map_frame_error),
+  )
+
+  // If flow_controlled_length is not 0, add a WindowReset frame
+  case flow_controlled_length {
+    0 ->
+      Ok(
+        #(conn, [StreamReset(stream_id:, error_code:), ..events], <<
+          to_send:bits,
+          encoded_rst_stream_frame:bits,
+        >>),
+      )
+    _ -> {
+      use encoded_window_update <- result.try(
+        h2_frame.encode_window_update(
+          stream_id: 0,
+          window_size_increment: flow_controlled_length,
+        )
+        |> result.map_error(map_frame_error),
+      )
+      Ok(
+        #(conn, [StreamReset(stream_id:, error_code:), ..events], <<
+          to_send:bits,
+          encoded_rst_stream_frame:bits,
+          encoded_window_update:bits,
+        >>),
+      )
+    }
   }
 }
 
@@ -917,7 +1192,8 @@ fn parse_loop(
                   case conn.pending_header_blocks {
                     option.None ->
                       Error(ConnectionError(h2_frame.ProtocolError))
-                    option.Some(#(
+
+                    option.Some(PendingHeaders(
                       pending_stream_id,
                       end_stream,
                       pending_block_fragment,
@@ -927,33 +1203,32 @@ fn parse_loop(
                         Error(ConnectionError(h2_frame.ProtocolError)),
                       )
 
+                      let combined = <<
+                        pending_block_fragment:bits,
+                        field_block_fragment:bits,
+                      >>
+
                       case end_headers {
                         // More continuation frames incoming
                         False -> {
                           let conn =
                             Connection(
                               ..conn,
-                              pending_header_blocks: option.Some(
-                                #(stream_id, end_stream, <<
-                                  pending_block_fragment:bits,
-                                  field_block_fragment:bits,
-                                >>),
-                              ),
+                              pending_header_blocks: option.Some(PendingHeaders(
+                                stream_id:,
+                                end_stream:,
+                                fragment: combined,
+                              )),
                             )
                           parse_loop(conn, events, to_send)
                         }
 
-                        // Last continuation block 
+                        // Last continuation block
                         True -> {
                           use #(conn, decoded_headers) <- result.try(
-                            decode_headers(conn, <<
-                              pending_block_fragment:bits,
-                              field_block_fragment:bits,
-                            >>),
+                            decode_headers(conn, combined),
                           )
 
-                          // Reset the pending headers variable in the conn as 
-                          // we have received the full headers
                           let conn =
                             Connection(
                               ..conn,
@@ -965,6 +1240,65 @@ fn parse_loop(
                               conn,
                               stream_id,
                               end_stream,
+                              decoded_headers,
+                              events,
+                              to_send,
+                            ),
+                          )
+                          parse_loop(conn, events, to_send)
+                        }
+                      }
+                    }
+
+                    option.Some(PendingPushPromise(
+                      pending_stream_id,
+                      promised_stream_id,
+                      pending_block_fragment,
+                    )) -> {
+                      use <- bool.guard(
+                        pending_stream_id != stream_id,
+                        Error(ConnectionError(h2_frame.ProtocolError)),
+                      )
+
+                      let combined = <<
+                        pending_block_fragment:bits,
+                        field_block_fragment:bits,
+                      >>
+
+                      case end_headers {
+                        // More continuation frames incoming
+                        False -> {
+                          let conn =
+                            Connection(
+                              ..conn,
+                              pending_header_blocks: option.Some(
+                                PendingPushPromise(
+                                  stream_id:,
+                                  promised_stream_id:,
+                                  fragment: combined,
+                                ),
+                              ),
+                            )
+                          parse_loop(conn, events, to_send)
+                        }
+
+                        // Last continuation block
+                        True -> {
+                          use #(conn, decoded_headers) <- result.try(
+                            decode_headers(conn, combined),
+                          )
+
+                          let conn =
+                            Connection(
+                              ..conn,
+                              pending_header_blocks: option.None,
+                            )
+
+                          use #(conn, events, to_send) <- result.try(
+                            handle_decoded_push_promise(
+                              conn,
+                              stream_id,
+                              promised_stream_id,
                               decoded_headers,
                               events,
                               to_send,
@@ -1200,10 +1534,10 @@ fn parse_loop(
                   let conn =
                     Connection(
                       ..conn,
-                      pending_header_blocks: option.Some(#(
-                        stream_id,
-                        end_stream,
-                        field_block_fragment,
+                      pending_header_blocks: option.Some(PendingHeaders(
+                        stream_id:,
+                        end_stream:,
+                        fragment: field_block_fragment,
                       )),
                     )
                   parse_loop(conn, events, to_send)
@@ -1219,6 +1553,178 @@ fn parse_loop(
                       conn,
                       stream_id,
                       end_stream,
+                      decoded_headers,
+                      events,
+                      to_send,
+                    ),
+                  )
+                  parse_loop(conn, events, to_send)
+                }
+              }
+            }
+
+            // DATA
+            h2_frame.Data(stream_id, end_stream, padding, data) -> {
+              use stream <- result.try(case dict.get(conn.streams, stream_id) {
+                Ok(stream) -> {
+                  use <- bool.guard(
+                    stream.state == ReservedLocal
+                      || stream.state == ReservedRemote,
+                    Error(ConnectionError(h2_frame.ProtocolError)),
+                  )
+                  Ok(stream)
+                }
+                Error(Nil) -> Error(ConnectionError(h2_frame.ProtocolError))
+              })
+
+              let new_stream_state = case end_stream {
+                True -> {
+                  case stream.state {
+                    HalfClosedLocal -> Closed
+                    _ -> HalfClosedRemote
+                  }
+                }
+                False -> stream.state
+              }
+
+              let payload_length = case padding {
+                option.Some(pad_length) ->
+                  1 + bit_array.byte_size(data) + pad_length
+                option.None -> bit_array.byte_size(data)
+              }
+
+              let new_conn_recv_window = conn.recv_window_size - payload_length
+
+              // Make sure that the data does not exceed the connection recv window
+              use <- bool.guard(
+                new_conn_recv_window < 0,
+                Error(ConnectionError(h2_frame.FlowControlError)),
+              )
+
+              let new_stream_recv_window =
+                stream.recv_window_size - payload_length
+              let conn =
+                Connection(
+                  ..conn,
+                  streams: dict.insert(
+                    conn.streams,
+                    stream_id,
+                    Stream(
+                      ..stream,
+                      state: new_stream_state,
+                      recv_window_size: new_stream_recv_window,
+                    ),
+                  ),
+                  recv_window_size: new_conn_recv_window,
+                )
+
+              // Receiving data frames on a already HalfClosedRemote stream
+              // triggers a RST_STREAM
+              use <- bool.guard(
+                stream.state == HalfClosedRemote,
+                handle_rst_stream(
+                  conn: conn,
+                  stream_id: stream_id,
+                  error_code: h2_frame.StreamClosed,
+                  flow_controlled_length: payload_length,
+                  events: events,
+                  to_send: to_send,
+                ),
+              )
+
+              use <- bool.guard(
+                new_stream_recv_window < 0,
+                handle_rst_stream(
+                  conn: conn,
+                  stream_id: stream_id,
+                  error_code: h2_frame.FlowControlError,
+                  flow_controlled_length: payload_length,
+                  events: events,
+                  to_send: to_send,
+                ),
+              )
+
+              parse_loop(
+                conn,
+                [
+                  DataReceived(
+                    stream_id: stream_id,
+                    data: data,
+                    end_stream: end_stream,
+                    flow_controlled_length: payload_length,
+                  ),
+                  ..events
+                ],
+                to_send,
+              )
+            }
+
+            h2_frame.PushPromise(
+              stream_id,
+              end_headers,
+              promised_stream_id,
+              field_block_fragment,
+            ) -> {
+              // Can only be received by clients
+              use <- bool.guard(
+                conn.role == Server,
+                Error(ConnectionError(h2_frame.ProtocolError)),
+              )
+
+              // Parent stream must exist
+              use stream <- result.try(
+                dict.get(conn.streams, stream_id)
+                |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
+              )
+
+              // Stream state must be one of these
+              use <- bool.guard(
+                !list.contains([Open, HalfClosedLocal, Closed], stream.state),
+                Error(ConnectionError(h2_frame.ProtocolError)),
+              )
+
+              // Our setting for enable push must be true
+              use <- bool.guard(
+                !conn.local_settings.enable_push,
+                Error(ConnectionError(h2_frame.ProtocolError)),
+              )
+
+              // Promised stream ID must be even (it comes from a servere)
+              use <- bool.guard(
+                promised_stream_id % 2 == 1,
+                Error(ConnectionError(h2_frame.ProtocolError)),
+              )
+
+              // Promised stream ID must be a new stream
+              use <- bool.guard(
+                promised_stream_id <= conn.last_remote_stream_id,
+                Error(ConnectionError(h2_frame.ProtocolError)),
+              )
+
+              case end_headers {
+                False -> {
+                  let conn =
+                    Connection(
+                      ..conn,
+                      pending_header_blocks: option.Some(PendingPushPromise(
+                        stream_id:,
+                        promised_stream_id:,
+                        fragment: field_block_fragment,
+                      )),
+                    )
+                  parse_loop(conn, events, to_send)
+                }
+                True -> {
+                  use #(conn, decoded_headers) <- result.try(decode_headers(
+                    conn,
+                    field_block_fragment,
+                  ))
+
+                  use #(conn, events, to_send) <- result.try(
+                    handle_decoded_push_promise(
+                      conn,
+                      stream_id,
+                      promised_stream_id,
                       decoded_headers,
                       events,
                       to_send,
