@@ -429,12 +429,16 @@ fn validate_headers(
         Error(Nil),
       )
 
-      let #(seen_pseudos, seen_regular) = case
-        string.starts_with(header.name, ":")
-      {
-        True -> {
-          #([header.name, ..seen_pseudos], seen_regular)
-        }
+      let is_pseudo = string.starts_with(header.name, ":")
+
+      use <- bool.guard(is_pseudo && seen_regular, Error(Nil))
+      use <- bool.guard(
+        is_pseudo && list.contains(seen_pseudos, header.name),
+        Error(Nil),
+      )
+
+      let #(seen_pseudos, seen_regular) = case is_pseudo {
+        True -> #([header.name, ..seen_pseudos], seen_regular)
         False -> #(seen_pseudos, True)
       }
 
