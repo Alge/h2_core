@@ -1384,7 +1384,17 @@ fn parse_loop(
 
               // Make sure that the data does not exceed the connection recv window
 
-              todo
+              Ok(#(
+                conn,
+                [
+                  DataReceived(
+                    stream_id: stream_id,
+                    data: data,
+                    end_stream: end_stream,
+                  ),
+                ],
+                to_send,
+              ))
             }
 
             // Ignore PRIORITY frames
