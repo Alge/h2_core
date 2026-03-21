@@ -1572,6 +1572,12 @@ fn parse_loop(
                 Error(ConnectionError(h2_frame.ProtocolError)),
               )
 
+              // Parent stream must exist
+              use stream <- result.try(
+                dict.get(conn.streams, stream_id)
+                |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
+              )
+
               parse_loop(
                 conn,
                 [
