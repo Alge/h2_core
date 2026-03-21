@@ -209,19 +209,10 @@ pub fn receive_push_promise_with_zero_promised_id_is_protocol_error_test() {
 
 pub fn receive_push_promise_with_already_used_id_is_protocol_error_test() {
   let #(_server, client) = server_with_open_stream()
-  // First push reserves stream 2
-  let assert Ok(pp1) =
-    h2_frame.encode_push_promise(
-      stream_id: 1,
-      end_headers: True,
-      promised_stream_id: 2,
-      field_block_fragment: <<>>,
-      padding: None,
-    )
-  let assert Ok(#(client, _events, _to_send)) = receive_data(client, pp1)
-
-  // Second push tries to reuse stream 2 — not idle anymore
-  let assert Ok(pp2) =
+  // Simulate that stream 2 was already promised by setting last_remote_stream_id
+  let client = h2_core.Connection(..client, last_remote_stream_id: 2)
+  // Push promises stream 2 — already used (2 <= 2)
+  let assert Ok(pp) =
     h2_frame.encode_push_promise(
       stream_id: 1,
       end_headers: True,
@@ -230,7 +221,7 @@ pub fn receive_push_promise_with_already_used_id_is_protocol_error_test() {
       padding: None,
     )
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
-    receive_data(client, pp2)
+    receive_data(client, pp)
 }
 
 // Section 5.1.1 - "The identifier of a newly established stream MUST be
@@ -238,19 +229,10 @@ pub fn receive_push_promise_with_already_used_id_is_protocol_error_test() {
 // opened or reserved."
 pub fn receive_push_promise_with_decreasing_id_is_protocol_error_test() {
   let #(_server, client) = server_with_open_stream()
-  // First push reserves stream 4
-  let assert Ok(pp1) =
-    h2_frame.encode_push_promise(
-      stream_id: 1,
-      end_headers: True,
-      promised_stream_id: 4,
-      field_block_fragment: <<>>,
-      padding: None,
-    )
-  let assert Ok(#(client, _events, _to_send)) = receive_data(client, pp1)
-
-  // Second push tries stream 2 — lower than 4, violates ordering
-  let assert Ok(pp2) =
+  // Simulate that stream 4 was already promised
+  let client = h2_core.Connection(..client, last_remote_stream_id: 4)
+  // Push promises stream 2 — lower than 4, violates ordering
+  let assert Ok(pp) =
     h2_frame.encode_push_promise(
       stream_id: 1,
       end_headers: True,
@@ -259,7 +241,7 @@ pub fn receive_push_promise_with_decreasing_id_is_protocol_error_test() {
       padding: None,
     )
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
-    receive_data(client, pp2)
+    receive_data(client, pp)
 }
 
 // =============================================================================

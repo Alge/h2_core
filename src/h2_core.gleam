@@ -1596,6 +1596,12 @@ fn parse_loop(
                 Error(ConnectionError(h2_frame.ProtocolError)),
               )
 
+              // Promised stream ID must be a new stream
+              use <- bool.guard(
+                promised_stream_id <= conn.last_remote_stream_id,
+                Error(ConnectionError(h2_frame.ProtocolError)),
+              )
+
               parse_loop(
                 conn,
                 [
