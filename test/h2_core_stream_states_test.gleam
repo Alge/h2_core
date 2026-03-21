@@ -173,6 +173,105 @@ pub fn receive_headers_on_reserved_local_is_protocol_error_test() {
 }
 
 // =============================================================================
+// Reserved (remote) state — transitions — RFC 9113 Section 5.1
+// =============================================================================
+
+// RFC 9113 Section 5.1 (reserved remote):
+// "Receiving a HEADERS frame causes the stream to transition to
+// 'half-closed (local)'."
+//
+// This is the normal push response flow: after receiving PUSH_PROMISE,
+// the server sends HEADERS on the promised stream to deliver the response.
+pub fn receive_headers_on_reserved_remote_transitions_to_half_closed_local_test() {
+  let client = client_with_reserved_remote_stream()
+  let assert Ok(stream) = dict.get(client.streams, 2)
+  assert stream.state == ReservedRemote
+
+  // Server sends HEADERS on promised stream 2
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 2,
+      end_stream: False,
+      end_headers: True,
+      priority: None,
+      field_block_fragment: <<0x88>>,
+      padding: None,
+    )
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, headers_frame)
+  let assert Ok(stream) = dict.get(client.streams, 2)
+  assert stream.state == h2_core.HalfClosedLocal
+}
+
+// RFC 9113 Section 5.1 (reserved remote):
+// "Either endpoint can send a RST_STREAM frame to cause the stream
+// to become 'closed'. This releases the stream reservation."
+pub fn receive_rst_stream_on_reserved_remote_transitions_to_closed_test() {
+  let client = client_with_reserved_remote_stream()
+  let assert Ok(stream) = dict.get(client.streams, 2)
+  assert stream.state == ReservedRemote
+
+  // Server sends RST_STREAM on promised stream 2
+  let assert Ok(rst) =
+    h2_frame.encode_rst_stream(stream_id: 2, error_code: h2_frame.Cancel)
+  let assert Ok(#(client, events, _to_send)) = receive_data(client, rst)
+  assert events == [StreamReset(stream_id: 2, error_code: h2_frame.Cancel)]
+  let assert Ok(stream) = dict.get(client.streams, 2)
+  assert stream.state == Closed
+}
+
+// =============================================================================
+// Reserved (local) state — transitions — RFC 9113 Section 5.1
+// =============================================================================
+
+// RFC 9113 Section 5.1 (reserved local):
+// "Either endpoint can send a RST_STREAM frame to cause the stream
+// to become 'closed'. This releases the stream reservation."
+//
+// The client rejects a push by sending RST_STREAM on the reserved stream.
+pub fn receive_rst_stream_on_reserved_local_transitions_to_closed_test() {
+  let server = server_with_reserved_local_stream()
+  let assert Ok(stream) = dict.get(server.streams, 2)
+  assert stream.state == ReservedLocal
+
+  // Client sends RST_STREAM on promised stream 2 to reject the push
+  let assert Ok(rst) =
+    h2_frame.encode_rst_stream(stream_id: 2, error_code: h2_frame.Cancel)
+  let assert Ok(#(server, events, _to_send)) = receive_data(server, rst)
+  assert events == [StreamReset(stream_id: 2, error_code: h2_frame.Cancel)]
+  let assert Ok(stream) = dict.get(server.streams, 2)
+  assert stream.state == Closed
+}
+
+// =============================================================================
+// Half-closed (local) state — RFC 9113 Section 5.1
+// =============================================================================
+
+// RFC 9113 Section 5.1 (half-closed local):
+// "A stream transitions from this state to 'closed' when a frame is
+// received with the END_STREAM flag set or when either peer sends a
+// RST_STREAM frame."
+//
+// Test: receiving RST_STREAM on a half-closed (local) stream transitions
+// to closed.
+pub fn receive_rst_stream_on_half_closed_local_transitions_to_closed_test() {
+  let #(server, _client) = server_with_open_stream()
+  // Server sends headers with END_STREAM → half-closed (local)
+  let assert Ok(#(server, _events, _to_send)) =
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == h2_core.HalfClosedLocal
+
+  // Client sends RST_STREAM
+  let assert Ok(rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
+  let assert Ok(#(server, events, _to_send)) = receive_data(server, rst)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.Cancel)]
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == Closed
+}
+
+// =============================================================================
 // Half-closed (remote) state — RFC 9113 Section 5.1
 // =============================================================================
 
@@ -261,6 +360,31 @@ pub fn send_headers_on_closed_stream_is_error_test() {
   // (e.g. trailers), add a test that sending headers on a closed stream
   // returns an error.
   let assert Error(_) = h2_core.send_data(server, 1, <<>>, True, None)
+}
+
+// RFC 9113 Section 5.1 (closed):
+// "An endpoint MUST NOT send frames other than PRIORITY on a closed stream."
+//
+// Test: send_rst_stream on a closed stream should be an error.
+pub fn send_rst_stream_on_closed_stream_is_error_test() {
+  let #(server, _client) = server_with_closed_stream()
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == Closed
+
+  let assert Error(_) = send_rst_stream(server, 1, h2_frame.Cancel)
+}
+
+// RFC 9113 Section 5.1 (closed):
+// "An endpoint MUST NOT send frames other than PRIORITY on a closed stream."
+//
+// Test: send_window_update on a closed stream should be an error.
+pub fn send_window_update_on_closed_stream_is_error_test() {
+  let #(server, _client) = server_with_closed_stream()
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == Closed
+
+  let assert Error(_) =
+    h2_core.send_window_update(server, 1, 1024)
 }
 
 // =============================================================================
