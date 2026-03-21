@@ -1,8 +1,8 @@
 import gleam/dict
 import h2_core.{
   Client, Connected, ConnectionError, HalfClosedLocal, HalfClosedRemote, Header,
-  HeadersReceived, Open, Server, StreamReset, WithIndexing, receive_data,
-  send_headers, send_window_update,
+  HeadersReceived, Open, Server, StreamReset, WithIndexing, open_stream,
+  receive_data, send_window_update,
 }
 import h2_frame
 import helper
@@ -20,7 +20,7 @@ pub fn new_stream_default_window_sizes_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.send_window_size == 65_535
@@ -44,7 +44,7 @@ pub fn send_window_update_stream_level_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   let assert Ok(#(_server, events, to_send)) =
@@ -110,7 +110,7 @@ pub fn send_window_update_stream_does_not_affect_connection_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   let assert Ok(#(server, _events, _to_send)) =
@@ -125,7 +125,7 @@ pub fn send_window_update_stream_recv_window_accumulates_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   let assert Ok(#(server, _events, _to_send)) =
@@ -142,7 +142,7 @@ pub fn send_window_update_stream_overflow_recv_window_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   let assert Error(ConnectionError(h2_frame.FlowControlError)) =
@@ -261,7 +261,7 @@ pub fn receive_window_update_stream_level_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   let assert Ok(wu) =
@@ -280,7 +280,7 @@ pub fn receive_window_update_stream_does_not_affect_connection_window_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   let assert Ok(wu) =
@@ -297,7 +297,7 @@ pub fn receive_window_update_stream_accumulates_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   let assert Ok(wu1) =
@@ -317,7 +317,7 @@ pub fn receive_window_update_stream_overflow_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   let assert Ok(wu) =
@@ -351,7 +351,7 @@ pub fn receive_window_update_on_open_stream_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == Open
@@ -372,7 +372,7 @@ pub fn receive_window_update_on_half_closed_local_stream_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   let server = helper.set_stream_state(server, 1, HalfClosedLocal)
 
@@ -394,7 +394,7 @@ pub fn receive_window_update_on_half_closed_remote_stream_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], True)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], True)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == HalfClosedRemote
@@ -418,7 +418,7 @@ pub fn receive_window_update_on_closed_stream_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   let server = helper.set_stream_state(server, 1, h2_core.Closed)
 
@@ -437,7 +437,7 @@ pub fn receive_window_update_connection_survives_stream_overflow_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, headers1)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers1)
 
   // Overflow stream 1's window — should get RST_STREAM but connection lives
@@ -452,7 +452,7 @@ pub fn receive_window_update_connection_survives_stream_overflow_test() {
 
   // Connection should still work — open stream 3
   let assert Ok(#(_client, _events, headers3)) =
-    send_headers(client, [Header(":method", "POST", WithIndexing)], False)
+    open_stream(client, [Header(":method", "POST", WithIndexing)], False)
   let assert Ok(#(server, events, _to_send)) = receive_data(server, headers3)
   let assert [HeadersReceived(stream_id: 3, headers: _, end_stream: False)] =
     events

@@ -5,7 +5,7 @@ packages = [
   { name = "alpacki", version = "1.0.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "alpacki", source = "hex", outer_checksum = "D58226C7A776B6B9EA1BFD13BD453F232FE7FE6E9DAA9931CE8BD26D23BC913A" },
   { name = "gleam_stdlib", version = "0.70.0", build_tools = ["gleam"], requirements = [], otp_app = "gleam_stdlib", source = "hex", outer_checksum = "86949BF5D1F0E4AC0AB5B06F235D8A5CC11A2DFC33BF22F752156ED61CA7D0FF" },
   { name = "gleeunit", version = "1.9.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleeunit", source = "hex", outer_checksum = "DA9553CE58B67924B3C631F96FE3370C49EB6D6DC6B384EC4862CC4AAA718F3C" },
-  { name = "h2_frame", version = "0.3.1", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "h2_frame", source = "hex", outer_checksum = "DCF8874480F39FE31451CBE035070B4F79F4456594CB57BAED90B41D827D34AD" },
+  { name = "h2_frame", version = "0.4.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "h2_frame", source = "hex", outer_checksum = "90EEE84822D67538E4A678B1619FEBA2CB468CB5F0CC1C60851EF420DCDEB199" },
 ]
 
 [requirements]
