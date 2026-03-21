@@ -67,7 +67,14 @@ pub fn receive_data_on_open_stream_test() {
     )
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, data_frame)
   assert events
-    == [DataReceived(stream_id: 1, data: <<"hello":utf8>>, end_stream: False)]
+    == [
+      DataReceived(
+        stream_id: 1,
+        data: <<"hello":utf8>>,
+        end_stream: False,
+        flow_controlled_length: 5,
+      ),
+    ]
 }
 
 // RFC 9113 Section 6.1 - DATA with END_STREAM flag transitions stream to
@@ -83,7 +90,14 @@ pub fn receive_data_with_end_stream_test() {
     )
   let assert Ok(#(server, events, _to_send)) = receive_data(server, data_frame)
   assert events
-    == [DataReceived(stream_id: 1, data: <<"goodbye":utf8>>, end_stream: True)]
+    == [
+      DataReceived(
+        stream_id: 1,
+        data: <<"goodbye":utf8>>,
+        end_stream: True,
+        flow_controlled_length: 7,
+      ),
+    ]
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == h2_core.HalfClosedRemote
 }
@@ -134,10 +148,14 @@ pub fn receive_data_on_half_closed_remote_is_stream_closed_error_test() {
     )
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal. The endpoint
   // sends RST_STREAM and continues processing.
+  // RFC 9113 Section 6.9 - The connection window must still be accounted for,
+  // and since the data is discarded, a WINDOW_UPDATE must be sent to reclaim it.
   let assert Ok(#(_server, events, to_send)) = receive_data(server, data_frame)
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.StreamClosed)
-  assert to_send == expected_rst
+  let assert Ok(expected_wu) =
+    h2_frame.encode_window_update(stream_id: 0, window_size_increment: 7)
+  assert to_send == <<expected_rst:bits, expected_wu:bits>>
   assert events
     == [StreamReset(stream_id: 1, error_code: h2_frame.StreamClosed)]
 }
@@ -204,7 +222,15 @@ pub fn receive_empty_data_frame_test() {
       padding: None,
     )
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, data_frame)
-  assert events == [DataReceived(stream_id: 1, data: <<>>, end_stream: False)]
+  assert events
+    == [
+      DataReceived(
+        stream_id: 1,
+        data: <<>>,
+        end_stream: False,
+        flow_controlled_length: 0,
+      ),
+    ]
 }
 
 // RFC 9113 Section 6.1 - Empty DATA frame with END_STREAM is valid
@@ -219,7 +245,15 @@ pub fn receive_empty_data_frame_with_end_stream_test() {
       padding: None,
     )
   let assert Ok(#(server, events, _to_send)) = receive_data(server, data_frame)
-  assert events == [DataReceived(stream_id: 1, data: <<>>, end_stream: True)]
+  assert events
+    == [
+      DataReceived(
+        stream_id: 1,
+        data: <<>>,
+        end_stream: True,
+        flow_controlled_length: 0,
+      ),
+    ]
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == h2_core.HalfClosedRemote
 }
@@ -293,13 +327,17 @@ pub fn receive_data_exceeding_stream_window_is_flow_control_error_test() {
     )
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal. The endpoint
   // sends RST_STREAM and continues processing.
+  // RFC 9113 Section 6.9 - The connection window must still be accounted for,
+  // and since the data is discarded, a WINDOW_UPDATE must be sent to reclaim it.
   let assert Ok(#(_server, events, to_send)) = receive_data(server, data_frame)
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(
       stream_id: 1,
       error_code: h2_frame.FlowControlError,
     )
-  assert to_send == expected_rst
+  let assert Ok(expected_wu) =
+    h2_frame.encode_window_update(stream_id: 0, window_size_increment: 13)
+  assert to_send == <<expected_rst:bits, expected_wu:bits>>
   assert events
     == [StreamReset(stream_id: 1, error_code: h2_frame.FlowControlError)]
 }
@@ -830,9 +868,18 @@ pub fn receive_data_exceeding_stream_window_still_decrements_connection_window_t
       padding: None,
     )
   // Stream error (not connection error) — receive_data returns Ok with RST_STREAM
-  let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
+  let assert Ok(#(server, _events, to_send)) = receive_data(server, data_frame)
   // Connection window MUST still be decremented despite the stream error
   assert server.recv_window_size == 65_535 - data_size
+  // Data is discarded, so auto-reclaim via WINDOW_UPDATE
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(
+      stream_id: 1,
+      error_code: h2_frame.FlowControlError,
+    )
+  let assert Ok(expected_wu) =
+    h2_frame.encode_window_update(stream_id: 0, window_size_increment: 13)
+  assert to_send == <<expected_rst:bits, expected_wu:bits>>
 }
 
 // RFC 9113 Section 6.9 - "A receiver that receives a flow-controlled frame
@@ -864,8 +911,14 @@ pub fn receive_data_on_closed_stream_still_counts_toward_connection_window_test(
       data: <<"stale":utf8>>,
       padding: None,
     )
-  let assert Ok(#(server, _events, _to_send)) = receive_data(server, more_data)
+  let assert Ok(#(server, _events, to_send)) = receive_data(server, more_data)
+  // Connection window is decremented then reclaimed via auto WINDOW_UPDATE
   assert server.recv_window_size == 65_535 - 5
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.StreamClosed)
+  let assert Ok(expected_wu) =
+    h2_frame.encode_window_update(stream_id: 0, window_size_increment: 5)
+  assert to_send == <<expected_rst:bits, expected_wu:bits>>
 }
 
 // =============================================================================
@@ -892,8 +945,18 @@ pub fn receive_multiple_data_frames_test() {
     receive_data(server, <<frame1:bits, frame2:bits>>)
   assert events
     == [
-      DataReceived(stream_id: 1, data: <<"part1":utf8>>, end_stream: False),
-      DataReceived(stream_id: 1, data: <<"part2":utf8>>, end_stream: True),
+      DataReceived(
+        stream_id: 1,
+        data: <<"part1":utf8>>,
+        end_stream: False,
+        flow_controlled_length: 5,
+      ),
+      DataReceived(
+        stream_id: 1,
+        data: <<"part2":utf8>>,
+        end_stream: True,
+        flow_controlled_length: 5,
+      ),
     ]
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == h2_core.HalfClosedRemote
@@ -917,7 +980,14 @@ pub fn receive_padded_data_frame_test() {
     )
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, data_frame)
   assert events
-    == [DataReceived(stream_id: 1, data: <<"hello":utf8>>, end_stream: False)]
+    == [
+      DataReceived(
+        stream_id: 1,
+        data: <<"hello":utf8>>,
+        end_stream: False,
+        flow_controlled_length: 16,
+      ),
+    ]
 }
 
 // RFC 9113 Section 6.1 - "The entire DATA frame payload is included in flow
@@ -988,7 +1058,10 @@ pub fn receive_padded_data_pad_length_field_counts_toward_flow_control_test() {
       stream_id: 1,
       error_code: h2_frame.FlowControlError,
     )
-  assert to_send == expected_rst
+  // Full payload is 14 bytes (1 + 3 + 10), auto-reclaim via WINDOW_UPDATE
+  let assert Ok(expected_wu) =
+    h2_frame.encode_window_update(stream_id: 0, window_size_increment: 14)
+  assert to_send == <<expected_rst:bits, expected_wu:bits>>
   assert events
     == [StreamReset(stream_id: 1, error_code: h2_frame.FlowControlError)]
 }
@@ -1070,7 +1143,14 @@ pub fn receive_data_nonzero_padding_bytes_accepted_by_default_test() {
   let assert Ok(#(_server, events, _to_send)) =
     receive_data(server, non_zero_padded)
   assert events
-    == [DataReceived(stream_id: 1, data: <<"hello":utf8>>, end_stream: False)]
+    == [
+      DataReceived(
+        stream_id: 1,
+        data: <<"hello":utf8>>,
+        end_stream: False,
+        flow_controlled_length: 9,
+      ),
+    ]
 }
 
 // RFC 9113 Section 6.1 - "The total number of padding octets is determined

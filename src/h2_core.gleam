@@ -221,7 +221,12 @@ pub fn default_settings() -> Settings {
 
 pub type Event {
   HeadersReceived(stream_id: Int, headers: List(Header), end_stream: Bool)
-  DataReceived(stream_id: Int, data: BitArray, end_stream: Bool)
+  DataReceived(
+    stream_id: Int,
+    data: BitArray,
+    end_stream: Bool,
+    flow_controlled_length: Int,
+  )
   StreamReset(stream_id: Int, error_code: ErrorCode)
   StreamEnded(stream_id: Int)
   PushPromiseReceived(
@@ -577,6 +582,7 @@ fn handle_decoded_headers(
                 conn:,
                 stream_id:,
                 error_code: h2_frame.StreamClosed,
+                flow_controlled_length: 0,
                 events:,
                 to_send:,
               )
@@ -619,6 +625,7 @@ fn handle_decoded_headers(
       conn:,
       stream_id:,
       error_code: h2_frame.RefusedStream,
+      flow_controlled_length: 0,
       events:,
       to_send:,
     ),
@@ -1001,20 +1008,41 @@ fn handle_rst_stream(
   conn conn: Connection,
   stream_id stream_id: Int,
   error_code error_code: h2_frame.ErrorCode,
+  flow_controlled_length flow_controlled_length: Int,
   events events: List(Event),
   to_send to_send: BitArray,
 ) -> Result(#(Connection, List(Event), BitArray), H2Error) {
-  use encoded_frame <- result.try(
+  use encoded_rst_stream_frame <- result.try(
     h2_frame.encode_rst_stream(stream_id: stream_id, error_code: error_code)
     |> result.map_error(map_frame_error),
   )
 
-  Ok(
-    #(conn, [StreamReset(stream_id:, error_code:), ..events], <<
-      to_send:bits,
-      encoded_frame:bits,
-    >>),
-  )
+  // If flow_controlled_length is not 0, add a WindowReset frame
+  case flow_controlled_length {
+    0 ->
+      Ok(
+        #(conn, [StreamReset(stream_id:, error_code:), ..events], <<
+          to_send:bits,
+          encoded_rst_stream_frame:bits,
+        >>),
+      )
+    _ -> {
+      use encoded_window_update <- result.try(
+        h2_frame.encode_window_update(
+          stream_id: 0,
+          window_size_increment: flow_controlled_length,
+        )
+        |> result.map_error(map_frame_error),
+      )
+      Ok(
+        #(conn, [StreamReset(stream_id:, error_code:), ..events], <<
+          to_send:bits,
+          encoded_rst_stream_frame:bits,
+          encoded_window_update:bits,
+        >>),
+      )
+    }
+  }
 }
 
 fn parse_loop(
@@ -1428,6 +1456,7 @@ fn parse_loop(
                   conn: conn,
                   stream_id: stream_id,
                   error_code: h2_frame.StreamClosed,
+                  flow_controlled_length: payload_length,
                   events: events,
                   to_send: to_send,
                 ),
@@ -1439,6 +1468,7 @@ fn parse_loop(
                   conn: conn,
                   stream_id: stream_id,
                   error_code: h2_frame.FlowControlError,
+                  flow_controlled_length: payload_length,
                   events: events,
                   to_send: to_send,
                 ),
@@ -1451,6 +1481,7 @@ fn parse_loop(
                     stream_id: stream_id,
                     data: data,
                     end_stream: end_stream,
+                    flow_controlled_length: payload_length,
                   ),
                   ..events
                 ],
