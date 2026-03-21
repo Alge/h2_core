@@ -1,9 +1,10 @@
 import gleam/dict
 import gleam/option.{None}
 import h2_core.{
-  type Connection, Client, Connected, ConnectionError, Header,
-  PushPromiseReceived, ReservedLocal, ReservedRemote, Server, StreamError,
-  WithIndexing, open_stream, receive_data, send_headers, send_settings,
+  type Connection, Client, Closed, Connected, ConnectionError, HalfClosedRemote,
+  Header, PushPromiseReceived, ReservedLocal, ReservedRemote, Server,
+  StreamError, WithIndexing, open_stream, receive_data, send_headers,
+  send_rst_stream, send_settings,
 }
 import h2_frame
 import helper
@@ -609,4 +610,196 @@ pub fn receive_push_promise_nonzero_padding_bytes_accepted_by_default_test() {
     receive_data(client, non_zero_padded)
   assert events
     == [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: [])]
+}
+
+// =============================================================================
+// Section 6.6 - "However, an endpoint that has sent RST_STREAM on the
+// associated stream MUST handle PUSH_PROMISE frames that might have been
+// created before the RST_STREAM frame is received and processed."
+//
+// A PUSH_PROMISE arriving on a stream where the client previously sent
+// RST_STREAM must not cause a connection error — the server may have sent
+// the PUSH_PROMISE before processing the RST_STREAM.
+// =============================================================================
+
+pub fn receive_push_promise_after_client_sent_rst_stream_is_not_connection_error_test() {
+  let #(_server, client) = server_with_open_stream()
+  // Client sends RST_STREAM on stream 1
+  let assert Ok(#(client, _events, _to_send)) =
+    send_rst_stream(client, 1, h2_frame.Cancel)
+  let assert Ok(stream) = dict.get(client.streams, 1)
+  assert stream.state == Closed
+
+  // Server's PUSH_PROMISE arrives (was in flight before RST_STREAM processed)
+  let assert Ok(pp) =
+    h2_frame.encode_push_promise(
+      stream_id: 1,
+      end_headers: True,
+      promised_stream_id: 2,
+      field_block_fragment: <<>>,
+      padding: None,
+    )
+  // Must not be a connection error — the endpoint must handle this gracefully
+  let assert Ok(#(_client, _events, _to_send)) = receive_data(client, pp)
+}
+
+// =============================================================================
+// Section 6.6 - "A receiver MUST treat the receipt of a PUSH_PROMISE on a
+// stream that is neither 'open' nor 'half-closed (local)' as a connection
+// error (Section 5.4.1) of type PROTOCOL_ERROR."
+//
+// Half-closed (remote) on the receiver means the receiver sent END_STREAM
+// but hasn't received it — the stream is not "open" or "half-closed (local)",
+// so receiving PUSH_PROMISE here is a PROTOCOL_ERROR.
+// =============================================================================
+
+pub fn receive_push_promise_on_half_closed_remote_is_protocol_error_test() {
+  let #(_server, client) = server_with_open_stream()
+  // Simulate stream 1 being half-closed (remote) on client
+  // (server sent END_STREAM to client)
+  let client = helper.set_stream_state(client, 1, HalfClosedRemote)
+  let assert Ok(pp) =
+    h2_frame.encode_push_promise(
+      stream_id: 1,
+      end_headers: True,
+      promised_stream_id: 2,
+      field_block_fragment: <<>>,
+      padding: None,
+    )
+  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+    receive_data(client, pp)
+}
+
+// =============================================================================
+// Section 6.6 - "A sender MUST NOT send a PUSH_PROMISE on a stream unless
+// that stream is either 'open' or 'half-closed (remote)'"
+//
+// Sending on a closed stream must error.
+// =============================================================================
+
+pub fn send_push_promise_on_closed_stream_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let server = helper.set_stream_state(server, 1, Closed)
+  let assert Error(_) =
+    h2_core.send_push_promise(server, 1, 2, [
+      Header(":method", "GET", WithIndexing),
+    ])
+}
+
+// =============================================================================
+// Section 6.6 - "the sender MUST ensure that the promised stream is a valid
+// choice for a new stream identifier (Section 5.1.1) (that is, the promised
+// stream MUST be in the 'idle' state)."
+//
+// Sending with a promised stream ID that is already in use (not idle).
+// =============================================================================
+
+pub fn send_push_promise_with_already_used_promised_id_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  // First push reserves stream 2
+  let assert Ok(#(server, _events, _to_send)) =
+    h2_core.send_push_promise(server, 1, 2, [
+      Header(":method", "GET", WithIndexing),
+    ])
+  // Second push reuses stream 2 — no longer idle
+  let assert Error(_) =
+    h2_core.send_push_promise(server, 1, 2, [
+      Header(":method", "GET", WithIndexing),
+    ])
+}
+
+// =============================================================================
+// Section 6.6 - "PUSH_PROMISE frames MUST only be sent on a peer-initiated
+// stream"
+//
+// Server-initiated streams (even IDs) are not peer-initiated from the
+// server's perspective. Sending PUSH_PROMISE on a server-initiated stream
+// must error.
+// =============================================================================
+
+pub fn send_push_promise_on_server_initiated_stream_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  // Reserve stream 2 via push, then try to push on stream 2 itself
+  let assert Ok(#(server, _events, _to_send)) =
+    h2_core.send_push_promise(server, 1, 2, [
+      Header(":method", "GET", WithIndexing),
+    ])
+  let assert Error(_) =
+    h2_core.send_push_promise(server, 2, 4, [
+      Header(":method", "GET", WithIndexing),
+    ])
+}
+
+// =============================================================================
+// Verify that send_push_promise produces correctly encoded output.
+// =============================================================================
+
+pub fn send_push_promise_returns_encoded_frame_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(#(_server, _events, to_send)) =
+    h2_core.send_push_promise(server, 1, 2, [
+      Header(":method", "GET", WithIndexing),
+    ])
+  // The output should be a valid PUSH_PROMISE frame that can be decoded
+  // by the client. We verify by having the client parse it.
+  let client = helper.new_connection(Client, Connected)
+  let assert Ok(#(client, _events, _to_send)) =
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+  let assert Ok(#(client, events, _to_send)) = receive_data(client, to_send)
+  assert events
+    == [
+      PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: [
+        Header(":method", "GET", WithIndexing),
+      ]),
+    ]
+  // Promised stream should be reserved on client side
+  let assert Ok(stream) = dict.get(client.streams, 2)
+  assert stream.state == ReservedRemote
+}
+
+// =============================================================================
+// Section 8.4 - Multiple PUSH_PROMISE frames reserving different streams.
+// Verify all are properly reserved.
+// =============================================================================
+
+pub fn receive_multiple_push_promises_reserves_all_streams_test() {
+  let #(_server, client) = server_with_open_stream()
+  let assert Ok(pp1) =
+    h2_frame.encode_push_promise(
+      stream_id: 1,
+      end_headers: True,
+      promised_stream_id: 2,
+      field_block_fragment: <<>>,
+      padding: None,
+    )
+  let assert Ok(pp2) =
+    h2_frame.encode_push_promise(
+      stream_id: 1,
+      end_headers: True,
+      promised_stream_id: 4,
+      field_block_fragment: <<>>,
+      padding: None,
+    )
+  let assert Ok(pp3) =
+    h2_frame.encode_push_promise(
+      stream_id: 1,
+      end_headers: True,
+      promised_stream_id: 6,
+      field_block_fragment: <<>>,
+      padding: None,
+    )
+  let assert Ok(#(client, events, _to_send)) =
+    receive_data(client, <<pp1:bits, pp2:bits, pp3:bits>>)
+  assert events
+    == [
+      PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: []),
+      PushPromiseReceived(stream_id: 1, promised_stream_id: 4, headers: []),
+      PushPromiseReceived(stream_id: 1, promised_stream_id: 6, headers: []),
+    ]
+  let assert Ok(s2) = dict.get(client.streams, 2)
+  let assert Ok(s4) = dict.get(client.streams, 4)
+  let assert Ok(s6) = dict.get(client.streams, 6)
+  assert s2.state == ReservedRemote
+  assert s4.state == ReservedRemote
+  assert s6.state == ReservedRemote
 }
