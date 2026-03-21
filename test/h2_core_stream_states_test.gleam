@@ -99,7 +99,8 @@ pub fn send_data_on_reserved_local_stream_is_error_test() {
   assert stream.state == ReservedLocal
 
   // Attempt to send DATA on reserved (local) stream 2 — should fail
-  let assert Error(_) = h2_core.send_data(server, 2, <<"illegal":utf8>>, False, None)
+  let assert Error(_) =
+    h2_core.send_data(server, 2, <<"illegal":utf8>>, False, None)
 }
 
 // =============================================================================
@@ -122,7 +123,8 @@ pub fn send_data_on_reserved_remote_stream_is_error_test() {
   assert stream.state == ReservedRemote
 
   // Attempt to send DATA on reserved (remote) stream 2 — should fail
-  let assert Error(_) = h2_core.send_data(client, 2, <<"illegal":utf8>>, False, None)
+  let assert Error(_) =
+    h2_core.send_data(client, 2, <<"illegal":utf8>>, False, None)
 }
 
 // =============================================================================
@@ -187,7 +189,8 @@ pub fn send_data_on_closed_stream_is_error_test() {
   assert stream.state == Closed
 
   // Attempt to send DATA on closed stream 1 — should fail
-  let assert Error(_) = h2_core.send_data(server, 1, <<"illegal":utf8>>, False, None)
+  let assert Error(_) =
+    h2_core.send_data(server, 1, <<"illegal":utf8>>, False, None)
 }
 
 // RFC 9113 Section 5.1 (closed):

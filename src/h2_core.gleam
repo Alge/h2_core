@@ -1503,6 +1503,11 @@ fn parse_loop(
                 |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
               )
 
+              use <- bool.guard(
+                stream.state == Closed,
+                parse_loop(conn, events, to_send),
+              )
+
               let stream = Stream(..stream, state: Closed)
 
               let conn =
