@@ -759,11 +759,28 @@ pub fn send_headers(
 }
 
 pub fn send_push_promise(
-  _conn: Connection,
-  _stream_id: Int,
-  _promised_stream_id: Int,
-  _headers: List(Header),
-) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+  conn: Connection,
+  stream_id: Int,
+  headers: List(Header),
+) -> Result(#(Connection, List(StreamEvent), BitArray, Int), H2Error) {
+  // Must only be sent by server
+  use <- bool.guard(
+    conn.role == Client,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  // Must not be sent on stream 0 (the connection level)
+  use <- bool.guard(
+    stream_id == 0,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
+  // Stream must exist
+  use stream <- result.try(
+    dict.get(conn.streams, stream_id)
+    |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
   todo
 }
 

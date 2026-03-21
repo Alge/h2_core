@@ -404,12 +404,13 @@ pub fn receive_push_promise_updates_hpack_state_test() {
 pub fn send_push_promise_on_open_peer_stream_test() {
   let #(server, _client) = server_with_open_stream()
   // Server pushes on stream 1 (client-initiated, open)
-  let assert Ok(#(server, _events, _to_send)) =
-    h2_core.send_push_promise(server, 1, 2, [
+  let assert Ok(#(server, _events, _to_send, promised_id)) =
+    h2_core.send_push_promise(server, 1, [
       Header(":method", "GET", WithIndexing),
     ])
-  // Promised stream 2 should be in reserved (local) on server side
-  let assert Ok(stream) = dict.get(server.streams, 2)
+  // Promised stream should be even and in reserved (local) on server side
+  assert promised_id % 2 == 0
+  let assert Ok(stream) = dict.get(server.streams, promised_id)
   assert stream.state == ReservedLocal
 }
 
@@ -421,11 +422,11 @@ pub fn send_push_promise_on_half_closed_remote_test() {
     open_stream(client, [Header(":method", "GET", WithIndexing)], True)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   // Stream 1 is half-closed (remote) on server — push should work
-  let assert Ok(#(server, _events, _to_send)) =
-    h2_core.send_push_promise(server, 1, 2, [
+  let assert Ok(#(server, _events, _to_send, promised_id)) =
+    h2_core.send_push_promise(server, 1, [
       Header(":method", "GET", WithIndexing),
     ])
-  let assert Ok(stream) = dict.get(server.streams, 2)
+  let assert Ok(stream) = dict.get(server.streams, promised_id)
   assert stream.state == ReservedLocal
 }
 
@@ -434,35 +435,26 @@ pub fn send_push_promise_on_half_closed_remote_test() {
 pub fn send_push_promise_on_idle_stream_is_error_test() {
   let server = helper.new_connection(Server, Connected)
   let assert Error(_) =
-    h2_core.send_push_promise(server, 1, 2, [
+    h2_core.send_push_promise(server, 1, [
       Header(":method", "GET", WithIndexing),
     ])
 }
 
-// RFC 9113 Section 6.6 - "the sender MUST ensure that the promised stream
-// is a valid choice for a new stream identifier (Section 5.1.1) (that is,
-// the promised stream MUST be in the 'idle' state)."
-pub fn send_push_promise_promised_id_must_be_even_test() {
+// RFC 9113 Section 5.1.1 - Auto-allocated promised stream IDs must be
+// even and strictly increasing.
+pub fn send_push_promise_auto_allocates_increasing_even_ids_test() {
   let #(server, _client) = server_with_open_stream()
-  // Promised stream 3 is odd — invalid for server
-  let assert Error(_) =
-    h2_core.send_push_promise(server, 1, 3, [
+  let assert Ok(#(server, _events, _to_send, id1)) =
+    h2_core.send_push_promise(server, 1, [
       Header(":method", "GET", WithIndexing),
     ])
-}
-
-pub fn send_push_promise_promised_id_must_be_increasing_test() {
-  let #(server, _client) = server_with_open_stream()
-  // First push reserves stream 4
-  let assert Ok(#(server, _events, _to_send)) =
-    h2_core.send_push_promise(server, 1, 4, [
+  let assert Ok(#(_server, _events, _to_send, id2)) =
+    h2_core.send_push_promise(server, 1, [
       Header(":method", "GET", WithIndexing),
     ])
-  // Second push tries stream 2 — lower than 4
-  let assert Error(_) =
-    h2_core.send_push_promise(server, 1, 2, [
-      Header(":method", "GET", WithIndexing),
-    ])
+  assert id1 % 2 == 0
+  assert id2 % 2 == 0
+  assert id2 > id1
 }
 
 // RFC 9113 Section 6.6 - "PUSH_PROMISE MUST NOT be sent if the
@@ -478,7 +470,7 @@ pub fn send_push_promise_when_peer_disabled_push_is_error_test() {
     receive_data(server, settings_frame)
   // Server tries to push — should fail
   let assert Error(_) =
-    h2_core.send_push_promise(server, 1, 2, [
+    h2_core.send_push_promise(server, 1, [
       Header(":method", "GET", WithIndexing),
     ])
 }
@@ -494,7 +486,7 @@ pub fn client_send_push_promise_is_error_test() {
   let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
   // Client tries to push — must be rejected
   let assert Error(_) =
-    h2_core.send_push_promise(client, 1, 2, [
+    h2_core.send_push_promise(client, 1, [
       Header(":method", "GET", WithIndexing),
     ])
 }
@@ -503,7 +495,7 @@ pub fn client_send_push_promise_is_error_test() {
 pub fn send_push_promise_on_stream_zero_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Error(_) =
-    h2_core.send_push_promise(server, 0, 2, [
+    h2_core.send_push_promise(server, 0, [
       Header(":method", "GET", WithIndexing),
     ])
 }
@@ -522,7 +514,7 @@ pub fn send_push_promise_on_half_closed_local_is_error_test() {
   let assert Ok(#(server, _events, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
   let assert Error(_) =
-    h2_core.send_push_promise(server, 1, 2, [
+    h2_core.send_push_promise(server, 1, [
       Header(":method", "GET", WithIndexing),
     ])
 }
@@ -681,29 +673,7 @@ pub fn send_push_promise_on_closed_stream_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let server = helper.set_stream_state(server, 1, Closed)
   let assert Error(_) =
-    h2_core.send_push_promise(server, 1, 2, [
-      Header(":method", "GET", WithIndexing),
-    ])
-}
-
-// =============================================================================
-// Section 6.6 - "the sender MUST ensure that the promised stream is a valid
-// choice for a new stream identifier (Section 5.1.1) (that is, the promised
-// stream MUST be in the 'idle' state)."
-//
-// Sending with a promised stream ID that is already in use (not idle).
-// =============================================================================
-
-pub fn send_push_promise_with_already_used_promised_id_is_error_test() {
-  let #(server, _client) = server_with_open_stream()
-  // First push reserves stream 2
-  let assert Ok(#(server, _events, _to_send)) =
-    h2_core.send_push_promise(server, 1, 2, [
-      Header(":method", "GET", WithIndexing),
-    ])
-  // Second push reuses stream 2 — no longer idle
-  let assert Error(_) =
-    h2_core.send_push_promise(server, 1, 2, [
+    h2_core.send_push_promise(server, 1, [
       Header(":method", "GET", WithIndexing),
     ])
 }
@@ -720,24 +690,26 @@ pub fn send_push_promise_with_already_used_promised_id_is_error_test() {
 pub fn send_push_promise_on_server_initiated_stream_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   // Reserve stream 2 via push, then try to push on stream 2 itself
-  let assert Ok(#(server, _events, _to_send)) =
-    h2_core.send_push_promise(server, 1, 2, [
+  let assert Ok(#(server, _events, _to_send, _promised_id)) =
+    h2_core.send_push_promise(server, 1, [
       Header(":method", "GET", WithIndexing),
     ])
   let assert Error(_) =
-    h2_core.send_push_promise(server, 2, 4, [
+    h2_core.send_push_promise(server, 2, [
       Header(":method", "GET", WithIndexing),
     ])
 }
 
 // =============================================================================
 // Verify that send_push_promise produces correctly encoded output.
+// The client should be able to decode the frame and get a PushPromiseReceived
+// event with the auto-allocated promised stream ID.
 // =============================================================================
 
 pub fn send_push_promise_returns_encoded_frame_test() {
   let #(server, _client) = server_with_open_stream()
-  let assert Ok(#(_server, _events, to_send)) =
-    h2_core.send_push_promise(server, 1, 2, [
+  let assert Ok(#(_server, _events, to_send, promised_id)) =
+    h2_core.send_push_promise(server, 1, [
       Header(":method", "GET", WithIndexing),
     ])
   // The output should be a valid PUSH_PROMISE frame that can be decoded
@@ -748,12 +720,14 @@ pub fn send_push_promise_returns_encoded_frame_test() {
   let assert Ok(#(client, events, _to_send)) = receive_data(client, to_send)
   assert events
     == [
-      PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: [
-        Header(":method", "GET", WithIndexing),
-      ]),
+      PushPromiseReceived(
+        stream_id: 1,
+        promised_stream_id: promised_id,
+        headers: [Header(":method", "GET", WithIndexing)],
+      ),
     ]
   // Promised stream should be reserved on client side
-  let assert Ok(stream) = dict.get(client.streams, 2)
+  let assert Ok(stream) = dict.get(client.streams, promised_id)
   assert stream.state == ReservedRemote
 }
 
