@@ -7,6 +7,7 @@ import gleam/int
 import gleam/list
 import gleam/option
 import gleam/result
+import gleam/string
 import h2_frame.{type ErrorCode}
 
 pub type Role {
@@ -399,6 +400,49 @@ pub type Header {
   Header(name: String, value: String, indexing: Indexing)
 }
 
+fn verify_mandatory_pseudoheaders(
+  role role: Role,
+  headers headers: List(String),
+) -> Result(Nil, Nil) {
+  Ok(Nil)
+}
+
+fn validate_headers(
+  role role: Role,
+  headers headers: List(Header),
+  is_trailer is_trailer: Bool,
+  seen_regular seen_regular: Bool,
+  seen_pseudos seen_pseudos: List(String),
+) -> Result(Nil, Nil) {
+  case headers {
+    [] -> {
+      case is_trailer {
+        True -> Ok(Nil)
+        False -> verify_mandatory_pseudoheaders(role, seen_pseudos)
+      }
+    }
+
+    [header, ..rest] -> {
+      // Pseudo headers cannot arrive after regular headers
+      use <- bool.guard(
+        string.starts_with(header.name, ":") && seen_regular,
+        Error(Nil),
+      )
+
+      let #(seen_pseudos, seen_regular) = case
+        string.starts_with(header.name, ":")
+      {
+        True -> {
+          #([header.name, ..seen_pseudos], seen_regular)
+        }
+        False -> #(seen_pseudos, True)
+      }
+
+      validate_headers(role, rest, is_trailer, seen_regular, seen_pseudos)
+    }
+  }
+}
+
 fn to_alpacki_header(header: Header) -> alpacki.HeaderField {
   let alpacki_indexing = case header.indexing {
     WithIndexing -> alpacki.WithIndexing
@@ -566,6 +610,21 @@ fn handle_decoded_headers(
   events,
   to_send,
 ) -> Result(#(Connection, List(Event), BitArray), H2Error) {
+  let is_trailer = end_stream && dict.has_key(conn.streams, stream_id)
+
+  use <- bool.guard(
+    validate_headers(conn.role, decoded_headers, is_trailer, False, [])
+      == Error(Nil),
+    handle_rst_stream(
+      conn:,
+      stream_id:,
+      error_code: h2_frame.ProtocolError,
+      flow_controlled_length: 0,
+      events:,
+      to_send:,
+    ),
+  )
+
   use <- bool.guard(
     stream_id <= conn.last_remote_stream_id
       || dict.has_key(conn.streams, stream_id),
