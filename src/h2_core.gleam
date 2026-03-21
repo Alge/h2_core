@@ -1389,11 +1389,12 @@ fn parse_loop(
               }
 
               let new_conn_recv_window = conn.recv_window_size - payload_length
+
               // Make sure that the data does not exceed the connection recv window
-              // use <- bool.guard(
-              //   new_conn_recv_window < 0,
-              //   Error(ConnectionError(h2_frame.ProtocolError)),
-              // )
+              use <- bool.guard(
+                new_conn_recv_window < 0,
+                Error(ConnectionError(h2_frame.FlowControlError)),
+              )
 
               let new_stream_recv_window =
                 stream.recv_window_size - payload_length
