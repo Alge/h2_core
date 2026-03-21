@@ -781,6 +781,11 @@ pub fn send_push_promise(
     |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
   )
 
+  use <- bool.guard(
+    stream.state != Open && stream.state != HalfClosedRemote,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
   todo
 }
 
