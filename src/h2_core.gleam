@@ -791,7 +791,10 @@ pub fn send_push_promise(
     Error(ConnectionError(h2_frame.ProtocolError)),
   )
 
-  todo
+  let #(conn, reserved_stream_id) =
+    add_stream(conn, Stream(..new_stream(), state: ReservedLocal))
+
+  Ok(#(conn, [], <<>>, reserved_stream_id))
 }
 
 pub fn send_data(
