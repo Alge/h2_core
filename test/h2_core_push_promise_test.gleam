@@ -73,8 +73,7 @@ pub fn receive_push_promise_on_stream_zero_is_protocol_error_test() {
 // =============================================================================
 
 pub fn receive_push_promise_when_push_disabled_is_protocol_error_test() {
-  let client = helper.new_connection(Client, Connected)
-  let #(server, _client) = server_with_open_stream()
+  let #(server, client) = server_with_open_stream()
 
   // Client disables push
   let assert Ok(#(client, _events, settings_frame)) =

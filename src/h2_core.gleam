@@ -1578,8 +1578,21 @@ fn parse_loop(
                 |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
               )
 
+              // Stream state must be one of these
               use <- bool.guard(
                 !list.contains([Open, HalfClosedLocal, Closed], stream.state),
+                Error(ConnectionError(h2_frame.ProtocolError)),
+              )
+
+              // Our setting for enable push must be true
+              use <- bool.guard(
+                !conn.local_settings.enable_push,
+                Error(ConnectionError(h2_frame.ProtocolError)),
+              )
+
+              // Promised stream ID must be even (it comes from a servere)
+              use <- bool.guard(
+                promised_stream_id % 2 == 1,
                 Error(ConnectionError(h2_frame.ProtocolError)),
               )
 
