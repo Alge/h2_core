@@ -521,79 +521,83 @@ fn handle_decoded_headers(
   events,
   to_send,
 ) -> Result(#(Connection, List(Event), BitArray), H2Error) {
-  use <- bool.guard(stream_id <= conn.last_remote_stream_id, {
-    case dict.get(conn.streams, stream_id) {
-      Ok(existing_stream) -> {
-        case existing_stream.state {
-          // Open / HalfClosedLocal: HEADERS is valid (e.g. trailers)
-          Open | HalfClosedLocal -> {
-            // Fall through to the normal path: emit HeadersReceived
-            // (don't update last_remote_stream_id or create a new stream)
+  use <- bool.guard(
+    stream_id <= conn.last_remote_stream_id
+      || dict.has_key(conn.streams, stream_id),
+    {
+      case dict.get(conn.streams, stream_id) {
+        Ok(existing_stream) -> {
+          case existing_stream.state {
+            // Open / HalfClosedLocal: HEADERS is valid (e.g. trailers)
+            Open | HalfClosedLocal -> {
+              // Fall through to the normal path: emit HeadersReceived
+              // (don't update last_remote_stream_id or create a new stream)
 
-            // If end_stream is set, update the stream state
-            let conn = case end_stream {
-              False -> conn
-              True -> {
-                let new_state = case existing_stream.state {
-                  Open -> HalfClosedRemote
-                  HalfClosedLocal -> Closed
-                  // can't happen
-                  _ -> existing_stream.state
+              // If end_stream is set, update the stream state
+              let conn = case end_stream {
+                False -> conn
+                True -> {
+                  let new_state = case existing_stream.state {
+                    Open -> HalfClosedRemote
+                    HalfClosedLocal -> Closed
+                    // can't happen
+                    _ -> existing_stream.state
+                  }
+
+                  Connection(
+                    ..conn,
+                    streams: dict.insert(
+                      conn.streams,
+                      stream_id,
+                      Stream(..existing_stream, state: new_state),
+                    ),
+                  )
                 }
-
-                Connection(
-                  ..conn,
-                  streams: dict.insert(
-                    conn.streams,
-                    stream_id,
-                    Stream(..existing_stream, state: new_state),
-                  ),
-                )
               }
-            }
 
-            Ok(#(
-              conn,
-              [
-                HeadersReceived(
-                  stream_id: stream_id,
-                  headers: decoded_headers,
-                  end_stream: end_stream,
-                ),
-                ..events
-              ],
-              to_send,
-            ))
+              Ok(#(
+                conn,
+                [
+                  HeadersReceived(
+                    stream_id: stream_id,
+                    headers: decoded_headers,
+                    end_stream: end_stream,
+                  ),
+                  ..events
+                ],
+                to_send,
+              ))
+            }
+            // RFC 9113 Section 5.1 (half-closed remote) - "If an endpoint
+            // receives additional frames, other than WINDOW_UPDATE, PRIORITY,
+            // or RST_STREAM, for a stream that is in this state, it MUST
+            // respond with a stream error of type STREAM_CLOSED."
+            HalfClosedRemote ->
+              handle_rst_stream(
+                conn:,
+                stream_id:,
+                error_code: h2_frame.StreamClosed,
+                events:,
+                to_send:,
+              )
+            // RFC 9113 Section 5.1 (closed state) - "An endpoint MUST
+            // minimally process and then discard any frames it receives
+            // in this state." HPACK decoding already happened above.
+            Closed -> {
+              Ok(#(conn, events, to_send))
+            }
+            // Should never happen
+            Idle | ReservedLocal | ReservedRemote ->
+              Error(ConnectionError(h2_frame.ProtocolError))
           }
-          // RFC 9113 Section 5.1 (half-closed remote) - "If an endpoint
-          // receives additional frames, other than WINDOW_UPDATE, PRIORITY,
-          // or RST_STREAM, for a stream that is in this state, it MUST
-          // respond with a stream error of type STREAM_CLOSED."
-          HalfClosedRemote ->
-            handle_rst_stream(
-              conn:,
-              stream_id:,
-              error_code: h2_frame.StreamClosed,
-              events:,
-              to_send:,
-            )
-          // RFC 9113 Section 5.1 (closed state) - "An endpoint MUST
-          // minimally process and then discard any frames it receives
-          // in this state." HPACK decoding already happened above.
-          Closed -> {
-            Ok(#(conn, events, to_send))
-          }
-          // Should never happen
-          Idle | ReservedLocal | ReservedRemote ->
-            Error(ConnectionError(h2_frame.ProtocolError))
+        }
+        Error(Nil) -> {
+          // Stream doesn't exist
+          Error(ConnectionError(h2_frame.ProtocolError))
         }
       }
-      Error(Nil) -> {
-        // Stream doesn't exist
-        Error(ConnectionError(h2_frame.ProtocolError))
-      }
-    }
-  })
+    },
+  )
 
   // RFC 9113 Section 5.1.1 - Client streams are odd, server streams are even.
   // The peer's streams must have the opposite parity from our role.
