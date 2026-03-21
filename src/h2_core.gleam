@@ -1454,6 +1454,12 @@ fn parse_loop(
                           send_window_size: stream.send_window_size
                             + window_size_increment,
                         )
+
+                      use <- bool.guard(
+                        stream.state == ReservedRemote,
+                        Error(ConnectionError(h2_frame.ProtocolError)),
+                      )
+
                       use <- bool.guard(
                         stream.send_window_size > 2_147_483_647,
                         {

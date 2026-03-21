@@ -127,6 +127,51 @@ pub fn send_data_on_reserved_remote_stream_is_error_test() {
     h2_core.send_data(client, 2, <<"illegal":utf8>>, False, None)
 }
 
+// RFC 9113 Section 5.1 (reserved remote):
+// "Receiving any type of frame other than HEADERS, RST_STREAM, or
+// PRIORITY on a stream in this state MUST be treated as a connection
+// error (Section 5.4.1) of type PROTOCOL_ERROR."
+//
+// WINDOW_UPDATE is not in the allowed list for reserved (remote).
+pub fn receive_window_update_on_reserved_remote_is_protocol_error_test() {
+  let client = client_with_reserved_remote_stream()
+  let assert Ok(stream) = dict.get(client.streams, 2)
+  assert stream.state == ReservedRemote
+
+  let assert Ok(wu) =
+    h2_frame.encode_window_update(stream_id: 2, window_size_increment: 1024)
+  let assert Error(h2_core.ConnectionError(h2_frame.ProtocolError)) =
+    receive_data(client, wu)
+}
+
+// =============================================================================
+// Reserved (local) state — receiving restrictions — RFC 9113 Section 5.1
+// =============================================================================
+
+// RFC 9113 Section 5.1 (reserved local):
+// "Receiving any type of frame other than RST_STREAM, PRIORITY, or
+// WINDOW_UPDATE on a stream in this state MUST be treated as a
+// connection error (Section 5.4.1) of type PROTOCOL_ERROR."
+//
+// HEADERS is not in the allowed list for reserved (local).
+pub fn receive_headers_on_reserved_local_is_protocol_error_test() {
+  let server = server_with_reserved_local_stream()
+  let assert Ok(stream) = dict.get(server.streams, 2)
+  assert stream.state == ReservedLocal
+
+  // Manually craft a HEADERS frame on stream 2
+  // Length=0, Type=0x01, Flags=0x04 (END_HEADERS), Stream ID=2
+  let bad_headers = <<
+    0:size(24),
+    0x01:size(8),
+    0x04:size(8),
+    0:size(1),
+    2:size(31),
+  >>
+  let assert Error(h2_core.ConnectionError(h2_frame.ProtocolError)) =
+    receive_data(server, bad_headers)
+}
+
 // =============================================================================
 // Half-closed (remote) state — RFC 9113 Section 5.1
 // =============================================================================
