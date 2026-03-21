@@ -254,6 +254,15 @@ pub type ConnectionState {
   Connected
 }
 
+pub type PendingHeaderBlock {
+  PendingHeaders(stream_id: Int, end_stream: Bool, fragment: BitArray)
+  PendingPushPromise(
+    stream_id: Int,
+    promised_stream_id: Int,
+    fragment: BitArray,
+  )
+}
+
 pub type Connection {
   Connection(
     state: ConnectionState,
@@ -269,7 +278,7 @@ pub type Connection {
     recv_window_size: Int,
     hpack_encoder: HpackContext,
     hpack_decoder: HpackContext,
-    pending_header_blocks: option.Option(#(Int, Bool, BitArray)),
+    pending_header_blocks: option.Option(PendingHeaderBlock),
   )
 }
 
@@ -516,6 +525,37 @@ pub fn encode_headers(
   let conn = Connection(..conn, hpack_encoder: HpackContext(table: new_table))
 
   Ok(#(conn, bytes_tree.to_bit_array(encoded_headers)))
+}
+
+fn handle_decoded_push_promise(
+  conn: Connection,
+  stream_id: Int,
+  promised_stream_id: Int,
+  decoded_headers: List(Header),
+  events: List(Event),
+  to_send: BitArray,
+) -> Result(#(Connection, List(Event), BitArray), H2Error) {
+  let promised_stream = Stream(..new_stream(), state: ReservedRemote)
+
+  let conn =
+    Connection(
+      ..conn,
+      streams: dict.insert(conn.streams, promised_stream_id, promised_stream),
+      last_remote_stream_id: promised_stream_id,
+    )
+
+  Ok(#(
+    conn,
+    [
+      PushPromiseReceived(
+        stream_id: stream_id,
+        promised_stream_id: promised_stream_id,
+        headers: decoded_headers,
+      ),
+      ..events
+    ],
+    to_send,
+  ))
 }
 
 fn handle_decoded_headers(
@@ -1152,7 +1192,8 @@ fn parse_loop(
                   case conn.pending_header_blocks {
                     option.None ->
                       Error(ConnectionError(h2_frame.ProtocolError))
-                    option.Some(#(
+
+                    option.Some(PendingHeaders(
                       pending_stream_id,
                       end_stream,
                       pending_block_fragment,
@@ -1162,33 +1203,32 @@ fn parse_loop(
                         Error(ConnectionError(h2_frame.ProtocolError)),
                       )
 
+                      let combined = <<
+                        pending_block_fragment:bits,
+                        field_block_fragment:bits,
+                      >>
+
                       case end_headers {
                         // More continuation frames incoming
                         False -> {
                           let conn =
                             Connection(
                               ..conn,
-                              pending_header_blocks: option.Some(
-                                #(stream_id, end_stream, <<
-                                  pending_block_fragment:bits,
-                                  field_block_fragment:bits,
-                                >>),
-                              ),
+                              pending_header_blocks: option.Some(PendingHeaders(
+                                stream_id:,
+                                end_stream:,
+                                fragment: combined,
+                              )),
                             )
                           parse_loop(conn, events, to_send)
                         }
 
-                        // Last continuation block 
+                        // Last continuation block
                         True -> {
                           use #(conn, decoded_headers) <- result.try(
-                            decode_headers(conn, <<
-                              pending_block_fragment:bits,
-                              field_block_fragment:bits,
-                            >>),
+                            decode_headers(conn, combined),
                           )
 
-                          // Reset the pending headers variable in the conn as 
-                          // we have received the full headers
                           let conn =
                             Connection(
                               ..conn,
@@ -1200,6 +1240,65 @@ fn parse_loop(
                               conn,
                               stream_id,
                               end_stream,
+                              decoded_headers,
+                              events,
+                              to_send,
+                            ),
+                          )
+                          parse_loop(conn, events, to_send)
+                        }
+                      }
+                    }
+
+                    option.Some(PendingPushPromise(
+                      pending_stream_id,
+                      promised_stream_id,
+                      pending_block_fragment,
+                    )) -> {
+                      use <- bool.guard(
+                        pending_stream_id != stream_id,
+                        Error(ConnectionError(h2_frame.ProtocolError)),
+                      )
+
+                      let combined = <<
+                        pending_block_fragment:bits,
+                        field_block_fragment:bits,
+                      >>
+
+                      case end_headers {
+                        // More continuation frames incoming
+                        False -> {
+                          let conn =
+                            Connection(
+                              ..conn,
+                              pending_header_blocks: option.Some(
+                                PendingPushPromise(
+                                  stream_id:,
+                                  promised_stream_id:,
+                                  fragment: combined,
+                                ),
+                              ),
+                            )
+                          parse_loop(conn, events, to_send)
+                        }
+
+                        // Last continuation block
+                        True -> {
+                          use #(conn, decoded_headers) <- result.try(
+                            decode_headers(conn, combined),
+                          )
+
+                          let conn =
+                            Connection(
+                              ..conn,
+                              pending_header_blocks: option.None,
+                            )
+
+                          use #(conn, events, to_send) <- result.try(
+                            handle_decoded_push_promise(
+                              conn,
+                              stream_id,
+                              promised_stream_id,
                               decoded_headers,
                               events,
                               to_send,
@@ -1435,10 +1534,10 @@ fn parse_loop(
                   let conn =
                     Connection(
                       ..conn,
-                      pending_header_blocks: option.Some(#(
-                        stream_id,
-                        end_stream,
-                        field_block_fragment,
+                      pending_header_blocks: option.Some(PendingHeaders(
+                        stream_id:,
+                        end_stream:,
+                        fragment: field_block_fragment,
                       )),
                     )
                   parse_loop(conn, events, to_send)
@@ -1602,15 +1701,38 @@ fn parse_loop(
                 Error(ConnectionError(h2_frame.ProtocolError)),
               )
 
-              parse_loop(
-                conn,
-                [
-                  // TODO add acual headers
-                  PushPromiseReceived(stream_id, promised_stream_id, []),
-                  ..events
-                ],
-                to_send,
-              )
+              case end_headers {
+                False -> {
+                  let conn =
+                    Connection(
+                      ..conn,
+                      pending_header_blocks: option.Some(PendingPushPromise(
+                        stream_id:,
+                        promised_stream_id:,
+                        fragment: field_block_fragment,
+                      )),
+                    )
+                  parse_loop(conn, events, to_send)
+                }
+                True -> {
+                  use #(conn, decoded_headers) <- result.try(decode_headers(
+                    conn,
+                    field_block_fragment,
+                  ))
+
+                  use #(conn, events, to_send) <- result.try(
+                    handle_decoded_push_promise(
+                      conn,
+                      stream_id,
+                      promised_stream_id,
+                      decoded_headers,
+                      events,
+                      to_send,
+                    ),
+                  )
+                  parse_loop(conn, events, to_send)
+                }
+              }
             }
 
             // Ignore PRIORITY frames
