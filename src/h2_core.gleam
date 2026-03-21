@@ -402,20 +402,55 @@ pub type Header {
 
 fn verify_mandatory_pseudoheaders(
   role role: Role,
-  headers headers: List(String),
+  headers headers: List(Header),
 ) -> Result(Nil, Nil) {
-  case role {
-    Server ->
-      case
-        list.contains(headers, ":method")
-        && list.contains(headers, ":scheme")
-        && list.contains(headers, ":path")
-      {
-        True -> Ok(Nil)
+  let pseudo_names =
+    list.filter_map(headers, fn(h) {
+      case string.starts_with(h.name, ":") {
+        True -> Ok(h.name)
         False -> Error(Nil)
       }
+    })
+  case role {
+    Server -> {
+      use method <- result.try(
+        list.find(headers, fn(h) { h.name == ":method" }),
+      )
+      case method.value {
+        "CONNECT" -> {
+          case list.contains(pseudo_names, ":authority") {
+            True -> {
+              case
+                list.contains(pseudo_names, ":scheme")
+                || list.contains(pseudo_names, ":path")
+              {
+                True -> Error(Nil)
+                False -> Ok(Nil)
+              }
+            }
+            False -> Error(Nil)
+          }
+        }
+
+        _ -> {
+          use path <- result.try(
+            list.find(headers, fn(h) { h.name == ":path" }),
+          )
+          use <- bool.guard(path.value == "", Error(Nil))
+
+          case
+            list.contains(pseudo_names, ":method")
+            && list.contains(pseudo_names, ":scheme")
+            && list.contains(pseudo_names, ":path")
+          {
+            True -> Ok(Nil)
+            False -> Error(Nil)
+          }
+        }
+      }
+    }
     Client ->
-      case list.contains(headers, ":status") {
+      case list.contains(pseudo_names, ":status") {
         True -> Ok(Nil)
         False -> Error(Nil)
       }
@@ -426,16 +461,23 @@ fn validate_headers(
   role role: Role,
   headers headers: List(Header),
   is_trailer is_trailer: Bool,
+) -> Result(Nil, Nil) {
+  use _ <- result.try(do_validate_headers(role, headers, is_trailer, False, []))
+  case is_trailer {
+    True -> Ok(Nil)
+    False -> verify_mandatory_pseudoheaders(role, headers)
+  }
+}
+
+fn do_validate_headers(
+  role role: Role,
+  headers headers: List(Header),
+  is_trailer is_trailer: Bool,
   seen_regular seen_regular: Bool,
   seen_pseudos seen_pseudos: List(String),
 ) -> Result(Nil, Nil) {
   case headers {
-    [] -> {
-      case is_trailer {
-        True -> Ok(Nil)
-        False -> verify_mandatory_pseudoheaders(role, seen_pseudos)
-      }
-    }
+    [] -> Ok(Nil)
 
     [header, ..rest] -> {
       // Pseudo headers cannot arrive after regular headers
@@ -489,7 +531,7 @@ fn validate_headers(
         False -> #(seen_pseudos, True)
       }
 
-      validate_headers(role, rest, is_trailer, seen_regular, seen_pseudos)
+      do_validate_headers(role, rest, is_trailer, seen_regular, seen_pseudos)
     }
   }
 }
@@ -631,7 +673,7 @@ fn handle_decoded_push_promise(
   to_send: BitArray,
 ) -> Result(#(Connection, List(Event), BitArray), H2Error) {
   use <- bool.guard(
-    validate_headers(Server, decoded_headers, False, False, []) == Error(Nil),
+    validate_headers(Server, decoded_headers, False) == Error(Nil),
     handle_rst_stream(
       conn:,
       stream_id:,
@@ -676,8 +718,7 @@ fn handle_decoded_headers(
   let is_trailer = end_stream && dict.has_key(conn.streams, stream_id)
 
   use <- bool.guard(
-    validate_headers(conn.role, decoded_headers, is_trailer, False, [])
-      == Error(Nil),
+    validate_headers(conn.role, decoded_headers, is_trailer) == Error(Nil),
     handle_rst_stream(
       conn:,
       stream_id:,
