@@ -1578,6 +1578,11 @@ fn parse_loop(
                 |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
               )
 
+              use <- bool.guard(
+                !list.contains([Open, HalfClosedLocal, Closed], stream.state),
+                Error(ConnectionError(h2_frame.ProtocolError)),
+              )
+
               parse_loop(
                 conn,
                 [
