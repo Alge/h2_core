@@ -632,8 +632,36 @@ fn handle_decoded_headers(
             Closed -> {
               Ok(#(conn, events, to_send))
             }
+            ReservedRemote -> {
+              let new_state = case end_stream {
+                True -> Closed
+                False -> HalfClosedLocal
+              }
+              let conn =
+                Connection(
+                  ..conn,
+                  streams: dict.insert(
+                    conn.streams,
+                    stream_id,
+                    Stream(..existing_stream, state: new_state),
+                  ),
+                )
+              Ok(#(
+                conn,
+                [
+                  HeadersReceived(
+                    stream_id: stream_id,
+                    headers: decoded_headers,
+                    end_stream: end_stream,
+                  ),
+                  ..events
+                ],
+                to_send,
+              ))
+            }
+
             // Should never happen
-            Idle | ReservedLocal | ReservedRemote ->
+            Idle | ReservedLocal ->
               Error(ConnectionError(h2_frame.ProtocolError))
           }
         }
