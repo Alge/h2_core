@@ -2,8 +2,8 @@ import gleam/bit_array
 import gleam/dict
 import gleam/option.{None}
 import h2_core.{
-  Client, Connected, HalfClosedLocal, Header, Open, Server, WithIndexing,
-  open_stream,
+  Client, Connected, ConnectionError, HalfClosedLocal, Header, Open, Server,
+  StreamError, WithIndexing, WithoutIndexing, open_stream, send_headers,
 }
 import h2_frame
 import helper
@@ -113,11 +113,127 @@ pub fn open_stream_updates_hpack_encoder_test() {
   assert bit_array.byte_size(second_send) < bit_array.byte_size(first_send)
 }
 
-// Sending headers with empty list produces a valid frame
-pub fn open_stream_empty_headers_test() {
+// RFC 9113 Section 8.3.1 - "All HTTP/2 requests MUST include exactly
+// one valid value for the ':method', ':scheme', and ':path'
+// pseudo-header fields."
+//
+// Sending headers with empty list is missing mandatory pseudo-headers.
+pub fn open_stream_empty_headers_is_error_test() {
   let conn = helper.new_connection(Client, Connected)
-  let assert Ok(#(conn, _events, to_send)) = open_stream(conn, [], False)
-  assert to_send != <<>>
+  let assert Error(_) = open_stream(conn, [], False)
+}
+
+// RFC 9113 Section 8.3.1 - Missing :scheme is malformed.
+pub fn open_stream_missing_scheme_is_error_test() {
+  let conn = helper.new_connection(Client, Connected)
+  let assert Error(_) =
+    open_stream(conn, [
+      Header(":method", "GET", WithIndexing),
+      Header(":path", "/", WithIndexing),
+    ], False)
+}
+
+// RFC 9113 Section 8.3.1 - Missing :path is malformed.
+pub fn open_stream_missing_path_is_error_test() {
+  let conn = helper.new_connection(Client, Connected)
+  let assert Error(_) =
+    open_stream(conn, [
+      Header(":method", "GET", WithIndexing),
+      Header(":scheme", "https", WithIndexing),
+    ], False)
+}
+
+// RFC 9113 Section 8.3.1 - Missing :method is malformed.
+pub fn open_stream_missing_method_is_error_test() {
+  let conn = helper.new_connection(Client, Connected)
+  let assert Error(_) =
+    open_stream(conn, [
+      Header(":scheme", "https", WithIndexing),
+      Header(":path", "/", WithIndexing),
+    ], False)
+}
+
+// RFC 9113 Section 8.3 - "All pseudo-header fields MUST appear in a
+// field block before all regular field lines."
+pub fn open_stream_pseudo_after_regular_is_error_test() {
+  let conn = helper.new_connection(Client, Connected)
+  let assert Error(_) =
+    open_stream(conn, [
+      Header(":method", "GET", WithIndexing),
+      Header("x-foo", "bar", WithIndexing),
+      Header(":scheme", "https", WithIndexing),
+      Header(":path", "/", WithIndexing),
+    ], False)
+}
+
+// RFC 9113 Section 8.3 - "The same pseudo-header field name MUST NOT
+// appear more than once in a field block."
+pub fn open_stream_duplicate_pseudo_is_error_test() {
+  let conn = helper.new_connection(Client, Connected)
+  let assert Error(_) =
+    open_stream(conn, [
+      Header(":method", "GET", WithIndexing),
+      Header(":method", "POST", WithIndexing),
+      Header(":scheme", "https", WithIndexing),
+      Header(":path", "/", WithIndexing),
+    ], False)
+}
+
+// RFC 9113 Section 8.2.2 - "Any message containing connection-specific
+// header fields MUST be treated as malformed."
+pub fn open_stream_with_connection_header_is_error_test() {
+  let conn = helper.new_connection(Client, Connected)
+  let assert Error(_) =
+    open_stream(conn, [
+      Header(":method", "GET", WithIndexing),
+      Header(":scheme", "https", WithIndexing),
+      Header(":path", "/", WithIndexing),
+      Header("connection", "close", WithIndexing),
+    ], False)
+}
+
+// RFC 9113 Section 8.2.2 - TE header must only have value "trailers".
+pub fn open_stream_with_te_non_trailers_is_error_test() {
+  let conn = helper.new_connection(Client, Connected)
+  let assert Error(_) =
+    open_stream(conn, [
+      Header(":method", "GET", WithIndexing),
+      Header(":scheme", "https", WithIndexing),
+      Header(":path", "/", WithIndexing),
+      Header("te", "chunked", WithIndexing),
+    ], False)
+}
+
+// Valid headers should succeed.
+pub fn open_stream_with_valid_headers_test() {
+  let conn = helper.new_connection(Client, Connected)
+  let assert Ok(#(conn, _events, _to_send)) =
+    open_stream(conn, helper.request_headers(), False)
   let assert Ok(stream) = dict.get(conn.streams, 1)
   assert stream.state == Open
+}
+
+// RFC 9113 Section 8.3.2 - Server responses must include :status.
+pub fn send_headers_response_missing_status_is_error_test() {
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
+  let assert Ok(#(_client, _events, headers)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(server, _events, _to_send)) =
+    h2_core.receive_data(server, headers)
+  // Server sends response without :status
+  let assert Error(_) =
+    send_headers(server, 1, [Header("content-type", "text/html", WithIndexing)], False)
+}
+
+// Valid server response should succeed.
+pub fn send_headers_response_with_status_test() {
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
+  let assert Ok(#(_client, _events, headers)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(server, _events, _to_send)) =
+    h2_core.receive_data(server, headers)
+  let assert Ok(#(_server, _events, _to_send)) =
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
 }
