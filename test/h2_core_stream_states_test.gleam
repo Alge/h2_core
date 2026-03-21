@@ -3,7 +3,7 @@ import gleam/option.{None}
 import h2_core.{
   type Connection, Client, Closed, Connected, HalfClosedRemote, Header,
   ReservedLocal, ReservedRemote, Server, Stream, StreamReset, WithIndexing,
-  receive_data, send_headers, send_rst_stream,
+  open_stream, receive_data, send_headers, send_rst_stream,
 }
 import h2_frame
 import helper
@@ -17,7 +17,7 @@ fn server_with_open_stream() -> #(Connection, Connection) {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   #(server, client)
 }
@@ -28,7 +28,7 @@ fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, headers)) =
-    send_headers(client, [Header(":method", "GET", WithIndexing)], True)
+    open_stream(client, [Header(":method", "GET", WithIndexing)], True)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   #(server, client)
 }
@@ -99,7 +99,7 @@ pub fn send_data_on_reserved_local_stream_is_error_test() {
   assert stream.state == ReservedLocal
 
   // Attempt to send DATA on reserved (local) stream 2 — should fail
-  let assert Error(_) = h2_core.send_data(server, 2, <<"illegal":utf8>>, False)
+  let assert Error(_) = h2_core.send_data(server, 2, <<"illegal":utf8>>, False, None)
 }
 
 // =============================================================================
@@ -122,7 +122,7 @@ pub fn send_data_on_reserved_remote_stream_is_error_test() {
   assert stream.state == ReservedRemote
 
   // Attempt to send DATA on reserved (remote) stream 2 — should fail
-  let assert Error(_) = h2_core.send_data(client, 2, <<"illegal":utf8>>, False)
+  let assert Error(_) = h2_core.send_data(client, 2, <<"illegal":utf8>>, False, None)
 }
 
 // =============================================================================
@@ -187,7 +187,7 @@ pub fn send_data_on_closed_stream_is_error_test() {
   assert stream.state == Closed
 
   // Attempt to send DATA on closed stream 1 — should fail
-  let assert Error(_) = h2_core.send_data(server, 1, <<"illegal":utf8>>, False)
+  let assert Error(_) = h2_core.send_data(server, 1, <<"illegal":utf8>>, False, None)
 }
 
 // RFC 9113 Section 5.1 (closed):
@@ -212,7 +212,7 @@ pub fn send_headers_on_closed_stream_is_error_test() {
   // TODO: When send_headers gains support for sending on existing streams
   // (e.g. trailers), add a test that sending headers on a closed stream
   // returns an error.
-  let assert Error(_) = h2_core.send_data(server, 1, <<>>, True)
+  let assert Error(_) = h2_core.send_data(server, 1, <<>>, True, None)
 }
 
 // =============================================================================
