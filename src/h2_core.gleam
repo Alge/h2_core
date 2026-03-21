@@ -1056,6 +1056,11 @@ pub fn send_window_update(
               ..stream,
               recv_window_size: stream.recv_window_size + window_size_increment,
             )
+
+          use <- bool.guard(
+            stream.state == Closed,
+            Error(ConnectionError(h2_frame.ProtocolError)),
+          )
           use <- bool.guard(
             stream.recv_window_size > 2_147_483_647,
             Error(ConnectionError(h2_frame.FlowControlError)),
