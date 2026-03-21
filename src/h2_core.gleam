@@ -1384,8 +1384,27 @@ fn parse_loop(
 
               // Make sure that the data does not exceed the connection recv window
 
+              // Update the stream state
+
+              let new_stream_state = case end_stream {
+                True -> {
+                  case stream.state {
+                    HalfClosedLocal -> Closed
+                    _ -> HalfClosedRemote
+                  }
+                }
+                False -> stream.state
+              }
+
               Ok(#(
-                conn,
+                Connection(
+                  ..conn,
+                  streams: dict.insert(
+                    conn.streams,
+                    stream_id,
+                    Stream(..stream, state: new_stream_state),
+                  ),
+                ),
                 [
                   DataReceived(
                     stream_id: stream_id,
