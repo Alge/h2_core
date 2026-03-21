@@ -464,6 +464,11 @@ fn validate_headers(
         Error(Nil),
       )
 
+      use <- bool.guard(
+        !is_pseudo && header.name == "te" && header.value != "trailers",
+        Error(Nil),
+      )
+
       let #(seen_pseudos, seen_regular) = case is_pseudo {
         True -> #([header.name, ..seen_pseudos], seen_regular)
         False -> #(seen_pseudos, True)
