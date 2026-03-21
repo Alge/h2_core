@@ -502,20 +502,28 @@ pub fn send_push_promise_on_half_closed_local_is_error_test() {
 
 // RFC 9113 Section 6.6 - "A receiver MUST treat the receipt of a
 // PUSH_PROMISE on a stream that is neither 'open' nor 'half-closed
-// (local)' as a connection error (Section 5.4.1) of type
-// PROTOCOL_ERROR."
+// (local)' as a connection error of type PROTOCOL_ERROR. However, an
+// endpoint that has sent RST_STREAM on the associated stream MUST handle
+// PUSH_PROMISE frames that might have been created before the RST_STREAM
+// frame is received and processed."
 //
-// A closed stream is neither open nor half-closed (local).
-pub fn receive_push_promise_on_closed_stream_is_protocol_error_test() {
+// NOTE: The RFC is ambiguous about whether "handle" means "accept
+// normally" or just "don't crash". It also doesn't distinguish between
+// streams closed by our RST_STREAM vs the peer's RST_STREAM. Most
+// implementations (Mint/Elixir) strictly reject closed streams. We follow
+// hyper-h2's more lenient approach: accept PUSH_PROMISE on any closed
+// stream, decode HPACK, reserve the promised stream, and emit the event.
+// The caller can RST_STREAM the promised stream if unwanted.
+pub fn receive_push_promise_on_closed_stream_is_handled_gracefully_test() {
   let #(_server, client) = server_with_open_stream()
-  // Client sends headers with END_STREAM — stream 1 is half-closed (local)
-  // Then server RST_STREAMs it — stream 1 is now closed on client
+  // Server RST_STREAMs stream 1 — now closed on client
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.NoError)
   let assert Ok(#(client, _events, _to_send)) = receive_data(client, rst)
   let assert Ok(stream) = dict.get(client.streams, 1)
   assert stream.state == h2_core.Closed
 
+  // PUSH_PROMISE arrives on closed stream — must be handled, not rejected
   let assert Ok(pp) =
     h2_frame.encode_push_promise(
       stream_id: 1,
@@ -524,8 +532,12 @@ pub fn receive_push_promise_on_closed_stream_is_protocol_error_test() {
       field_block_fragment: <<>>,
       padding: None,
     )
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
-    receive_data(client, pp)
+  let assert Ok(#(client, events, _to_send)) = receive_data(client, pp)
+  assert events
+    == [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: [])]
+  // Promised stream should still be reserved
+  let assert Ok(stream) = dict.get(client.streams, 2)
+  assert stream.state == ReservedRemote
 }
 
 // RFC 9113 Section 6.6 - "The total number of padding octets is
