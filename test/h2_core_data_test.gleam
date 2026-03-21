@@ -1242,7 +1242,7 @@ pub fn receive_data_exceeding_content_length_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   // Client sends request with content-length: 5
-  let assert Ok(#(client, _events, headers)) =
+  let assert Ok(#(_client, _events, headers)) =
     open_stream(client, [
       Header(":method", "POST", WithIndexing),
       Header("content-length", "5", WithIndexing),
@@ -1257,8 +1257,12 @@ pub fn receive_data_exceeding_content_length_is_malformed_test() {
       data: <<"0123456789":utf8>>,
       padding: None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
-    receive_data(server, data_frame)
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
+  let assert Ok(#(_server, events, to_send)) = receive_data(server, data_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
 
 // RFC 9113 Section 8.1.1 - Receiving less DATA than declared in
@@ -1267,7 +1271,7 @@ pub fn receive_data_less_than_content_length_with_end_stream_is_malformed_test()
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   // Client sends request with content-length: 10
-  let assert Ok(#(client, _events, headers)) =
+  let assert Ok(#(_client, _events, headers)) =
     open_stream(client, [
       Header(":method", "POST", WithIndexing),
       Header("content-length", "10", WithIndexing),
@@ -1282,6 +1286,10 @@ pub fn receive_data_less_than_content_length_with_end_stream_is_malformed_test()
       data: <<"hello":utf8>>,
       padding: None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
-    receive_data(server, data_frame)
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
+  let assert Ok(#(_server, events, to_send)) = receive_data(server, data_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }

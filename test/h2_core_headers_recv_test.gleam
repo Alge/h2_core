@@ -715,8 +715,14 @@ pub fn receive_headers_pseudo_after_regular_is_malformed_test() {
       field_block_fragment: bad_hpack,
       padding: option.None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal. The endpoint
+  // sends RST_STREAM and continues processing.
+  let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
 
 // RFC 9113 Section 8.3 - "The same pseudo-header field name MUST NOT
@@ -737,8 +743,14 @@ pub fn receive_headers_duplicate_pseudo_header_is_malformed_test() {
       field_block_fragment: bad_hpack,
       padding: option.None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal. The endpoint
+  // sends RST_STREAM and continues processing.
+  let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
 
 // RFC 9113 Section 8.3 - "Pseudo-header fields MUST NOT appear in a
@@ -767,8 +779,13 @@ pub fn receive_trailers_with_pseudo_header_is_malformed_test() {
       field_block_fragment: bad_hpack,
       padding: option.None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
+  let assert Ok(#(_server, events, to_send)) =
     receive_data(server, trailer_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
 
 // RFC 9113 Section 8.2.2 - "Any message containing connection-specific
@@ -792,8 +809,14 @@ pub fn receive_headers_with_connection_header_is_malformed_test() {
       field_block_fragment: bad_hpack,
       padding: option.None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal. The endpoint
+  // sends RST_STREAM and continues processing.
+  let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
 
 pub fn receive_headers_with_transfer_encoding_is_malformed_test() {
@@ -811,8 +834,14 @@ pub fn receive_headers_with_transfer_encoding_is_malformed_test() {
       field_block_fragment: bad_hpack,
       padding: option.None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal. The endpoint
+  // sends RST_STREAM and continues processing.
+  let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
 
 // RFC 9113 Section 8.1 - "A HEADERS frame with the END_STREAM flag set
@@ -840,8 +869,13 @@ pub fn receive_informational_response_with_end_stream_is_malformed_test() {
       field_block_fragment: bad_hpack,
       padding: option.None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
+  let assert Ok(#(_client, events, to_send)) =
     receive_data(client, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
 
 // RFC 9113 Section 8.3.1 - "All HTTP/2 requests MUST include exactly one
@@ -863,8 +897,14 @@ pub fn receive_request_missing_method_is_malformed_test() {
       field_block_fragment: bad_hpack,
       padding: option.None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal. The endpoint
+  // sends RST_STREAM and continues processing.
+  let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
 
 pub fn receive_request_missing_scheme_is_malformed_test() {
@@ -880,8 +920,14 @@ pub fn receive_request_missing_scheme_is_malformed_test() {
       field_block_fragment: bad_hpack,
       padding: option.None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal. The endpoint
+  // sends RST_STREAM and continues processing.
+  let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
 
 pub fn receive_request_missing_path_is_malformed_test() {
@@ -897,8 +943,14 @@ pub fn receive_request_missing_path_is_malformed_test() {
       field_block_fragment: bad_hpack,
       padding: option.None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal. The endpoint
+  // sends RST_STREAM and continues processing.
+  let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
 
 // RFC 9113 Section 8.3.2 - "This pseudo-header field [:status] MUST be
@@ -927,8 +979,13 @@ pub fn receive_response_missing_status_is_malformed_test() {
       field_block_fragment: bad_hpack,
       padding: option.None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
+  let assert Ok(#(_client, events, to_send)) =
     receive_data(client, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
 
 // RFC 9113 Section 8.3 - "Endpoints MUST treat a request or response
@@ -951,8 +1008,14 @@ pub fn receive_headers_with_unrecognized_pseudo_header_is_malformed_test() {
       field_block_fragment: bad_hpack,
       padding: option.None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal. The endpoint
+  // sends RST_STREAM and continues processing.
+  let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
 
 // RFC 9113 Section 8.2.2 - "The only exception to this is the TE header
@@ -973,8 +1036,14 @@ pub fn receive_headers_with_te_non_trailers_is_malformed_test() {
       field_block_fragment: bad_hpack,
       padding: option.None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal. The endpoint
+  // sends RST_STREAM and continues processing.
+  let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
 
 // RFC 9113 Section 8.2.2 - TE header with value "trailers" is allowed.
@@ -1034,8 +1103,13 @@ pub fn receive_informational_response_after_final_is_malformed_test() {
       field_block_fragment: <<0x48, 0x03, "100":utf8>>,
       padding: option.None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
+  let assert Ok(#(_client, events, to_send)) =
     receive_data(client, informational_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
 
 // RFC 9113 Section 8.1 - "a server MAY send any number of interim
@@ -1101,8 +1175,14 @@ pub fn receive_request_with_empty_path_is_malformed_test() {
       field_block_fragment: bad_hpack,
       padding: option.None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal. The endpoint
+  // sends RST_STREAM and continues processing.
+  let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
 
 // RFC 9113 Section 8.5 - "The ':scheme' and ':path' pseudo-header
@@ -1130,8 +1210,14 @@ pub fn receive_connect_request_with_path_is_malformed_test() {
       field_block_fragment: bad_hpack,
       padding: option.None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal. The endpoint
+  // sends RST_STREAM and continues processing.
+  let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
 
 // RFC 9113 Section 8.5 - A valid CONNECT request has only :method and

@@ -2,7 +2,7 @@ import gleam/bit_array
 import gleam/dict
 import h2_core.{
   type Connection, Client, Closed, Connected, ConnectionError, HalfClosedLocal,
-  HalfClosedRemote, Header, Open, ReservedLocal, ReservedRemote, Server, Stream,
+  HalfClosedRemote, Header, Open, ReservedLocal, ReservedRemote, Server,
   StreamError, WithIndexing, open_stream, receive_data, send_headers,
 }
 import h2_frame
@@ -210,7 +210,7 @@ pub fn send_headers_updates_hpack_encoder_test() {
   let assert Ok(#(server, _events, first)) =
     send_headers(server, 1, headers, False)
   // Same headers on stream 3 — HPACK should produce smaller output
-  let assert Ok(#(server, _events, second)) =
+  let assert Ok(#(_server, _events, second)) =
     send_headers(server, 3, headers, False)
   // Second encoding should be smaller due to HPACK dynamic table
   let assert Ok(#(first_frame, _)) = h2_frame.extract_frame(first, 16_384)

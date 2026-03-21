@@ -3,8 +3,8 @@ import gleam/option.{None}
 import h2_core.{
   type Connection, Client, Closed, Connected, ConnectionError, HalfClosedRemote,
   Header, PushPromiseReceived, ReservedLocal, ReservedRemote, Server,
-  StreamError, WithIndexing, open_stream, receive_data, send_headers,
-  send_rst_stream, send_settings,
+  StreamReset, WithIndexing, open_stream, receive_data, send_headers,
+  send_rst_stream,
 }
 import h2_frame
 import helper
@@ -800,8 +800,12 @@ pub fn receive_push_promise_missing_method_is_malformed_test() {
       field_block_fragment: bad_hpack,
       padding: None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
-    receive_data(client, pp)
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
+  let assert Ok(#(_client, events, to_send)) = receive_data(client, pp)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
 
 // RFC 9113 Section 8.4.1 - PUSH_PROMISE with pseudo-header after
@@ -820,6 +824,10 @@ pub fn receive_push_promise_pseudo_after_regular_is_malformed_test() {
       field_block_fragment: bad_hpack,
       padding: None,
     )
-  let assert Error(h2_core.StreamError(1, h2_frame.ProtocolError)) =
-    receive_data(client, pp)
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
+  let assert Ok(#(_client, events, to_send)) = receive_data(client, pp)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
 }
