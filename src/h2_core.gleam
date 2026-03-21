@@ -1101,6 +1101,11 @@ pub fn send_rst_stream(
     Error(ConnectionError(h2_frame.ProtocolError)),
   )
 
+  use <- bool.guard(
+    stream.state == Closed,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
   // Close the stream
   let stream = Stream(..stream, state: Closed)
 
