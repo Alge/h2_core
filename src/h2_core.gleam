@@ -1356,7 +1356,7 @@ fn parse_loop(
             }
 
             // DATA
-            h2_frame.Data(stream_id, end_stream, _padding, data) -> {
+            h2_frame.Data(stream_id, end_stream, padding, data) -> {
               use stream <- result.try(case dict.get(conn.streams, stream_id) {
                 Ok(stream) -> {
                   use <- bool.guard(
@@ -1382,9 +1382,21 @@ fn parse_loop(
                 ),
               )
 
-              // Make sure that the data does not exceed the connection recv window
+              let payload_length = case padding {
+                option.Some(pad_length) ->
+                  1 + bit_array.byte_size(data) + pad_length
+                option.None -> bit_array.byte_size(data)
+              }
 
-              // Update the stream state
+              let new_conn_recv_window = conn.recv_window_size - payload_length
+              // Make sure that the data does not exceed the connection recv window
+              // use <- bool.guard(
+              //   new_conn_recv_window < 0,
+              //   Error(ConnectionError(h2_frame.ProtocolError)),
+              // )
+
+              let new_stream_recv_window =
+                stream.recv_window_size - payload_length
 
               let new_stream_state = case end_stream {
                 True -> {
@@ -1402,8 +1414,13 @@ fn parse_loop(
                   streams: dict.insert(
                     conn.streams,
                     stream_id,
-                    Stream(..stream, state: new_stream_state),
+                    Stream(
+                      ..stream,
+                      state: new_stream_state,
+                      recv_window_size: new_stream_recv_window,
+                    ),
                   ),
+                  recv_window_size: new_conn_recv_window,
                 ),
                 [
                   DataReceived(
