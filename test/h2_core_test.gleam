@@ -139,7 +139,7 @@ pub fn receive_unknown_frame_type_on_stream_is_ignored_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, headers)) =
-    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   // Unknown frame type 0xFE on stream 1

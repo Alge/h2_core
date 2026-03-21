@@ -17,7 +17,7 @@ fn server_with_open_stream() -> #(Connection, Connection) {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, request)) =
-    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, request)
   #(server, client)
 }
@@ -27,7 +27,7 @@ fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, _events, request)) =
-    open_stream(client, [Header(":method", "GET", WithIndexing)], True)
+    open_stream(client, helper.request_headers(), True)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, request)
   #(server, client)
 }
@@ -201,7 +201,7 @@ pub fn send_headers_updates_hpack_encoder_test() {
   let #(server, client) = server_with_open_stream()
   // Open a second stream on the same client — will use stream 3
   let assert Ok(#(_client, _events, request2)) =
-    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, request2)
   let headers = [
     Header(":status", "200", WithIndexing),

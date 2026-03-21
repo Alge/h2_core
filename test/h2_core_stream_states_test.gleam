@@ -17,7 +17,7 @@ fn server_with_open_stream() -> #(Connection, Connection) {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, headers)) =
-    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   #(server, client)
 }
@@ -28,7 +28,7 @@ fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, headers)) =
-    open_stream(client, [Header(":method", "GET", WithIndexing)], True)
+    open_stream(client, helper.request_headers(), True)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   #(server, client)
 }
@@ -159,14 +159,16 @@ pub fn receive_headers_on_reserved_local_is_protocol_error_test() {
   let assert Ok(stream) = dict.get(server.streams, 2)
   assert stream.state == ReservedLocal
 
-  // Manually craft a HEADERS frame on stream 2
-  // Length=0, Type=0x01, Flags=0x04 (END_HEADERS), Stream ID=2
+  // Manually craft a HEADERS frame on stream 2 with valid HPACK
+  // Length=3, Type=0x01, Flags=0x04 (END_HEADERS), Stream ID=2
+  // HPACK: 0x82 = :method GET, 0x87 = :scheme https, 0x84 = :path /
   let bad_headers = <<
-    0:size(24),
+    3:size(24),
     0x01:size(8),
     0x04:size(8),
     0:size(1),
     2:size(31),
+    0x82, 0x87, 0x84,
   >>
   let assert Error(h2_core.ConnectionError(h2_frame.ProtocolError)) =
     receive_data(server, bad_headers)

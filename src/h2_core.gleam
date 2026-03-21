@@ -404,7 +404,22 @@ fn verify_mandatory_pseudoheaders(
   role role: Role,
   headers headers: List(String),
 ) -> Result(Nil, Nil) {
-  Ok(Nil)
+  case role {
+    Server ->
+      case
+        list.contains(headers, ":method")
+        && list.contains(headers, ":scheme")
+        && list.contains(headers, ":path")
+      {
+        True -> Ok(Nil)
+        False -> Error(Nil)
+      }
+    Client ->
+      case list.contains(headers, ":status") {
+        True -> Ok(Nil)
+        False -> Error(Nil)
+      }
+  }
 }
 
 fn validate_headers(

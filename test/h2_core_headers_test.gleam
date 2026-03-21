@@ -26,7 +26,7 @@ pub fn open_stream_produces_encoded_frame_test() {
 // open_stream opens a new stream in Open state
 pub fn open_stream_opens_stream_test() {
   let conn = helper.new_connection(Client, Connected)
-  let headers = [Header(":method", "GET", WithIndexing)]
+  let headers = helper.request_headers()
   let assert Ok(#(conn, _events, _to_send)) = open_stream(conn, headers, False)
   let assert Ok(stream) = dict.get(conn.streams, 1)
   assert stream.state == Open
@@ -35,7 +35,7 @@ pub fn open_stream_opens_stream_test() {
 // open_stream increments next_stream_id by 2
 pub fn open_stream_increments_stream_id_test() {
   let conn = helper.new_connection(Client, Connected)
-  let headers = [Header(":method", "GET", WithIndexing)]
+  let headers = helper.request_headers()
   let assert Ok(#(conn, _events, _to_send)) = open_stream(conn, headers, False)
   assert conn.next_stream_id == 3
   let assert Ok(#(conn, _events, _to_send)) = open_stream(conn, headers, False)
@@ -54,7 +54,7 @@ pub fn open_stream_server_uses_even_stream_ids_test() {
 // RFC 9113 Section 6.2 - END_STREAM flag transitions stream to half-closed (local)
 pub fn open_stream_with_end_stream_test() {
   let conn = helper.new_connection(Client, Connected)
-  let headers = [Header(":method", "GET", WithIndexing)]
+  let headers = helper.request_headers()
   let assert Ok(#(conn, _events, _to_send)) = open_stream(conn, headers, True)
   let assert Ok(stream) = dict.get(conn.streams, 1)
   assert stream.state == HalfClosedLocal
@@ -84,7 +84,7 @@ pub fn open_stream_produces_parseable_frame_test() {
 // END_STREAM is reflected in the encoded frame
 pub fn open_stream_end_stream_in_frame_test() {
   let conn = helper.new_connection(Client, Connected)
-  let headers = [Header(":method", "GET", WithIndexing)]
+  let headers = helper.request_headers()
   let assert Ok(#(_conn, _events, to_send)) = open_stream(conn, headers, True)
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(frame) = h2_frame.decode_frame(frame_data)

@@ -1,3 +1,4 @@
+import gleam/list
 import h2_core.{
   Client, Connected, Connection, ConnectionError, GoawayReceived, Header,
   HeadersReceived, Server, WithIndexing, open_stream, receive_data, send_goaway,
@@ -182,11 +183,11 @@ pub fn receive_headers_after_goaway_maintains_hpack_state_test() {
 
   // Client sends three HEADERS frames — HPACK state accumulates across all three
   let assert Ok(#(client, _events, encoded1)) =
-    open_stream(client, [Header("x-custom", "value1", WithIndexing)], False)
+    open_stream(client, list.append(helper.request_headers(), [Header("x-custom", "value1", WithIndexing)]), False)
   let assert Ok(#(client, _events, encoded2)) =
-    open_stream(client, [Header("x-custom", "value2", WithIndexing)], False)
+    open_stream(client, list.append(helper.request_headers(), [Header("x-custom", "value2", WithIndexing)]), False)
   let assert Ok(#(_client, _events, encoded3)) =
-    open_stream(client, [Header("x-custom", "value3", WithIndexing)], False)
+    open_stream(client, list.append(helper.request_headers(), [Header("x-custom", "value3", WithIndexing)]), False)
 
   // Server receives stream 1
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
@@ -204,7 +205,7 @@ pub fn receive_headers_after_goaway_maintains_hpack_state_test() {
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, encoded3)
   let assert [HeadersReceived(stream_id: 5, headers: h, end_stream: False)] =
     events
-  let assert [Header("x-custom", "value3", _)] = h
+  let assert [_, _, _, Header("x-custom", "value3", _)] = h
 }
 
 // RFC 9113 Section 6.8 - "Receivers of a GOAWAY frame MUST NOT open
@@ -215,7 +216,7 @@ pub fn receive_goaway_prevents_opening_new_streams_test() {
   let client = helper.new_connection(Client, Connected)
   // Open stream 1
   let assert Ok(#(client, _events, _to_send)) =
-    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, helper.request_headers(), False)
 
   // Receive GOAWAY from server
   let goaway =
@@ -228,7 +229,7 @@ pub fn receive_goaway_prevents_opening_new_streams_test() {
 
   // Attempt to open a new stream — must be rejected
   let assert Error(_) =
-    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, helper.request_headers(), False)
 }
 
 // RFC 9113 Section 6.8 - "Endpoints MUST NOT increase the value they
@@ -239,9 +240,9 @@ pub fn send_goaway_must_not_increase_last_stream_id_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, headers1)) =
-    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, helper.request_headers(), False)
   let assert Ok(#(_client, _events, headers2)) =
-    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers1)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers2)
 

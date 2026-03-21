@@ -1,9 +1,18 @@
 import gleam/dict
 import gleam/list
 import h2_core.{
-  type Connection, type ConnectionState, type StreamState, Connection, Stream,
+  type Connection, type ConnectionState, type Header, type StreamState,
+  Connection, Header, Stream, WithIndexing,
 }
 import h2_frame
+
+pub fn request_headers() -> List(Header) {
+  [
+    Header(":method", "GET", WithIndexing),
+    Header(":scheme", "https", WithIndexing),
+    Header(":path", "/", WithIndexing),
+  ]
+}
 
 pub fn new_connection(role: h2_core.Role, state: ConnectionState) -> Connection {
   let assert Ok(#(conn, _)) =

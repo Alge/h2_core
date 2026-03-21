@@ -14,7 +14,7 @@ fn server_with_open_stream() -> #(Connection, Connection) {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, headers)) =
-    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   #(server, client)
 }
@@ -25,7 +25,7 @@ fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, headers)) =
-    open_stream(client, [Header(":method", "GET", WithIndexing)], True)
+    open_stream(client, helper.request_headers(), True)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   #(server, client)
 }
@@ -109,7 +109,7 @@ pub fn receive_data_with_end_stream_on_half_closed_local_closes_stream_test() {
   let client = helper.new_connection(Client, Connected)
   // Client opens stream 1
   let assert Ok(#(client, _events, headers)) =
-    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
+    open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   // Server sends headers with END_STREAM, making it half-closed (local)

@@ -55,7 +55,7 @@ fn large_headers() -> List(h2_core.Header) {
 pub fn open_stream_small_block_no_continuation_test() {
   let conn = connection_with_small_frame_size(Client)
   // A single tiny header should fit in 32 bytes
-  let headers = [Header(":method", "GET", WithIndexing)]
+  let headers = helper.request_headers()
   let assert Ok(#(_conn, _events, to_send)) = open_stream(conn, headers, False)
   // Should parse as a single HEADERS frame with end_headers=True
   let assert Ok(#(frame_data, rest)) = h2_frame.extract_frame(to_send, 16_384)
@@ -410,7 +410,7 @@ pub fn receive_continuation_clears_pending_state_test() {
 
   // A normal single-frame HEADERS on a new stream must work after reassembly
   let assert Ok(#(_client, _events, encoded2)) =
-    open_stream(client, [Header(":method", "POST", WithIndexing)], False)
+    open_stream(client, [Header(":method", "POST", WithIndexing), Header(":scheme", "https", WithIndexing), Header(":path", "/", WithIndexing)], False)
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, encoded2)
   let assert [HeadersReceived(stream_id: 3, headers: _, end_stream: False)] =
     events
@@ -523,6 +523,7 @@ pub fn receive_continuation_on_open_stream_is_valid_test() {
 
   let h2 = [
     Header(":method", "POST", WithIndexing),
+    Header(":scheme", "https", WithIndexing),
     Header(":path", "/second/request/path", WithIndexing),
     Header("x-request-id", "aaaa-bbbb-cccc-dddd", WithIndexing),
   ]
@@ -552,6 +553,7 @@ pub fn receive_continuation_on_half_closed_local_is_valid_test() {
 
   let h2 = [
     Header(":method", "POST", WithIndexing),
+    Header(":scheme", "https", WithIndexing),
     Header(":path", "/second/request/path", WithIndexing),
     Header("x-request-id", "aaaa-bbbb-cccc-dddd", WithIndexing),
   ]
@@ -586,6 +588,7 @@ pub fn receive_continuation_on_closed_stream_is_discarded_test() {
 
   let h2 = [
     Header(":method", "POST", WithIndexing),
+    Header(":scheme", "https", WithIndexing),
     Header(":path", "/second/request/path", WithIndexing),
     Header("x-request-id", "aaaa-bbbb-cccc-dddd", WithIndexing),
   ]
@@ -616,16 +619,19 @@ pub fn receive_continuation_rejected_preserves_hpack_state_test() {
   // from shrinking subsequent sends below the frame size limit
   let h1 = [
     Header(":method", "GET", WithIndexing),
+    Header(":scheme", "https", WithIndexing),
     Header(":path", "/first/request/path", WithIndexing),
     Header("x-request-id", "aaaa-bbbb-cccc-dddd", WithIndexing),
   ]
   let h2 = [
     Header(":method", "POST", WithIndexing),
+    Header(":scheme", "https", WithIndexing),
     Header(":path", "/second/request/path", WithIndexing),
     Header("x-request-id", "eeee-ffff-0000-1111", WithIndexing),
   ]
   let h3 = [
     Header(":method", "PUT", WithIndexing),
+    Header(":scheme", "https", WithIndexing),
     Header(":path", "/third/request/path", WithIndexing),
     Header("x-request-id", "2222-3333-4444-5555", WithIndexing),
   ]
