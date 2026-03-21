@@ -692,10 +692,6 @@ pub fn receive_headers_with_decreasing_stream_id_is_protocol_error_test() {
     receive_data(server, patched3)
 }
 
-// =============================================================================
-// Section 8 — HTTP semantic validation
-// =============================================================================
-
 // RFC 9113 Section 8.3 - "All pseudo-header fields MUST appear in a field
 // block before all regular field lines. Any request or response that
 // contains a pseudo-header field that appears in a field block after a
@@ -935,10 +931,6 @@ pub fn receive_response_missing_status_is_malformed_test() {
     receive_data(client, headers_frame)
 }
 
-// =============================================================================
-// Section 8 — Additional header validation
-// =============================================================================
-
 // RFC 9113 Section 8.3 - "Endpoints MUST treat a request or response
 // that contains undefined or invalid pseudo-header fields as malformed
 // (Section 8.1.1)."
@@ -1090,10 +1082,6 @@ pub fn receive_multiple_informational_responses_before_final_test() {
   let assert Ok(#(_client, events, _to_send)) = receive_data(client, final_resp)
   let assert [HeadersReceived(stream_id: 1, ..)] = events
 }
-
-// =============================================================================
-// Section 8.3.1 / 8.5 — Path and CONNECT validation
-// =============================================================================
 
 // RFC 9113 Section 8.3.1 - "This pseudo-header field [:path] MUST NOT
 // be empty for 'http' or 'https' URIs; 'http' or 'https' URIs that do
