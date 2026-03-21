@@ -34,7 +34,7 @@ pub fn receive_push_promise_from_client_is_protocol_error_test() {
       stream_id: 1,
       end_headers: True,
       promised_stream_id: 2,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
@@ -95,7 +95,7 @@ pub fn receive_push_promise_when_push_disabled_is_protocol_error_test() {
       stream_id: 1,
       end_headers: True,
       promised_stream_id: 2,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
@@ -119,7 +119,7 @@ pub fn receive_push_promise_on_idle_stream_is_protocol_error_test() {
       stream_id: 1,
       end_headers: True,
       promised_stream_id: 2,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
@@ -134,13 +134,13 @@ pub fn receive_push_promise_on_open_stream_is_valid_test() {
       stream_id: 1,
       end_headers: True,
       promised_stream_id: 2,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   let assert Ok(#(client, events, _to_send)) = receive_data(client, pp)
   // Should emit PushPromiseReceived event
-  assert events
-    == [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: [])]
+  let assert [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _)] =
+    events
   // Promised stream 2 should be in reserved (remote) state
   let assert Ok(stream) = dict.get(client.streams, 2)
   assert stream.state == ReservedRemote
@@ -162,12 +162,12 @@ pub fn receive_push_promise_on_half_closed_local_is_valid_test() {
       stream_id: 1,
       end_headers: True,
       promised_stream_id: 2,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   let assert Ok(#(_client, events, _to_send)) = receive_data(client, pp)
-  assert events
-    == [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: [])]
+  let assert [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _)] =
+    events
 }
 
 // =============================================================================
@@ -186,7 +186,7 @@ pub fn receive_push_promise_with_odd_promised_id_is_protocol_error_test() {
       stream_id: 1,
       end_headers: True,
       promised_stream_id: 3,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
@@ -200,7 +200,7 @@ pub fn receive_push_promise_with_zero_promised_id_is_protocol_error_test() {
       stream_id: 1,
       end_headers: True,
       promised_stream_id: 0,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
@@ -217,7 +217,7 @@ pub fn receive_push_promise_with_already_used_id_is_protocol_error_test() {
       stream_id: 1,
       end_headers: True,
       promised_stream_id: 2,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
@@ -237,7 +237,7 @@ pub fn receive_push_promise_with_decreasing_id_is_protocol_error_test() {
       stream_id: 1,
       end_headers: True,
       promised_stream_id: 2,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
@@ -259,7 +259,7 @@ pub fn receive_push_promise_reserves_promised_stream_test() {
       stream_id: 1,
       end_headers: True,
       promised_stream_id: 2,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   let assert Ok(#(client, _events, _to_send)) = receive_data(client, pp)
@@ -282,10 +282,10 @@ pub fn receive_push_promise_without_end_headers_expects_continuation_test() {
       stream_id: 1,
       end_headers: False,
       promised_stream_id: 2,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
-  // Followed by CONTINUATION with END_HEADERS on stream 1
+  // Followed by CONTINUATION with END_HEADERS on stream 1 (empty fragment)
   let assert Ok(cont) =
     h2_frame.encode_continuation(
       stream_id: 1,
@@ -294,8 +294,8 @@ pub fn receive_push_promise_without_end_headers_expects_continuation_test() {
     )
   let assert Ok(#(_client, events, _to_send)) =
     receive_data(client, <<pp:bits, cont:bits>>)
-  assert events
-    == [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: [])]
+  let assert [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _)] =
+    events
 }
 
 pub fn receive_push_promise_without_end_headers_then_wrong_frame_is_protocol_error_test() {
@@ -306,7 +306,7 @@ pub fn receive_push_promise_without_end_headers_then_wrong_frame_is_protocol_err
       stream_id: 1,
       end_headers: False,
       promised_stream_id: 2,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   // Followed by PING instead of CONTINUATION
@@ -323,7 +323,7 @@ pub fn receive_push_promise_without_end_headers_then_wrong_stream_is_protocol_er
       stream_id: 1,
       end_headers: False,
       promised_stream_id: 2,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   // CONTINUATION on wrong stream
@@ -331,7 +331,7 @@ pub fn receive_push_promise_without_end_headers_then_wrong_stream_is_protocol_er
     h2_frame.encode_continuation(
       stream_id: 3,
       end_headers: True,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
     )
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
     receive_data(client, <<pp:bits, cont:bits>>)
@@ -353,17 +353,18 @@ pub fn receive_push_promise_updates_hpack_state_test() {
       end_headers: True,
       promised_stream_id: 2,
       // HPACK literal with indexing: :method GET (indexed as 2)
-      field_block_fragment: <<0x82>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   let assert Ok(#(_client, events, _to_send)) = receive_data(client, pp1)
   // Should have decoded the header
-  assert events
-    == [
-      PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: [
-        Header(":method", "GET", WithIndexing),
-      ]),
-    ]
+  let assert [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: h)] =
+    events
+  let assert [
+    Header(":method", "GET", _),
+    Header(":scheme", "https", _),
+    Header(":path", "/", _),
+  ] = h
 }
 
 // =============================================================================
@@ -528,12 +529,12 @@ pub fn receive_push_promise_on_closed_stream_is_handled_gracefully_test() {
       stream_id: 1,
       end_headers: True,
       promised_stream_id: 2,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   let assert Ok(#(client, events, _to_send)) = receive_data(client, pp)
-  assert events
-    == [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: [])]
+  let assert [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _)] =
+    events
   // Promised stream should still be reserved
   let assert Ok(stream) = dict.get(client.streams, 2)
   assert stream.state == ReservedRemote
@@ -574,11 +575,12 @@ pub fn receive_push_promise_invalid_padding_length_is_protocol_error_test() {
 pub fn receive_push_promise_nonzero_padding_bytes_accepted_by_default_test() {
   let #(_server, client) = server_with_open_stream()
   // Manually craft a PUSH_PROMISE with PADDED flag, pad_length=3,
-  // promised_stream_id=2, then 3 non-zero padding bytes.
-  // Length=8 (1 pad_length + 4 promised_id + 3 padding), Type=0x05,
-  // Flags=0x0C (PADDED | END_HEADERS), Stream ID=1
+  // promised_stream_id=2, HPACK data, then 3 non-zero padding bytes.
+  // Length=11 (1 pad_length + 4 promised_id + 3 HPACK + 3 padding),
+  // Type=0x05, Flags=0x0C (PADDED | END_HEADERS), Stream ID=1
+  // HPACK: 0x82 = :method GET, 0x87 = :scheme https, 0x84 = :path /
   let non_zero_padded = <<
-    8:size(24),
+    11:size(24),
     0x05:size(8),
     0x0C:size(8),
     0:size(1),
@@ -586,14 +588,15 @@ pub fn receive_push_promise_nonzero_padding_bytes_accepted_by_default_test() {
     3:size(8),
     0:size(1),
     2:size(31),
+    0x82, 0x87, 0x84,
     0xFF,
     0xFF,
     0xFF,
   >>
   let assert Ok(#(_client, events, _to_send)) =
     receive_data(client, non_zero_padded)
-  assert events
-    == [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: [])]
+  let assert [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _)] =
+    events
 }
 
 // =============================================================================
@@ -620,7 +623,7 @@ pub fn receive_push_promise_after_client_sent_rst_stream_is_not_connection_error
       stream_id: 1,
       end_headers: True,
       promised_stream_id: 2,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   // Must not be a connection error — the endpoint must handle this gracefully
@@ -647,7 +650,7 @@ pub fn receive_push_promise_on_half_closed_remote_is_protocol_error_test() {
       stream_id: 1,
       end_headers: True,
       promised_stream_id: 2,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
@@ -678,32 +681,31 @@ pub fn send_push_promise_on_closed_stream_is_error_test() {
 pub fn send_push_promise_returns_encoded_frame_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(_server, _events, to_send, promised_id)) =
-    h2_core.send_push_promise(server, 1, [
-      Header(":method", "GET", WithIndexing),
-    ])
-  // :method GET is HPACK static index 2, encoded as 0x82
+    h2_core.send_push_promise(server, 1, helper.request_headers())
+  // :method GET = 0x82, :scheme https = 0x87, :path / = 0x84
   let assert Ok(expected) =
     h2_frame.encode_push_promise(
       stream_id: 1,
       end_headers: True,
       promised_stream_id: promised_id,
-      field_block_fragment: <<0x82>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   assert to_send == expected
 }
 
 // Verify that send_push_promise with empty headers produces a valid frame.
-pub fn send_push_promise_empty_headers_test() {
+pub fn send_push_promise_minimal_valid_headers_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(_server, _events, to_send, promised_id)) =
-    h2_core.send_push_promise(server, 1, [])
+    h2_core.send_push_promise(server, 1, helper.request_headers())
+  // 0x82 = :method GET, 0x87 = :scheme https, 0x84 = :path /
   let assert Ok(expected) =
     h2_frame.encode_push_promise(
       stream_id: 1,
       end_headers: True,
       promised_stream_id: promised_id,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   assert to_send == expected
@@ -748,7 +750,7 @@ pub fn receive_multiple_push_promises_reserves_all_streams_test() {
       stream_id: 1,
       end_headers: True,
       promised_stream_id: 2,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   let assert Ok(pp2) =
@@ -756,7 +758,7 @@ pub fn receive_multiple_push_promises_reserves_all_streams_test() {
       stream_id: 1,
       end_headers: True,
       promised_stream_id: 4,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   let assert Ok(pp3) =
@@ -764,17 +766,16 @@ pub fn receive_multiple_push_promises_reserves_all_streams_test() {
       stream_id: 1,
       end_headers: True,
       promised_stream_id: 6,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   let assert Ok(#(client, events, _to_send)) =
     receive_data(client, <<pp1:bits, pp2:bits, pp3:bits>>)
-  assert events
-    == [
-      PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: []),
-      PushPromiseReceived(stream_id: 1, promised_stream_id: 4, headers: []),
-      PushPromiseReceived(stream_id: 1, promised_stream_id: 6, headers: []),
-    ]
+  let assert [
+    PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _),
+    PushPromiseReceived(stream_id: 1, promised_stream_id: 4, headers: _),
+    PushPromiseReceived(stream_id: 1, promised_stream_id: 6, headers: _),
+  ] = events
   let assert Ok(s2) = dict.get(client.streams, 2)
   let assert Ok(s4) = dict.get(client.streams, 4)
   let assert Ok(s6) = dict.get(client.streams, 6)

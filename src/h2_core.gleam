@@ -630,6 +630,18 @@ fn handle_decoded_push_promise(
   events: List(Event),
   to_send: BitArray,
 ) -> Result(#(Connection, List(Event), BitArray), H2Error) {
+  use <- bool.guard(
+    validate_headers(Server, decoded_headers, False, False, []) == Error(Nil),
+    handle_rst_stream(
+      conn:,
+      stream_id:,
+      error_code: h2_frame.ProtocolError,
+      flow_controlled_length: 0,
+      events:,
+      to_send:,
+    ),
+  )
+
   let promised_stream = Stream(..new_stream(), state: ReservedRemote)
 
   let conn =

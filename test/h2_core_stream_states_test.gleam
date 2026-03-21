@@ -42,7 +42,7 @@ fn client_with_reserved_remote_stream() -> Connection {
       stream_id: 1,
       end_headers: True,
       promised_stream_id: 2,
-      field_block_fragment: <<>>,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
   let assert Ok(#(client, _events, _to_send)) = receive_data(client, pp)
