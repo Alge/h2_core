@@ -791,10 +791,51 @@ pub fn send_push_promise(
     Error(ConnectionError(h2_frame.ProtocolError)),
   )
 
-  let #(conn, reserved_stream_id) =
+  let #(conn, promised_stream_id) =
     add_stream(conn, Stream(..new_stream(), state: ReservedLocal))
 
-  Ok(#(conn, [], <<>>, reserved_stream_id))
+  use #(conn, encoded_headers) <- result.try(encode_headers(
+    conn: conn,
+    headers: headers,
+  ))
+
+  case chunk_bytes(encoded_headers, conn.remote_settings.max_frame_size, []) {
+    [] -> {
+      use push_promise_frame <- result.try(
+        h2_frame.encode_push_promise(
+          stream_id: stream_id,
+          promised_stream_id: promised_stream_id,
+          end_headers: True,
+          field_block_fragment: <<>>,
+          padding: option.None,
+        )
+        |> result.map_error(map_frame_error),
+      )
+      Ok(#(conn, [], push_promise_frame, promised_stream_id))
+    }
+
+    [header_chunk, ..rest] -> {
+      use push_promise_frame <- result.try(
+        h2_frame.encode_push_promise(
+          stream_id: stream_id,
+          promised_stream_id: promised_stream_id,
+          end_headers: True,
+          field_block_fragment: header_chunk,
+          padding: option.None,
+        )
+        |> result.map_error(map_frame_error),
+      )
+      use continuation_frames <- result.try(
+        encode_header_continuations(rest, stream_id, <<>>),
+      )
+      Ok(#(
+        conn,
+        [],
+        <<push_promise_frame:bits, continuation_frames:bits>>,
+        promised_stream_id,
+      ))
+    }
+  }
 }
 
 pub fn send_data(

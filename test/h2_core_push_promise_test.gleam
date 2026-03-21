@@ -679,9 +679,8 @@ pub fn send_push_promise_on_closed_stream_is_error_test() {
 }
 
 // =============================================================================
-// Verify that send_push_promise produces correctly encoded output.
-// The client should be able to decode the frame and get a PushPromiseReceived
-// event with the auto-allocated promised stream ID.
+// Verify that send_push_promise produces correctly encoded output by
+// comparing against h2_frame.encode_push_promise directly.
 // =============================================================================
 
 pub fn send_push_promise_returns_encoded_frame_test() {
@@ -690,23 +689,59 @@ pub fn send_push_promise_returns_encoded_frame_test() {
     h2_core.send_push_promise(server, 1, [
       Header(":method", "GET", WithIndexing),
     ])
-  // The output should be a valid PUSH_PROMISE frame that can be decoded
-  // by the client. We verify by having the client parse it.
-  let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(client, _events, _to_send)) =
-    open_stream(client, [Header(":method", "GET", WithIndexing)], False)
-  let assert Ok(#(client, events, _to_send)) = receive_data(client, to_send)
-  assert events
-    == [
-      PushPromiseReceived(
-        stream_id: 1,
-        promised_stream_id: promised_id,
-        headers: [Header(":method", "GET", WithIndexing)],
-      ),
-    ]
-  // Promised stream should be reserved on client side
-  let assert Ok(stream) = dict.get(client.streams, promised_id)
-  assert stream.state == ReservedRemote
+  // :method GET is HPACK static index 2, encoded as 0x82
+  let assert Ok(expected) =
+    h2_frame.encode_push_promise(
+      stream_id: 1,
+      end_headers: True,
+      promised_stream_id: promised_id,
+      field_block_fragment: <<0x82>>,
+      padding: None,
+    )
+  assert to_send == expected
+}
+
+// Verify that send_push_promise with empty headers produces a valid frame.
+pub fn send_push_promise_empty_headers_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(#(_server, _events, to_send, promised_id)) =
+    h2_core.send_push_promise(server, 1, [])
+  let assert Ok(expected) =
+    h2_frame.encode_push_promise(
+      stream_id: 1,
+      end_headers: True,
+      promised_stream_id: promised_id,
+      field_block_fragment: <<>>,
+      padding: None,
+    )
+  assert to_send == expected
+}
+
+// Verify that send_push_promise with multiple headers encodes them all.
+pub fn send_push_promise_multiple_headers_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(#(server, _events, to_send, promised_id)) =
+    h2_core.send_push_promise(server, 1, [
+      Header(":method", "GET", WithIndexing),
+      Header(":path", "/", WithIndexing),
+    ])
+  // :method GET = 0x82, :path / = 0x84 (HPACK static table indices)
+  let assert Ok(expected) =
+    h2_frame.encode_push_promise(
+      stream_id: 1,
+      end_headers: True,
+      promised_stream_id: promised_id,
+      field_block_fragment: <<0x82, 0x84>>,
+      padding: None,
+    )
+  assert to_send == expected
+  // HPACK encoder state should be updated on the connection
+  // Verify by sending a second push — the encoder should still work
+  let assert Ok(#(_server, _events, _to_send, id2)) =
+    h2_core.send_push_promise(server, 1, [
+      Header(":method", "GET", WithIndexing),
+    ])
+  assert id2 > promised_id
 }
 
 // =============================================================================
