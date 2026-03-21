@@ -159,6 +159,40 @@ pub fn receive_data_on_idle_stream_is_protocol_error_test() {
     receive_data(server, data_frame)
 }
 
+// RFC 9113 Section 5.1 (reserved local) - "Receiving any type of frame other
+// than RST_STREAM, PRIORITY, or WINDOW_UPDATE on a stream in this state MUST
+// be treated as a connection error (Section 5.4.1) of type PROTOCOL_ERROR."
+pub fn receive_data_on_reserved_local_is_protocol_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let server = helper.set_stream_state(server, 2, ReservedLocal)
+  let assert Ok(data_frame) =
+    h2_frame.encode_data(
+      stream_id: 2,
+      end_stream: False,
+      data: <<"bad":utf8>>,
+      padding: None,
+    )
+  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+    receive_data(server, data_frame)
+}
+
+// RFC 9113 Section 5.1 (reserved remote) - "Receiving any type of frame other
+// than HEADERS, RST_STREAM, or PRIORITY on a stream in this state MUST be
+// treated as a connection error (Section 5.4.1) of type PROTOCOL_ERROR."
+pub fn receive_data_on_reserved_remote_is_protocol_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let server = helper.set_stream_state(server, 2, ReservedRemote)
+  let assert Ok(data_frame) =
+    h2_frame.encode_data(
+      stream_id: 2,
+      end_stream: False,
+      data: <<"bad":utf8>>,
+      padding: None,
+    )
+  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+    receive_data(server, data_frame)
+}
+
 // RFC 9113 Section 6.1 - Empty DATA frame is valid.
 pub fn receive_empty_data_frame_test() {
   let #(server, _client) = server_with_open_stream()
@@ -202,23 +236,36 @@ pub fn receive_empty_data_frame_with_end_stream_test() {
 // Section 5.2.1 - "A sender MUST respect flow-control limits imposed by
 // a receiver."
 //
-// Receiving DATA must decrement both the stream and connection
-// recv_window_size.
-pub fn receive_data_decrements_recv_window_test() {
+// Receiving DATA must decrement the stream recv_window_size.
+pub fn receive_data_decrements_stream_recv_window_test() {
   let #(server, _client) = server_with_open_stream()
-  let data = <<"hello world":utf8>>
-  let data_size = 11
   let assert Ok(data_frame) =
     h2_frame.encode_data(
       stream_id: 1,
       end_stream: False,
-      data: data,
+      data: <<"hello world":utf8>>,
       padding: None,
     )
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
   let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.recv_window_size == 65_535 - data_size
-  assert server.recv_window_size == 65_535 - data_size
+  assert stream.recv_window_size == 65_535 - 11
+}
+
+// RFC 9113 Section 5.2.1 - "A sender that sends a FLOW_CONTROLLED frame
+// reduces the available space in both flow-control windows."
+//
+// Receiving DATA must decrement the connection recv_window_size.
+pub fn receive_data_decrements_connection_recv_window_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(data_frame) =
+    h2_frame.encode_data(
+      stream_id: 1,
+      end_stream: False,
+      data: <<"hello world":utf8>>,
+      padding: None,
+    )
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
+  assert server.recv_window_size == 65_535 - 11
 }
 
 // RFC 9113 Section 6.9 - "A receiver that receives a flow-controlled frame
@@ -453,6 +500,41 @@ pub fn send_data_empty_with_end_stream_closes_test() {
     h2_core.send_data(server, 1, <<>>, True, None)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == h2_core.HalfClosedLocal
+}
+
+// RFC 9113 Section 5.1 - END_STREAM on a half-closed (remote) stream causes
+// the stream to transition to "closed".
+pub fn send_data_with_end_stream_on_half_closed_remote_closes_stream_test() {
+  let #(server, _client) = server_with_half_closed_remote_stream()
+  let assert Ok(#(server, _events, _to_send)) =
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+  let assert Ok(#(server, _events, _to_send)) =
+    h2_core.send_data(server, 1, <<"done":utf8>>, True, None)
+  let assert Ok(stream) = dict.get(server.streams, 1)
+  assert stream.state == Closed
+}
+
+// RFC 9113 Section 6.9.2 - SETTINGS_INITIAL_WINDOW_SIZE changes can cause the
+// flow-control window to go negative. "A sender MUST NOT allow a flow-control
+// window to exceed 2^31-1 octets." A negative window means no DATA can be sent
+// until WINDOW_UPDATE frames restore it.
+pub fn send_data_with_negative_window_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(#(server, _events, _to_send)) =
+    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+  // Simulate a negative stream window (as if SETTINGS_INITIAL_WINDOW_SIZE
+  // was reduced after data was already in flight)
+  let server =
+    h2_core.Connection(
+      ..server,
+      streams: dict.insert(
+        server.streams,
+        1,
+        Stream(state: Open, send_window_size: -100, recv_window_size: 65_535),
+      ),
+    )
+  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+    h2_core.send_data(server, 1, <<"hello":utf8>>, False, None)
 }
 
 // =============================================================================
@@ -840,7 +922,8 @@ pub fn receive_padded_data_frame_test() {
 
 // RFC 9113 Section 6.1 - "The entire DATA frame payload is included in flow
 // control, including the Pad Length and Padding fields if present."
-pub fn receive_padded_data_counts_full_payload_for_flow_control_test() {
+// Stream recv window must be decremented by the full payload including padding.
+pub fn receive_padded_data_decrements_stream_recv_window_test() {
   let #(server, _client) = server_with_open_stream()
   // 5 bytes data + 1 byte pad_length + 10 bytes padding = 16 bytes total payload
   let assert Ok(data_frame) =
@@ -852,9 +935,54 @@ pub fn receive_padded_data_counts_full_payload_for_flow_control_test() {
     )
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
   let assert Ok(stream) = dict.get(server.streams, 1)
-  // Flow control counts the entire payload: pad_length(1) + data(5) + padding(10) = 16
   assert stream.recv_window_size == 65_535 - 16
+}
+
+// RFC 9113 Section 6.1 - "The entire DATA frame payload is included in flow
+// control, including the Pad Length and Padding fields if present."
+// Connection recv window must be decremented by the full payload including padding.
+pub fn receive_padded_data_decrements_connection_recv_window_test() {
+  let #(server, _client) = server_with_open_stream()
+  // 5 bytes data + 1 byte pad_length + 10 bytes padding = 16 bytes total payload
+  let assert Ok(data_frame) =
+    h2_frame.encode_data(
+      stream_id: 1,
+      end_stream: False,
+      data: <<"hello":utf8>>,
+      padding: Some(10),
+    )
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
   assert server.recv_window_size == 65_535 - 16
+}
+
+// RFC 9113 Section 6.1 - "The entire DATA frame payload is included in flow
+// control, including the Pad Length and Padding fields if present."
+// The Pad Length field itself (1 byte) counts toward flow control. This test
+// ensures that data + padding fits in the window but the extra pad_length
+// byte pushes it over.
+pub fn receive_padded_data_pad_length_field_counts_toward_flow_control_test() {
+  let #(server, _client) = server_with_open_stream()
+  // Set stream recv_window_size to exactly 13 bytes
+  let server =
+    h2_core.Connection(
+      ..server,
+      streams: dict.insert(
+        server.streams,
+        1,
+        Stream(state: Open, send_window_size: 65_535, recv_window_size: 13),
+      ),
+    )
+  // 3 bytes data + 10 bytes padding = 13, which fits the window.
+  // But the full payload is 1 (pad_length) + 3 (data) + 10 (padding) = 14 > 13.
+  let assert Ok(data_frame) =
+    h2_frame.encode_data(
+      stream_id: 1,
+      end_stream: False,
+      data: <<"hey":utf8>>,
+      padding: Some(10),
+    )
+  let assert Error(StreamError(1, h2_frame.FlowControlError)) =
+    receive_data(server, data_frame)
 }
 
 // =============================================================================

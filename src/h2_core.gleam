@@ -569,31 +569,14 @@ fn handle_decoded_headers(
           // receives additional frames, other than WINDOW_UPDATE, PRIORITY,
           // or RST_STREAM, for a stream that is in this state, it MUST
           // respond with a stream error of type STREAM_CLOSED."
-          HalfClosedRemote -> {
-            case
-              h2_frame.encode_rst_stream(
-                stream_id: stream_id,
-                error_code: h2_frame.StreamClosed,
-              )
-            {
-              Ok(encoded_frame) -> {
-                Ok(
-                  #(
-                    conn,
-                    [
-                      StreamReset(
-                        stream_id: stream_id,
-                        error_code: h2_frame.StreamClosed,
-                      ),
-                      ..events
-                    ],
-                    <<to_send:bits, encoded_frame:bits>>,
-                  ),
-                )
-              }
-              Error(error) -> Error(map_frame_error(error))
-            }
-          }
+          HalfClosedRemote ->
+            handle_rst_stream(
+              conn:,
+              stream_id:,
+              error_code: h2_frame.StreamClosed,
+              events:,
+              to_send:,
+            )
           // RFC 9113 Section 5.1 (closed state) - "An endpoint MUST
           // minimally process and then discard any frames it receives
           // in this state." HPACK decoding already happened above.
@@ -628,29 +611,13 @@ fn handle_decoded_headers(
       option.Some(max) -> count_inbound_streams(conn) >= max
       option.None -> False
     },
-    {
-      use encoded_frame <- result.try(
-        h2_frame.encode_rst_stream(
-          stream_id: stream_id,
-          error_code: h2_frame.RefusedStream,
-        )
-        |> result.map_error(map_frame_error),
-      )
-
-      Ok(
-        #(
-          conn,
-          [
-            StreamReset(
-              stream_id: stream_id,
-              error_code: h2_frame.RefusedStream,
-            ),
-            ..events
-          ],
-          <<to_send:bits, encoded_frame:bits>>,
-        ),
-      )
-    },
+    handle_rst_stream(
+      conn:,
+      stream_id:,
+      error_code: h2_frame.RefusedStream,
+      events:,
+      to_send:,
+    ),
   )
 
   // Create new stream
@@ -796,13 +763,12 @@ pub fn send_data(
   end_stream end_stream: Bool,
   padding padding: option.Option(Int),
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
-
   use <- bool.guard(
     stream_id == 0,
     Error(ConnectionError(h2_frame.ProtocolError)),
   )
 
-  use _stream <- result.try(case dict.get(conn.streams, stream_id) {
+  use stream <- result.try(case dict.get(conn.streams, stream_id) {
     Ok(stream) -> {
       use <- bool.guard(
         stream.state == HalfClosedLocal || stream.state == Closed,
@@ -817,7 +783,6 @@ pub fn send_data(
     Error(Nil) ->
       Error(StreamError(stream_id: stream_id, error_code: h2_frame.StreamClosed))
   })
-
 
   use max_allowed_window_size <- result.try(
     get_send_window_size(conn: conn, stream_id: stream_id)
@@ -834,13 +799,15 @@ pub fn send_data(
     option.None -> 0
   }
 
+  let payload_length = bit_array.byte_size(data) + padding_length
+
   use <- bool.guard(
-    bit_array.byte_size(data) + padding_length > conn.remote_settings.max_frame_size,
-    Error(ConnectionError(h2_frame.FrameSizeError))
+    payload_length > conn.remote_settings.max_frame_size,
+    Error(ConnectionError(h2_frame.FrameSizeError)),
   )
 
   use <- bool.guard(
-    bit_array.byte_size(data) + padding_length > max_allowed_window_size,
+    payload_length > max_allowed_window_size,
     Error(ConnectionError(h2_frame.FlowControlError)),
   )
 
@@ -849,17 +816,37 @@ pub fn send_data(
       stream_id: stream_id,
       end_stream: end_stream,
       data: data,
-      padding: option.None,
+      padding: padding,
     )
     |> result.map_error(map_frame_error),
   )
 
-  Ok(#(
-    conn,
-    [],
-    encoded_frame
-  ))
+  let new_stream_state = case end_stream {
+    True ->
+      case stream.state {
+        HalfClosedRemote -> Closed
+        _ -> HalfClosedLocal
+      }
+    False -> stream.state
+  }
 
+  // Update the window size of the stream, and set the new state
+  let stream =
+    Stream(
+      ..stream,
+      send_window_size: stream.send_window_size - payload_length,
+      state: new_stream_state,
+    )
+
+  // Update the window sizes of the connection, and add the updated stream
+  let conn =
+    Connection(
+      ..conn,
+      send_window_size: conn.send_window_size - payload_length,
+      streams: dict.insert(conn.streams, stream_id, stream),
+    )
+
+  Ok(#(conn, [], encoded_frame))
 }
 
 pub fn get_send_window_size(
@@ -998,6 +985,26 @@ pub fn send_rst_stream(
     Ok(encoded_frame) -> Ok(#(conn, [], encoded_frame))
     Error(error) -> Error(map_frame_error(error))
   }
+}
+
+fn handle_rst_stream(
+  conn conn: Connection,
+  stream_id stream_id: Int,
+  error_code error_code: h2_frame.ErrorCode,
+  events events: List(Event),
+  to_send to_send: BitArray,
+) -> Result(#(Connection, List(Event), BitArray), H2Error) {
+  use encoded_frame <- result.try(
+    h2_frame.encode_rst_stream(stream_id: stream_id, error_code: error_code)
+    |> result.map_error(map_frame_error),
+  )
+
+  Ok(
+    #(conn, [StreamReset(stream_id:, error_code:), ..events], <<
+      to_send:bits,
+      encoded_frame:bits,
+    >>),
+  )
 }
 
 fn parse_loop(
@@ -1346,6 +1353,38 @@ fn parse_loop(
                   parse_loop(conn, events, to_send)
                 }
               }
+            }
+
+            // DATA
+            h2_frame.Data(stream_id, end_stream, _padding, data) -> {
+              use stream <- result.try(case dict.get(conn.streams, stream_id) {
+                Ok(stream) -> {
+                  use <- bool.guard(
+                    stream.state == ReservedLocal
+                      || stream.state == ReservedRemote,
+                    Error(ConnectionError(h2_frame.ProtocolError)),
+                  )
+                  Ok(stream)
+                }
+                Error(Nil) -> Error(ConnectionError(h2_frame.ProtocolError))
+              })
+
+              // Receiving data frames on a already HalfClosedRemote stream
+              // triggers a RST_STREAM
+              use <- bool.guard(
+                stream.state == HalfClosedRemote,
+                handle_rst_stream(
+                  conn: conn,
+                  stream_id: stream_id,
+                  error_code: h2_frame.StreamClosed,
+                  events: events,
+                  to_send: to_send,
+                ),
+              )
+
+              // Make sure that the data does not exceed the connection recv window
+
+              todo
             }
 
             // Ignore PRIORITY frames
