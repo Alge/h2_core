@@ -9,14 +9,8 @@ import h2_core.{
 import h2_frame
 import helper
 
-// Helper: create a server connection with an open client-initiated stream 1
 fn server_with_open_stream() -> #(Connection, Connection) {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(client, _events, headers)) =
-    open_stream(client, helper.request_headers(), False)
-  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
-  #(server, client)
+  helper.server_with_open_stream()
 }
 
 // =============================================================================

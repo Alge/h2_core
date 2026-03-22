@@ -1,7 +1,7 @@
 import gleam/bit_array
 import gleam/dict
 import h2_core.{
-  type Connection, Client, Closed, Connected, ConnectionError, HalfClosedLocal,
+  type Connection, Closed, Connected, ConnectionError, HalfClosedLocal,
   HalfClosedRemote, Header, Open, ReservedLocal, ReservedRemote, Server,
   StreamError, WithIndexing, open_stream, receive_data, send_headers,
 }
@@ -12,24 +12,12 @@ import helper
 // Helpers
 // =============================================================================
 
-/// Server with a client-initiated stream 1 in Open state.
 fn server_with_open_stream() -> #(Connection, Connection) {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(client, _events, request)) =
-    open_stream(client, helper.request_headers(), False)
-  let assert Ok(#(server, _events, _to_send)) = receive_data(server, request)
-  #(server, client)
+  helper.server_with_open_stream()
 }
 
-/// Server with stream 1 in HalfClosedRemote state (client sent END_STREAM).
 fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, _events, request)) =
-    open_stream(client, helper.request_headers(), True)
-  let assert Ok(#(server, _events, _to_send)) = receive_data(server, request)
-  #(server, client)
+  helper.server_with_half_closed_remote_stream()
 }
 
 // =============================================================================

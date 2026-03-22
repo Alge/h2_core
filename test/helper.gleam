@@ -1,8 +1,9 @@
 import gleam/dict
 import gleam/list
 import h2_core.{
-  type Connection, type ConnectionState, type Header, type StreamState,
-  Connection, Header, Stream, WithIndexing,
+  type Connection, type ConnectionState, type Header, type StreamState, Client,
+  Connected, Connection, Header, Server, Stream, WithIndexing, open_stream,
+  receive_data,
 }
 import h2_frame
 
@@ -31,6 +32,27 @@ pub fn new_stream(state: StreamState) -> h2_core.Stream {
     recv_window_size: 65_535,
     headers_sent: False,
   )
+}
+
+/// Create a server and client with an open client-initiated stream 1.
+pub fn server_with_open_stream() -> #(Connection, Connection) {
+  let server = new_connection(Server, Connected)
+  let client = new_connection(Client, Connected)
+  let assert Ok(#(client, _events, headers)) =
+    open_stream(client, request_headers(), False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+  #(server, client)
+}
+
+/// Create a server and client where stream 1 is half-closed (remote)
+/// (client sent END_STREAM with headers).
+pub fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
+  let server = new_connection(Server, Connected)
+  let client = new_connection(Client, Connected)
+  let assert Ok(#(client, _events, headers)) =
+    open_stream(client, request_headers(), True)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+  #(server, client)
 }
 
 /// Override the state of a stream on a connection.

@@ -9,25 +9,12 @@ import h2_core.{
 import h2_frame
 import helper
 
-// Helper: create a server with an open client-initiated stream 1
 fn server_with_open_stream() -> #(Connection, Connection) {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(client, _events, headers)) =
-    open_stream(client, helper.request_headers(), False)
-  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
-  #(server, client)
+  helper.server_with_open_stream()
 }
 
-// Helper: create a server with a half-closed (remote) stream 1
-// (client sent END_STREAM with headers)
 fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(client, _events, headers)) =
-    open_stream(client, helper.request_headers(), True)
-  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
-  #(server, client)
+  helper.server_with_half_closed_remote_stream()
 }
 
 // =============================================================================

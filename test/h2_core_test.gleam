@@ -1,7 +1,7 @@
 import gleam/dict
 import gleeunit
 import h2_core.{
-  Client, Connected, Idle, Open, Server, Stream,
+  Client, Connected, Idle, Open, Server,
   default_settings, new_connection, open_stream, receive_data,
 }
 import helper

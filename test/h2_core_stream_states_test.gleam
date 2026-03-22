@@ -1,9 +1,9 @@
 import gleam/dict
 import gleam/option.{None}
 import h2_core.{
-  type Connection, Client, Closed, Connected, HalfClosedRemote, Header,
-  ReservedLocal, ReservedRemote, Server, Stream, StreamReset, WithIndexing,
-  open_stream, receive_data, send_headers, send_rst_stream,
+  type Connection, Closed, HalfClosedRemote, Header,
+  ReservedLocal, ReservedRemote, StreamReset, WithIndexing,
+  receive_data, send_headers, send_rst_stream,
 }
 import h2_frame
 import helper
@@ -12,25 +12,12 @@ import helper
 // Helpers
 // =============================================================================
 
-// Helper: create a server with an open client-initiated stream 1
 fn server_with_open_stream() -> #(Connection, Connection) {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(client, _events, headers)) =
-    open_stream(client, helper.request_headers(), False)
-  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
-  #(server, client)
+  helper.server_with_open_stream()
 }
 
-// Helper: create a server with a half-closed (remote) stream 1
-// (client sent END_STREAM with headers)
 fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(client, _events, headers)) =
-    open_stream(client, helper.request_headers(), True)
-  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
-  #(server, client)
+  helper.server_with_half_closed_remote_stream()
 }
 
 // Helper: create a client that received a PUSH_PROMISE, putting promised
