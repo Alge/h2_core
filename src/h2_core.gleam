@@ -9,8 +9,8 @@ import gleam/option
 import gleam/result
 import gleam/string
 import h2_core/internal/stream.{
-  type Stream, Closed, HalfClosedLocal, HalfClosedRemote, Idle, Open,
-  ReservedLocal, ReservedRemote, Stream, new_stream,
+  type Stream, type StreamState, Closed, HalfClosedLocal, HalfClosedRemote, Idle,
+  Open, ReservedLocal, ReservedRemote, Stream, new_stream,
 }
 import h2_frame
 
@@ -1436,6 +1436,17 @@ pub fn get_send_window_size(
   case dict.get(conn.streams, stream_id) {
     Ok(stream) ->
       Ok(int.max(0, int.min(stream.send_window_size, conn.send_window_size)))
+    Error(Nil) -> Error(Nil)
+  }
+}
+
+@internal
+pub fn get_stream_state(
+  conn conn: Connection,
+  stream_id stream_id: Int,
+) -> Result(StreamState, Nil) {
+  case dict.get(conn.streams, stream_id) {
+    Ok(stream) -> Ok(stream.state)
     Error(Nil) -> Error(Nil)
   }
 }

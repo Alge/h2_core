@@ -1,10 +1,9 @@
 import gleam/bit_array
-import gleam/dict
 import gleam/list
 import h2_core.{
   Client, CompressionError, Connection, ConnectionError, Header, HeadersReceived,
   ProtocolError, Server, Settings, StreamClosed, StreamReset, WithIndexing,
-  open_stream, receive_data,
+  get_stream_state, open_stream, receive_data,
 }
 import h2_core/internal/stream.{Closed, HalfClosedLocal, HalfClosedRemote, Open}
 import h2_frame
@@ -137,8 +136,7 @@ pub fn open_stream_end_stream_only_on_headers_frame_test() {
   assert continuations != []
 
   // Stream should still be HalfClosedLocal
-  let assert Ok(stream) = dict.get(conn.streams, 1)
-  assert stream.state == HalfClosedLocal
+  let assert Ok(HalfClosedLocal) = get_stream_state(conn, 1)
 }
 
 // Stream state is correct after sending split headers without end_stream
@@ -152,8 +150,7 @@ pub fn open_stream_continuation_stream_state_open_test() {
   let frames = helper.parse_all_frames(to_send, [])
   assert list.length(frames) > 1
 
-  let assert Ok(stream) = dict.get(conn.streams, 1)
-  assert stream.state == Open
+  let assert Ok(Open) = get_stream_state(conn, 1)
 }
 
 // The concatenated fragments from all frames can be HPACK-decoded
@@ -455,8 +452,7 @@ pub fn receive_continuation_preserves_end_stream_test() {
   let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: True)] =
     events
   // Stream should be HalfClosedRemote since end_stream was True
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == HalfClosedRemote
+  let assert Ok(HalfClosedRemote) = get_stream_state(server, 1)
 }
 
 // Header order is preserved when split across multiple frames
@@ -558,8 +554,7 @@ pub fn receive_continuation_on_open_stream_is_valid_test() {
 
   let server = helper.connected_connection(Server)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Open
+  let assert Ok(Open) = get_stream_state(server, 1)
 
   let assert Ok(#(_server, events, to_send)) = receive_data(server, patched)
   let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: False)] =
@@ -626,8 +621,7 @@ pub fn receive_continuation_on_closed_stream_is_discarded_test() {
   let server = helper.connected_connection(Server)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, rst)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Closed
+  let assert Ok(Closed) = get_stream_state(server, 1)
 
   // Silently discarded — no events, no response
   let assert Ok(#(_server, events, to_send)) = receive_data(server, patched)
@@ -680,8 +674,7 @@ pub fn receive_continuation_rejected_preserves_hpack_state_test() {
   let server = helper.connected_connection(Server)
   // Receive block 1 — stream 1 becomes HalfClosedRemote
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == HalfClosedRemote
+  let assert Ok(HalfClosedRemote) = get_stream_state(server, 1)
 
   // Receive patched block 2 — rejected, but HPACK must still be decoded
   let assert Ok(#(server, events, _to_send)) = receive_data(server, patched2)

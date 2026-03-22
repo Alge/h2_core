@@ -1,12 +1,11 @@
 import gleam/bit_array
-import gleam/dict
 import gleam/list
 import gleam/option
 import h2_core.{
   Client, CompressionError, Connection, ConnectionError, Header, HeadersReceived,
   MaxConcurrentStreams, NeverIndexed, ProtocolError, RefusedStream, Server,
-  StreamClosed, StreamReset, WithIndexing, WithoutIndexing, open_stream,
-  receive_data, send_headers, send_settings,
+  StreamClosed, StreamReset, WithIndexing, WithoutIndexing, get_stream_state,
+  open_stream, receive_data, send_headers, send_settings,
 }
 import h2_core/internal/stream.{Closed, HalfClosedLocal, HalfClosedRemote, Open}
 import h2_frame
@@ -43,8 +42,7 @@ pub fn receive_headers_opens_stream_test() {
 
   let server = helper.connected_connection(Server)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Open
+  let assert Ok(Open) = get_stream_state(server, 1)
 }
 
 // Receiving HEADERS with END_STREAM creates stream in HalfClosedRemote
@@ -56,8 +54,7 @@ pub fn receive_headers_end_stream_test() {
 
   let server = helper.connected_connection(Server)
   let assert Ok(#(server, events, _to_send)) = receive_data(server, encoded)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == HalfClosedRemote
+  let assert Ok(HalfClosedRemote) = get_stream_state(server, 1)
   let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: True)] =
     events
 }
@@ -206,10 +203,8 @@ pub fn receive_multiple_headers_creates_streams_test() {
     events2
 
   // Both streams should exist
-  let assert Ok(s1) = dict.get(server.streams, 1)
-  let assert Ok(s3) = dict.get(server.streams, 3)
-  assert s1.state == Open
-  assert s3.state == Open
+  let assert Ok(Open) = get_stream_state(server, 1)
+  let assert Ok(Open) = get_stream_state(server, 3)
 }
 
 // Receiving both HEADERS frames in a single receive_data call
@@ -235,10 +230,8 @@ pub fn receive_multiple_headers_in_one_call_test() {
     HeadersReceived(stream_id: 1, headers: _, end_stream: False),
     HeadersReceived(stream_id: 3, headers: _, end_stream: False),
   ] = events
-  let assert Ok(s1) = dict.get(server.streams, 1)
-  let assert Ok(s3) = dict.get(server.streams, 3)
-  assert s1.state == Open
-  assert s3.state == Open
+  let assert Ok(Open) = get_stream_state(server, 1)
+  let assert Ok(Open) = get_stream_state(server, 3)
 }
 
 // Receiving HEADERS updates last_remote_stream_id
@@ -304,16 +297,14 @@ pub fn receive_headers_on_open_stream_is_valid_test() {
 
   let server = helper.connected_connection(Server)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Open
+  let assert Ok(Open) = get_stream_state(server, 1)
 
   // HEADERS on an open stream should succeed and keep state Open
   let assert Ok(#(server, events, to_send)) = receive_data(server, patched)
   let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: False)] =
     events
   assert to_send == <<>>
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Open
+  let assert Ok(Open) = get_stream_state(server, 1)
 }
 
 // RFC 9113 Section 5.1 - Receiving HEADERS on a half-closed(local) stream
@@ -337,8 +328,7 @@ pub fn receive_headers_on_half_closed_local_stream_is_valid_test() {
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
   // Simulate server having sent END_STREAM on stream 1 (half-closed local)
   let server = helper.set_stream_state(server, 1, HalfClosedLocal)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == HalfClosedLocal
+  let assert Ok(HalfClosedLocal) = get_stream_state(server, 1)
 
   // HEADERS on half-closed(local) should succeed
   let assert Ok(#(_server, events, to_send)) = receive_data(server, patched)
@@ -359,14 +349,12 @@ pub fn receive_headers_end_stream_on_open_stream_transitions_state_test() {
 
   let server = helper.connected_connection(Server)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Open
+  let assert Ok(Open) = get_stream_state(server, 1)
 
   let assert Ok(#(server, events, _to_send)) = receive_data(server, encoded2)
   let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: True)] =
     events
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == HalfClosedRemote
+  let assert Ok(HalfClosedRemote) = get_stream_state(server, 1)
 }
 
 // RFC 9113 Section 5.1 - Receiving HEADERS with END_STREAM on a
@@ -387,8 +375,7 @@ pub fn receive_headers_end_stream_on_half_closed_local_transitions_to_closed_tes
   let assert Ok(#(server, events, _to_send)) = receive_data(server, encoded2)
   let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: True)] =
     events
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Closed
+  let assert Ok(Closed) = get_stream_state(server, 1)
 }
 
 // RFC 9113 Section 6.2 - "A receiver is not obligated to verify padding
@@ -504,12 +491,10 @@ pub fn receive_headers_on_closed_stream_is_discarded_test() {
   let server = helper.connected_connection(Server)
   // Receive HEADERS to open stream 1
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Open
+  let assert Ok(Open) = get_stream_state(server, 1)
   // Receive RST_STREAM to close stream 1
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, rst)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Closed
+  let assert Ok(Closed) = get_stream_state(server, 1)
 
   // HEADERS on closed stream: silently discarded
   let assert Ok(#(_server, events, to_send)) = receive_data(server, patched)
@@ -542,8 +527,7 @@ pub fn receive_headers_on_half_closed_remote_is_stream_error_test() {
 
   let server = helper.connected_connection(Server)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == HalfClosedRemote
+  let assert Ok(HalfClosedRemote) = get_stream_state(server, 1)
 
   // Patch frame 2 to target stream 1 (half-closed remote)
   let patched = helper.patch_stream_id(encoded2, 1)
@@ -702,8 +686,7 @@ pub fn receive_headers_exceeding_max_concurrent_streams_test() {
   let assert Ok(#(client, encoded1, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Open
+  let assert Ok(Open) = get_stream_state(server, 1)
 
   // Open stream 3 — should be refused (exceeds MAX_CONCURRENT_STREAMS=1)
   let assert Ok(#(_client, encoded3, _stream_id)) =

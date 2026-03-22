@@ -1,5 +1,4 @@
 import gleam/bit_array
-import gleam/dict
 import h2_core.{
   type Connection, ConnectionError, Header, ProtocolError, Server, StreamClosed,
   StreamError, WithIndexing, open_stream, receive_data, send_headers,
@@ -44,8 +43,7 @@ pub fn send_headers_with_end_stream_on_open_stream_transitions_to_half_closed_lo
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == HalfClosedLocal
+  let assert Ok(HalfClosedLocal) = h2_core.get_stream_state(server, 1)
 }
 
 // RFC 9113 Section 5.1 - A stream that is "half-closed (remote)" can be used
@@ -64,8 +62,7 @@ pub fn send_headers_with_end_stream_on_half_closed_remote_closes_stream_test() {
   let #(server, _client) = server_with_half_closed_remote_stream()
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Closed
+  let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 }
 
 // RFC 9113 Section 5.1 - "reserved (local): The endpoint can send a HEADERS
@@ -75,8 +72,7 @@ pub fn send_headers_on_reserved_local_transitions_to_half_closed_remote_test() {
   let server = helper.set_stream_state(server, 2, ReservedLocal)
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 2, [Header(":status", "200", WithIndexing)], False)
-  let assert Ok(stream) = dict.get(server.streams, 2)
-  assert stream.state == HalfClosedRemote
+  let assert Ok(HalfClosedRemote) = h2_core.get_stream_state(server, 2)
 }
 
 // RFC 9113 Section 8.1 - A server MAY send interim (1xx) responses before the
@@ -85,8 +81,7 @@ pub fn send_headers_interim_response_does_not_close_stream_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "100", WithIndexing)], False)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Open
+  let assert Ok(Open) = h2_core.get_stream_state(server, 1)
 }
 
 // RFC 9113 Section 5.1 - Without END_STREAM the stream state stays Open.
@@ -94,8 +89,7 @@ pub fn send_headers_without_end_stream_does_not_change_state_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Open
+  let assert Ok(Open) = h2_core.get_stream_state(server, 1)
 }
 
 // =============================================================================

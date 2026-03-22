@@ -1,4 +1,3 @@
-import gleam/dict
 import gleam/option.{None}
 import h2_core.{
   type Connection, Cancel, Client, ConnectionError, Header, ProtocolError,
@@ -136,8 +135,7 @@ pub fn receive_push_promise_on_open_stream_is_valid_test() {
     PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _),
   ] = events
   // Promised stream 2 should be in reserved (remote) state
-  let assert Ok(stream) = dict.get(client.streams, 2)
-  assert stream.state == ReservedRemote
+  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, 2)
 }
 
 pub fn receive_push_promise_on_half_closed_local_is_valid_test() {
@@ -254,8 +252,7 @@ pub fn receive_push_promise_reserves_promised_stream_test() {
       padding: None,
     )
   let assert Ok(#(client, _events, _to_send)) = receive_data(client, pp)
-  let assert Ok(stream) = dict.get(client.streams, 2)
-  assert stream.state == ReservedRemote
+  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, 2)
 }
 
 // =============================================================================
@@ -385,8 +382,7 @@ pub fn send_push_promise_on_open_peer_stream_test() {
     ])
   // Promised stream should be even and in reserved (local) on server side
   assert promised_id % 2 == 0
-  let assert Ok(stream) = dict.get(server.streams, promised_id)
-  assert stream.state == ReservedLocal
+  let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, promised_id)
 }
 
 pub fn send_push_promise_on_half_closed_remote_test() {
@@ -401,8 +397,7 @@ pub fn send_push_promise_on_half_closed_remote_test() {
     h2_core.send_push_promise(server, 1, [
       Header(":method", "GET", WithIndexing),
     ])
-  let assert Ok(stream) = dict.get(server.streams, promised_id)
-  assert stream.state == ReservedLocal
+  let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, promised_id)
 }
 
 // RFC 9113 Section 6.6 - "A sender MUST NOT send a PUSH_PROMISE on a stream
@@ -513,8 +508,7 @@ pub fn receive_push_promise_on_closed_stream_is_handled_gracefully_test() {
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.NoError)
   let assert Ok(#(client, _events, _to_send)) = receive_data(client, rst)
-  let assert Ok(stream) = dict.get(client.streams, 1)
-  assert stream.state == Closed
+  let assert Ok(Closed) = h2_core.get_stream_state(client, 1)
 
   // PUSH_PROMISE arrives on closed stream — must be handled, not rejected
   let assert Ok(pp) =
@@ -530,8 +524,7 @@ pub fn receive_push_promise_on_closed_stream_is_handled_gracefully_test() {
     PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _),
   ] = events
   // Promised stream should still be reserved
-  let assert Ok(stream) = dict.get(client.streams, 2)
-  assert stream.state == ReservedRemote
+  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, 2)
 }
 
 // RFC 9113 Section 6.6 - "The total number of padding octets is
@@ -598,8 +591,7 @@ pub fn receive_push_promise_after_client_sent_rst_stream_is_not_connection_error
   let #(_server, client) = server_with_open_stream()
   // Client sends RST_STREAM on stream 1
   let assert Ok(#(client, _to_send)) = send_rst_stream(client, 1, Cancel)
-  let assert Ok(stream) = dict.get(client.streams, 1)
-  assert stream.state == Closed
+  let assert Ok(Closed) = h2_core.get_stream_state(client, 1)
 
   // Server's PUSH_PROMISE arrives (was in flight before RST_STREAM processed)
   let assert Ok(pp) =
@@ -759,12 +751,9 @@ pub fn receive_multiple_push_promises_reserves_all_streams_test() {
     PushPromiseReceived(stream_id: 1, promised_stream_id: 4, headers: _),
     PushPromiseReceived(stream_id: 1, promised_stream_id: 6, headers: _),
   ] = events
-  let assert Ok(s2) = dict.get(client.streams, 2)
-  let assert Ok(s4) = dict.get(client.streams, 4)
-  let assert Ok(s6) = dict.get(client.streams, 6)
-  assert s2.state == ReservedRemote
-  assert s4.state == ReservedRemote
-  assert s6.state == ReservedRemote
+  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, 2)
+  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, 4)
+  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, 6)
 }
 
 // RFC 9113 Section 8.4.1 - "The header fields in PUSH_PROMISE and any

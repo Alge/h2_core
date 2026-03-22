@@ -35,8 +35,7 @@ fn client_with_reserved_remote_stream() -> Connection {
       padding: None,
     )
   let assert Ok(#(client, _events, _to_send)) = receive_data(client, pp)
-  let assert Ok(stream) = dict.get(client.streams, 2)
-  assert stream.state == ReservedRemote
+  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, 2)
   client
 }
 
@@ -59,8 +58,7 @@ fn server_with_closed_stream() -> #(Connection, Connection) {
   let #(server, client) = server_with_half_closed_remote_stream()
   // Server sends RST_STREAM to fully close the stream
   let assert Ok(#(server, _to_send)) = send_rst_stream(server, 1, NoError)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Closed
+  let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
   #(server, client)
 }
 
@@ -75,8 +73,7 @@ fn server_with_closed_stream() -> #(Connection, Connection) {
 // Test: sending DATA on a reserved (local) stream should be an error.
 pub fn send_data_on_reserved_local_stream_is_error_test() {
   let server = server_with_reserved_local_stream()
-  let assert Ok(stream) = dict.get(server.streams, 2)
-  assert stream.state == ReservedLocal
+  let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, 2)
 
   // Attempt to send DATA on reserved (local) stream 2 — should fail
   let assert Error(_) =
@@ -99,8 +96,7 @@ pub fn send_data_on_reserved_local_stream_is_error_test() {
 // Test: sending DATA on a reserved (remote) stream should be an error.
 pub fn send_data_on_reserved_remote_stream_is_error_test() {
   let client = client_with_reserved_remote_stream()
-  let assert Ok(stream) = dict.get(client.streams, 2)
-  assert stream.state == ReservedRemote
+  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, 2)
 
   // Attempt to send DATA on reserved (remote) stream 2 — should fail
   let assert Error(_) =
@@ -115,8 +111,7 @@ pub fn send_data_on_reserved_remote_stream_is_error_test() {
 // WINDOW_UPDATE is not in the allowed list for reserved (remote).
 pub fn receive_window_update_on_reserved_remote_is_protocol_error_test() {
   let client = client_with_reserved_remote_stream()
-  let assert Ok(stream) = dict.get(client.streams, 2)
-  assert stream.state == ReservedRemote
+  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, 2)
 
   let assert Ok(wu) =
     h2_frame.encode_window_update(stream_id: 2, window_size_increment: 1024)
@@ -136,8 +131,7 @@ pub fn receive_window_update_on_reserved_remote_is_protocol_error_test() {
 // HEADERS is not in the allowed list for reserved (local).
 pub fn receive_headers_on_reserved_local_is_protocol_error_test() {
   let server = server_with_reserved_local_stream()
-  let assert Ok(stream) = dict.get(server.streams, 2)
-  assert stream.state == ReservedLocal
+  let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, 2)
 
   // Manually craft a HEADERS frame on stream 2 with valid HPACK
   // Length=3, Type=0x01, Flags=0x04 (END_HEADERS), Stream ID=2
@@ -162,8 +156,7 @@ pub fn receive_headers_on_reserved_local_is_protocol_error_test() {
 // the server sends HEADERS on the promised stream to deliver the response.
 pub fn receive_headers_on_reserved_remote_transitions_to_half_closed_local_test() {
   let client = client_with_reserved_remote_stream()
-  let assert Ok(stream) = dict.get(client.streams, 2)
-  assert stream.state == ReservedRemote
+  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, 2)
 
   // Server sends HEADERS on promised stream 2
   let assert Ok(headers_frame) =
@@ -177,8 +170,7 @@ pub fn receive_headers_on_reserved_remote_transitions_to_half_closed_local_test(
     )
   let assert Ok(#(client, _events, _to_send)) =
     receive_data(client, headers_frame)
-  let assert Ok(stream) = dict.get(client.streams, 2)
-  assert stream.state == HalfClosedLocal
+  let assert Ok(HalfClosedLocal) = h2_core.get_stream_state(client, 2)
 }
 
 // RFC 9113 Section 5.1 (reserved remote):
@@ -186,16 +178,14 @@ pub fn receive_headers_on_reserved_remote_transitions_to_half_closed_local_test(
 // to become 'closed'. This releases the stream reservation."
 pub fn receive_rst_stream_on_reserved_remote_transitions_to_closed_test() {
   let client = client_with_reserved_remote_stream()
-  let assert Ok(stream) = dict.get(client.streams, 2)
-  assert stream.state == ReservedRemote
+  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, 2)
 
   // Server sends RST_STREAM on promised stream 2
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 2, error_code: h2_frame.Cancel)
   let assert Ok(#(client, events, _to_send)) = receive_data(client, rst)
   assert events == [StreamReset(stream_id: 2, error_code: Cancel)]
-  let assert Ok(stream) = dict.get(client.streams, 2)
-  assert stream.state == Closed
+  let assert Ok(Closed) = h2_core.get_stream_state(client, 2)
 }
 
 // =============================================================================
@@ -209,16 +199,14 @@ pub fn receive_rst_stream_on_reserved_remote_transitions_to_closed_test() {
 // The client rejects a push by sending RST_STREAM on the reserved stream.
 pub fn receive_rst_stream_on_reserved_local_transitions_to_closed_test() {
   let server = server_with_reserved_local_stream()
-  let assert Ok(stream) = dict.get(server.streams, 2)
-  assert stream.state == ReservedLocal
+  let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, 2)
 
   // Client sends RST_STREAM on promised stream 2 to reject the push
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 2, error_code: h2_frame.Cancel)
   let assert Ok(#(server, events, _to_send)) = receive_data(server, rst)
   assert events == [StreamReset(stream_id: 2, error_code: Cancel)]
-  let assert Ok(stream) = dict.get(server.streams, 2)
-  assert stream.state == Closed
+  let assert Ok(Closed) = h2_core.get_stream_state(server, 2)
 }
 
 // =============================================================================
@@ -237,16 +225,14 @@ pub fn receive_rst_stream_on_half_closed_local_transitions_to_closed_test() {
   // Server sends headers with END_STREAM → half-closed (local)
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == HalfClosedLocal
+  let assert Ok(HalfClosedLocal) = h2_core.get_stream_state(server, 1)
 
   // Client sends RST_STREAM
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
   let assert Ok(#(server, events, _to_send)) = receive_data(server, rst)
   assert events == [StreamReset(stream_id: 1, error_code: Cancel)]
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Closed
+  let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 }
 
 // =============================================================================
@@ -262,8 +248,7 @@ pub fn receive_rst_stream_on_half_closed_local_transitions_to_closed_test() {
 // (not a stream error).
 pub fn receive_window_update_on_half_closed_remote_is_accepted_test() {
   let #(server, _client) = server_with_half_closed_remote_stream()
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == HalfClosedRemote
+  let assert Ok(HalfClosedRemote) = h2_core.get_stream_state(server, 1)
 
   // Receive WINDOW_UPDATE on half-closed (remote) stream 1 — should succeed
   let assert Ok(wu) =
@@ -283,8 +268,7 @@ pub fn receive_window_update_on_half_closed_remote_is_accepted_test() {
 // Test: receiving RST_STREAM on a half-closed (remote) stream is accepted.
 pub fn receive_rst_stream_on_half_closed_remote_is_accepted_test() {
   let #(server, _client) = server_with_half_closed_remote_stream()
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == HalfClosedRemote
+  let assert Ok(HalfClosedRemote) = h2_core.get_stream_state(server, 1)
 
   // Receive RST_STREAM on half-closed (remote) stream 1 — should succeed
   let assert Ok(rst) =
@@ -293,8 +277,7 @@ pub fn receive_rst_stream_on_half_closed_remote_is_accepted_test() {
 
   // Should emit a StreamReset event and transition to Closed
   assert events == [StreamReset(stream_id: 1, error_code: Cancel)]
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Closed
+  let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 }
 
 // =============================================================================
@@ -307,8 +290,7 @@ pub fn receive_rst_stream_on_half_closed_remote_is_accepted_test() {
 // Test: send_data on a closed stream should be an error.
 pub fn send_data_on_closed_stream_is_error_test() {
   let #(server, _client) = server_with_closed_stream()
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Closed
+  let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 
   // Attempt to send DATA on closed stream 1 — should fail
   let assert Error(_) =
@@ -326,8 +308,7 @@ pub fn send_data_on_closed_stream_is_error_test() {
 // For now we test via send_data which takes a stream_id.
 pub fn send_headers_on_closed_stream_is_error_test() {
   let #(server, _client) = server_with_closed_stream()
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Closed
+  let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 
   // Since send_headers always creates a new stream (doesn't take stream_id),
   // we cannot directly test "send HEADERS on closed stream 1" with the
@@ -346,8 +327,7 @@ pub fn send_headers_on_closed_stream_is_error_test() {
 // Test: send_rst_stream on a closed stream should be an error.
 pub fn send_rst_stream_on_closed_stream_is_error_test() {
   let #(server, _client) = server_with_closed_stream()
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Closed
+  let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 
   let assert Error(_) = send_rst_stream(server, 1, Cancel)
 }
@@ -358,8 +338,7 @@ pub fn send_rst_stream_on_closed_stream_is_error_test() {
 // Test: send_window_update on a closed stream should be an error.
 pub fn send_window_update_on_closed_stream_is_error_test() {
   let #(server, _client) = server_with_closed_stream()
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Closed
+  let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 
   let assert Error(_) = h2_core.send_window_update(server, 1, 1024)
 }
@@ -381,8 +360,7 @@ pub fn send_window_update_on_closed_stream_is_error_test() {
 // discarded (not an error).
 pub fn receive_window_update_on_closed_stream_is_silently_discarded_test() {
   let #(server, _client) = server_with_closed_stream()
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Closed
+  let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 
   // Receive WINDOW_UPDATE on closed stream 1 — should be silently discarded
   let assert Ok(wu) =
@@ -403,8 +381,7 @@ pub fn receive_window_update_on_closed_stream_is_silently_discarded_test() {
 // discarded (not an error).
 pub fn receive_rst_stream_on_closed_stream_is_silently_discarded_test() {
   let #(server, _client) = server_with_closed_stream()
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Closed
+  let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 
   // Receive RST_STREAM on closed stream 1 — should be silently discarded
   let assert Ok(rst) =

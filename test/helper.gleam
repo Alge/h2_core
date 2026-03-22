@@ -8,8 +8,6 @@ import h2_core.{
 import h2_core/internal/stream.{type Stream, type StreamState, Stream}
 import h2_frame
 
-const client_preface_magic = <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8>>
-
 pub fn request_headers() -> List(Header) {
   [
     Header(":method", "GET", WithIndexing),

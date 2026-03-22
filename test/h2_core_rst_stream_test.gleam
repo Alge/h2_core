@@ -1,4 +1,3 @@
-import gleam/dict
 import h2_core.{
   Cancel, Client, ConnectionError, FrameSizeError, InternalError, ProtocolError,
   Server, StreamReset, open_stream, receive_data, send_rst_stream,
@@ -42,11 +41,9 @@ pub fn send_rst_stream_transitions_to_closed_test() {
   let conn = helper.connected_connection(Client)
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, helper.request_headers(), False)
-  let assert Ok(stream) = dict.get(conn.streams, 1)
-  assert stream.state == Open
+  let assert Ok(Open) = h2_core.get_stream_state(conn, 1)
   let assert Ok(#(conn, _to_send)) = send_rst_stream(conn, 1, Cancel)
-  let assert Ok(stream) = dict.get(conn.streams, 1)
-  assert stream.state == Closed
+  let assert Ok(Closed) = h2_core.get_stream_state(conn, 1)
 }
 
 // RFC 9113 Section 6.4 - RST_STREAM MUST NOT be sent for idle stream
@@ -89,13 +86,11 @@ pub fn receive_rst_stream_closes_stream_test() {
   let conn = helper.connected_connection(Client)
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, helper.request_headers(), False)
-  let assert Ok(stream) = dict.get(conn.streams, 1)
-  assert stream.state == Open
+  let assert Ok(Open) = h2_core.get_stream_state(conn, 1)
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
   let assert Ok(#(conn, _events, _to_send)) = receive_data(conn, rst)
-  let assert Ok(stream) = dict.get(conn.streams, 1)
-  assert stream.state == Closed
+  let assert Ok(Closed) = h2_core.get_stream_state(conn, 1)
 }
 
 // RFC 9113 Section 6.4 - RST_STREAM on stream 0 is PROTOCOL_ERROR
@@ -162,10 +157,8 @@ pub fn receive_rst_stream_continues_parse_loop_test() {
       StreamReset(stream_id: 1, error_code: Cancel),
       StreamReset(stream_id: 3, error_code: InternalError),
     ]
-  let assert Ok(s1) = dict.get(conn.streams, 1)
-  let assert Ok(s3) = dict.get(conn.streams, 3)
-  assert s1.state == Closed
-  assert s3.state == Closed
+  let assert Ok(Closed) = h2_core.get_stream_state(conn, 1)
+  let assert Ok(Closed) = h2_core.get_stream_state(conn, 3)
 }
 
 // RST_STREAM does not send any response frame

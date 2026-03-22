@@ -52,8 +52,7 @@ pub fn open_stream_opens_stream_test() {
   let conn = helper.connected_connection(Client)
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, helper.request_headers(), False)
-  let assert Ok(stream) = dict.get(conn.streams, 1)
-  assert stream.state == Open
+  let assert Ok(Open) = h2_core.get_stream_state(conn, 1)
 }
 
 pub fn open_stream_increments_stream_id_test() {
@@ -159,8 +158,7 @@ pub fn receive_unknown_frame_type_on_stream_is_ignored_test() {
   assert events == []
   assert to_send == <<>>
   // Stream 1 should still be open
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Open
+  let assert Ok(Open) = h2_core.get_stream_state(server, 1)
 }
 
 // RFC 9113 Section 4.1 - "Reserved: A reserved 1-bit field. The

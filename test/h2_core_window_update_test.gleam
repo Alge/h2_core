@@ -1,8 +1,8 @@
 import gleam/dict
 import h2_core.{
   Client, ConnectionError, FlowControlError, FrameSizeError, Header,
-  HeadersReceived, ProtocolError, Server, StreamReset, WithIndexing, open_stream,
-  receive_data, send_window_update,
+  HeadersReceived, ProtocolError, Server, StreamReset, WithIndexing,
+  get_stream_state, open_stream, receive_data, send_window_update,
 }
 import h2_core/internal/stream.{Closed, HalfClosedLocal, HalfClosedRemote, Open}
 import h2_frame
@@ -340,8 +340,7 @@ pub fn receive_window_update_on_open_stream_test() {
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == Open
+  let assert Ok(Open) = get_stream_state(server, 1)
 
   let assert Ok(wu) =
     h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)
@@ -383,8 +382,7 @@ pub fn receive_window_update_on_half_closed_remote_stream_test() {
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), True)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == HalfClosedRemote
+  let assert Ok(HalfClosedRemote) = get_stream_state(server, 1)
 
   let assert Ok(wu) =
     h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)
@@ -450,6 +448,5 @@ pub fn receive_window_update_connection_survives_stream_overflow_test() {
   let assert Ok(#(server, events, _to_send)) = receive_data(server, headers3)
   let assert [HeadersReceived(stream_id: 3, headers: _, end_stream: False)] =
     events
-  let assert Ok(stream) = dict.get(server.streams, 3)
-  assert stream.state == Open
+  let assert Ok(Open) = get_stream_state(server, 3)
 }

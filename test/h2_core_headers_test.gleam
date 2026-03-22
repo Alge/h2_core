@@ -29,8 +29,7 @@ pub fn open_stream_opens_stream_test() {
   let headers = helper.request_headers()
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, headers, False)
-  let assert Ok(stream) = dict.get(conn.streams, 1)
-  assert stream.state == Open
+  let assert Ok(Open) = h2_core.get_stream_state(conn, 1)
 }
 
 // open_stream increments next_stream_id by 2
@@ -61,8 +60,7 @@ pub fn open_stream_with_end_stream_test() {
   let headers = helper.request_headers()
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, headers, True)
-  let assert Ok(stream) = dict.get(conn.streams, 1)
-  assert stream.state == HalfClosedLocal
+  let assert Ok(HalfClosedLocal) = h2_core.get_stream_state(conn, 1)
 }
 
 // The encoded frame can be parsed back by h2_frame
@@ -241,8 +239,7 @@ pub fn open_stream_with_valid_headers_test() {
   let conn = helper.connected_connection(Client)
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, helper.request_headers(), False)
-  let assert Ok(stream) = dict.get(conn.streams, 1)
-  assert stream.state == Open
+  let assert Ok(Open) = h2_core.get_stream_state(conn, 1)
 }
 
 // RFC 9113 Section 8.3.2 - Server responses must include :status.
