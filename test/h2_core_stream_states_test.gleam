@@ -60,7 +60,7 @@ fn server_with_reserved_local_stream() -> Connection {
 fn server_with_closed_stream() -> #(Connection, Connection) {
   let #(server, client) = server_with_half_closed_remote_stream()
   // Server sends RST_STREAM to fully close the stream
-  let assert Ok(#(server, _events, _to_send)) =
+  let assert Ok(#(server, _to_send)) =
     send_rst_stream(server, 1, h2_frame.NoError)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == Closed
@@ -242,7 +242,7 @@ pub fn receive_rst_stream_on_reserved_local_transitions_to_closed_test() {
 pub fn receive_rst_stream_on_half_closed_local_transitions_to_closed_test() {
   let #(server, _client) = server_with_open_stream()
   // Server sends headers with END_STREAM → half-closed (local)
-  let assert Ok(#(server, _events, _to_send)) =
+  let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == h2_core.HalfClosedLocal

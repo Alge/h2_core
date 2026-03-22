@@ -31,7 +31,7 @@ fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
 // peers to send frames of any type.
 pub fn send_headers_on_open_stream_test() {
   let #(server, _client) = server_with_open_stream()
-  let assert Ok(#(_server, _events, to_send)) =
+  let assert Ok(#(_server, to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   assert to_send != <<>>
 }
@@ -40,7 +40,7 @@ pub fn send_headers_on_open_stream_test() {
 // stream state to become 'half-closed (local)'."
 pub fn send_headers_with_end_stream_on_open_stream_transitions_to_half_closed_local_test() {
   let #(server, _client) = server_with_open_stream()
-  let assert Ok(#(server, _events, _to_send)) =
+  let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == HalfClosedLocal
@@ -50,7 +50,7 @@ pub fn send_headers_with_end_stream_on_open_stream_transitions_to_half_closed_lo
 // by the endpoint to send frames of any type.
 pub fn send_headers_on_half_closed_remote_stream_test() {
   let #(server, _client) = server_with_half_closed_remote_stream()
-  let assert Ok(#(_server, _events, to_send)) =
+  let assert Ok(#(_server, to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   assert to_send != <<>>
 }
@@ -60,7 +60,7 @@ pub fn send_headers_on_half_closed_remote_stream_test() {
 // set."
 pub fn send_headers_with_end_stream_on_half_closed_remote_closes_stream_test() {
   let #(server, _client) = server_with_half_closed_remote_stream()
-  let assert Ok(#(server, _events, _to_send)) =
+  let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == Closed
@@ -71,7 +71,7 @@ pub fn send_headers_with_end_stream_on_half_closed_remote_closes_stream_test() {
 pub fn send_headers_on_reserved_local_transitions_to_half_closed_remote_test() {
   let server = helper.new_connection(Server, Connected)
   let server = helper.set_stream_state(server, 2, ReservedLocal)
-  let assert Ok(#(server, _events, _to_send)) =
+  let assert Ok(#(server, _to_send)) =
     send_headers(server, 2, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(stream) = dict.get(server.streams, 2)
   assert stream.state == HalfClosedRemote
@@ -81,7 +81,7 @@ pub fn send_headers_on_reserved_local_transitions_to_half_closed_remote_test() {
 // final response. Interim responses are HEADERS without END_STREAM.
 pub fn send_headers_interim_response_does_not_close_stream_test() {
   let #(server, _client) = server_with_open_stream()
-  let assert Ok(#(server, _events, _to_send)) =
+  let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "100", WithIndexing)], False)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == Open
@@ -90,7 +90,7 @@ pub fn send_headers_interim_response_does_not_close_stream_test() {
 // RFC 9113 Section 5.1 - Without END_STREAM the stream state stays Open.
 pub fn send_headers_without_end_stream_does_not_change_state_test() {
   let #(server, _client) = server_with_open_stream()
-  let assert Ok(#(server, _events, _to_send)) =
+  let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == Open
@@ -154,7 +154,7 @@ pub fn send_headers_on_stream_zero_is_protocol_error_test() {
 // RFC 9113 Section 6.2 - The encoded frame must carry the correct stream ID.
 pub fn send_headers_encodes_correct_stream_id_test() {
   let #(server, _client) = server_with_open_stream()
-  let assert Ok(#(_server, _events, to_send)) =
+  let assert Ok(#(_server, to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(frame) = h2_frame.decode_frame(frame_data)
@@ -165,7 +165,7 @@ pub fn send_headers_encodes_correct_stream_id_test() {
 // when requested.
 pub fn send_headers_end_stream_flag_set_in_frame_test() {
   let #(server, _client) = server_with_open_stream()
-  let assert Ok(#(_server, _events, to_send)) =
+  let assert Ok(#(_server, to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(frame) = h2_frame.decode_frame(frame_data)
@@ -176,7 +176,7 @@ pub fn send_headers_end_stream_flag_set_in_frame_test() {
 // False.
 pub fn send_headers_end_stream_flag_not_set_when_false_test() {
   let #(server, _client) = server_with_open_stream()
-  let assert Ok(#(_server, _events, to_send)) =
+  let assert Ok(#(_server, to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(frame) = h2_frame.decode_frame(frame_data)
@@ -188,17 +188,17 @@ pub fn send_headers_end_stream_flag_not_set_when_false_test() {
 pub fn send_headers_updates_hpack_encoder_test() {
   let #(server, client) = server_with_open_stream()
   // Open a second stream on the same client — will use stream 3
-  let assert Ok(#(_client, _events, request2)) =
+  let assert Ok(#(_client, request2)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, request2)
   let headers = [
     Header(":status", "200", WithIndexing),
     Header("content-type", "text/plain", WithIndexing),
   ]
-  let assert Ok(#(server, _events, first)) =
+  let assert Ok(#(server, first)) =
     send_headers(server, 1, headers, False)
   // Same headers on stream 3 — HPACK should produce smaller output
-  let assert Ok(#(_server, _events, second)) =
+  let assert Ok(#(_server, second)) =
     send_headers(server, 3, headers, False)
   // Second encoding should be smaller due to HPACK dynamic table
   let assert Ok(#(first_frame, _)) = h2_frame.extract_frame(first, 16_384)

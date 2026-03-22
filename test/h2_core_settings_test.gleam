@@ -12,8 +12,7 @@ import helper
 pub fn send_settings_returns_encoded_frame_test() {
   let conn = helper.new_connection(Client, Connected)
   let settings = [h2_frame.MaxConcurrentStreams(100)]
-  let assert Ok(#(_conn, events, to_send)) = send_settings(conn, settings)
-  assert events == []
+  let assert Ok(#(_conn, to_send)) = send_settings(conn, settings)
   let assert Ok(expected) =
     h2_frame.encode_settings(ack: False, settings: settings)
   assert to_send == expected
@@ -23,7 +22,7 @@ pub fn send_settings_returns_encoded_frame_test() {
 pub fn send_settings_adds_to_pending_test() {
   let conn = helper.new_connection(Client, Connected)
   let settings = [h2_frame.MaxConcurrentStreams(100)]
-  let assert Ok(#(conn, _events, _to_send)) = send_settings(conn, settings)
+  let assert Ok(#(conn, _to_send)) = send_settings(conn, settings)
   assert conn.pending_settings == [settings]
 }
 
@@ -32,7 +31,7 @@ pub fn send_settings_does_not_change_local_settings_test() {
   let conn = helper.new_connection(Client, Connected)
   let original_settings = conn.local_settings
   let settings = [h2_frame.MaxConcurrentStreams(100)]
-  let assert Ok(#(conn, _events, _to_send)) = send_settings(conn, settings)
+  let assert Ok(#(conn, _to_send)) = send_settings(conn, settings)
   assert conn.local_settings == original_settings
 }
 
@@ -43,8 +42,7 @@ pub fn send_settings_multiple_values_test() {
     h2_frame.InitialWindowSize(32_768),
     h2_frame.MaxFrameSize(32_768),
   ]
-  let assert Ok(#(_conn, events, to_send)) = send_settings(conn, settings)
-  assert events == []
+  let assert Ok(#(_conn, to_send)) = send_settings(conn, settings)
   let assert Ok(expected) =
     h2_frame.encode_settings(ack: False, settings: settings)
   assert to_send == expected
@@ -55,8 +53,8 @@ pub fn send_settings_twice_queues_both_test() {
   let conn = helper.new_connection(Client, Connected)
   let first = [h2_frame.MaxConcurrentStreams(100)]
   let second = [h2_frame.InitialWindowSize(32_768)]
-  let assert Ok(#(conn, _events, _to_send)) = send_settings(conn, first)
-  let assert Ok(#(conn, _events, _to_send)) = send_settings(conn, second)
+  let assert Ok(#(conn, _to_send)) = send_settings(conn, first)
+  let assert Ok(#(conn, _to_send)) = send_settings(conn, second)
   assert conn.pending_settings == [first, second]
 }
 
@@ -116,7 +114,7 @@ pub fn receive_settings_does_not_change_local_settings_test() {
 pub fn receive_settings_ack_applies_pending_test() {
   let conn = helper.new_connection(Client, Connected)
   let settings = [h2_frame.MaxConcurrentStreams(200)]
-  let assert Ok(#(conn, _events, _to_send)) = send_settings(conn, settings)
+  let assert Ok(#(conn, _to_send)) = send_settings(conn, settings)
   assert conn.local_settings.max_concurrent_streams == None
   let assert Ok(settings_ack) =
     h2_frame.encode_settings(ack: True, settings: [])
@@ -129,8 +127,8 @@ pub fn receive_settings_ack_removes_from_pending_test() {
   let conn = helper.new_connection(Client, Connected)
   let first = [h2_frame.MaxConcurrentStreams(100)]
   let second = [h2_frame.InitialWindowSize(32_768)]
-  let assert Ok(#(conn, _events, _to_send)) = send_settings(conn, first)
-  let assert Ok(#(conn, _events, _to_send)) = send_settings(conn, second)
+  let assert Ok(#(conn, _to_send)) = send_settings(conn, first)
+  let assert Ok(#(conn, _to_send)) = send_settings(conn, second)
   let assert Ok(settings_ack) =
     h2_frame.encode_settings(ack: True, settings: [])
   let assert Ok(#(conn, _events, _to_send)) = receive_data(conn, settings_ack)
@@ -279,7 +277,7 @@ pub fn receive_settings_initial_window_size_adjusts_existing_streams_test() {
   let client = helper.new_connection(Client, Connected)
 
   // Open stream 1 on the server
-  let assert Ok(#(_client, _events, headers)) =
+  let assert Ok(#(_client, headers)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   let assert Ok(stream) = dict.get(server.streams, 1)
@@ -306,7 +304,7 @@ pub fn receive_settings_initial_window_size_overflow_is_flow_control_error_test(
   let client = helper.new_connection(Client, Connected)
 
   // Open stream 1 on the server (default send_window_size = 65535)
-  let assert Ok(#(_client, _events, headers)) =
+  let assert Ok(#(_client, headers)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
@@ -322,7 +320,7 @@ pub fn receive_settings_initial_window_size_overflow_is_flow_control_error_test(
 
   // Start fresh with a known state
   let server = helper.new_connection(Server, Connected)
-  let assert Ok(#(_client2, _events, headers2)) =
+  let assert Ok(#(_client2, headers2)) =
     open_stream(
       helper.new_connection(Client, Connected),
       helper.request_headers(),
@@ -379,7 +377,7 @@ pub fn receive_settings_nonzero_stream_id_is_protocol_error_test() {
 pub fn receive_settings_ack_with_nonzero_length_is_frame_size_error_test() {
   let conn = helper.new_connection(Client, Connected)
   // First send a SETTINGS so there's something pending to ack
-  let assert Ok(#(conn, _events, _to_send)) =
+  let assert Ok(#(conn, _to_send)) =
     send_settings(conn, [h2_frame.MaxConcurrentStreams(100)])
 
   // Manually craft a SETTINGS ACK with a non-empty payload
@@ -409,14 +407,14 @@ pub fn settings_ack_initial_window_size_adjusts_recv_window_test() {
   let client = helper.new_connection(Client, Connected)
 
   // Client opens stream 1
-  let assert Ok(#(_client, _events, headers)) =
+  let assert Ok(#(_client, headers)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.recv_window_size == 65_535
 
   // Server sends SETTINGS with INITIAL_WINDOW_SIZE=32768
-  let assert Ok(#(server, _events, _to_send)) =
+  let assert Ok(#(server, _to_send)) =
     send_settings(server, [h2_frame.InitialWindowSize(32_768)])
 
   // Server receives ACK for its settings
@@ -442,7 +440,7 @@ pub fn receive_settings_initial_window_size_can_go_negative_test() {
   let client = helper.new_connection(Client, Connected)
 
   // Client opens stream 1 (default send_window_size = 65535)
-  let assert Ok(#(_client, _events, headers)) =
+  let assert Ok(#(_client, headers)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
@@ -473,7 +471,7 @@ pub fn receive_settings_initial_window_size_negative_window_tracked_test() {
   let client = helper.new_connection(Client, Connected)
 
   // Client opens stream 1 (send_window_size = 65535)
-  let assert Ok(#(_client, _events, headers)) =
+  let assert Ok(#(_client, headers)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 

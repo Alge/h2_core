@@ -72,8 +72,7 @@ pub fn receive_ping_nonzero_stream_test() {
 pub fn send_ping_returns_encoded_frame_test() {
   let conn = helper.new_connection(Client, Connected)
   let ping_data = <<1, 2, 3, 4, 5, 6, 7, 8>>
-  let assert Ok(#(_conn, events, to_send)) = send_ping(conn, ping_data)
-  assert events == []
+  let assert Ok(#(_conn, to_send)) = send_ping(conn, ping_data)
   let assert Ok(expected) = h2_frame.encode_ping(ack: False, data: ping_data)
   assert to_send == expected
 }
@@ -83,7 +82,7 @@ pub fn ping_round_trip_test() {
   let conn = helper.new_connection(Client, Connected)
   let ping_data = <<10, 20, 30, 40, 50, 60, 70, 80>>
   // Send a ping
-  let assert Ok(#(conn, _events, _to_send)) = send_ping(conn, ping_data)
+  let assert Ok(#(conn, _to_send)) = send_ping(conn, ping_data)
   // Simulate receiving the ack back
   let assert Ok(ping_ack) = h2_frame.encode_ping(ack: True, data: ping_data)
   let assert Ok(#(_conn, events, to_send)) = receive_data(conn, ping_ack)

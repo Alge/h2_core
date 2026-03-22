@@ -19,7 +19,7 @@ pub fn open_stream_produces_encoded_frame_test() {
     Header(":path", "/", WithIndexing),
     Header(":scheme", "https", WithIndexing),
   ]
-  let assert Ok(#(_conn, _events, to_send)) = open_stream(conn, headers, False)
+  let assert Ok(#(_conn, to_send)) = open_stream(conn, headers, False)
   // The output should be non-empty (actual HPACK-encoded HEADERS frame)
   assert to_send != <<>>
 }
@@ -28,7 +28,7 @@ pub fn open_stream_produces_encoded_frame_test() {
 pub fn open_stream_opens_stream_test() {
   let conn = helper.new_connection(Client, Connected)
   let headers = helper.request_headers()
-  let assert Ok(#(conn, _events, _to_send)) = open_stream(conn, headers, False)
+  let assert Ok(#(conn, _to_send)) = open_stream(conn, headers, False)
   let assert Ok(stream) = dict.get(conn.streams, 1)
   assert stream.state == Open
 }
@@ -37,9 +37,9 @@ pub fn open_stream_opens_stream_test() {
 pub fn open_stream_increments_stream_id_test() {
   let conn = helper.new_connection(Client, Connected)
   let headers = helper.request_headers()
-  let assert Ok(#(conn, _events, _to_send)) = open_stream(conn, headers, False)
+  let assert Ok(#(conn, _to_send)) = open_stream(conn, headers, False)
   assert conn.next_stream_id == 3
-  let assert Ok(#(conn, _events, _to_send)) = open_stream(conn, headers, False)
+  let assert Ok(#(conn, _to_send)) = open_stream(conn, headers, False)
   assert conn.next_stream_id == 5
 }
 
@@ -47,7 +47,7 @@ pub fn open_stream_increments_stream_id_test() {
 pub fn open_stream_server_uses_even_stream_ids_test() {
   let conn = helper.new_connection(Server, Connected)
   let headers = [Header(":status", "200", WithIndexing)]
-  let assert Ok(#(conn, _events, _to_send)) = open_stream(conn, headers, False)
+  let assert Ok(#(conn, _to_send)) = open_stream(conn, headers, False)
   let assert Ok(_stream) = dict.get(conn.streams, 2)
   assert conn.next_stream_id == 4
 }
@@ -56,7 +56,7 @@ pub fn open_stream_server_uses_even_stream_ids_test() {
 pub fn open_stream_with_end_stream_test() {
   let conn = helper.new_connection(Client, Connected)
   let headers = helper.request_headers()
-  let assert Ok(#(conn, _events, _to_send)) = open_stream(conn, headers, True)
+  let assert Ok(#(conn, _to_send)) = open_stream(conn, headers, True)
   let assert Ok(stream) = dict.get(conn.streams, 1)
   assert stream.state == HalfClosedLocal
 }
@@ -65,7 +65,7 @@ pub fn open_stream_with_end_stream_test() {
 pub fn open_stream_produces_parseable_frame_test() {
   let conn = helper.new_connection(Client, Connected)
   let headers = helper.request_headers()
-  let assert Ok(#(_conn, _events, to_send)) = open_stream(conn, headers, False)
+  let assert Ok(#(_conn, to_send)) = open_stream(conn, headers, False)
   // Parse the frame back
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(frame) = h2_frame.decode_frame(frame_data)
@@ -83,7 +83,7 @@ pub fn open_stream_produces_parseable_frame_test() {
 pub fn open_stream_end_stream_in_frame_test() {
   let conn = helper.new_connection(Client, Connected)
   let headers = helper.request_headers()
-  let assert Ok(#(_conn, _events, to_send)) = open_stream(conn, headers, True)
+  let assert Ok(#(_conn, to_send)) = open_stream(conn, headers, True)
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(frame) = h2_frame.decode_frame(frame_data)
   let assert h2_frame.Headers(
@@ -101,11 +101,11 @@ pub fn open_stream_updates_hpack_encoder_test() {
   let headers = list.append(helper.request_headers(), [
     Header("custom-header", "custom-value", WithIndexing),
   ])
-  let assert Ok(#(conn, _events, first_send)) =
+  let assert Ok(#(conn, first_send)) =
     open_stream(conn, headers, False)
   // Send the same headers again - HPACK should produce smaller output
   // because "custom-header: custom-value" is now in the dynamic table
-  let assert Ok(#(_conn, _events, second_send)) =
+  let assert Ok(#(_conn, second_send)) =
     open_stream(conn, headers, False)
   assert bit_array.byte_size(second_send) < bit_array.byte_size(first_send)
 }
@@ -204,7 +204,7 @@ pub fn open_stream_with_te_non_trailers_is_error_test() {
 // Valid headers should succeed.
 pub fn open_stream_with_valid_headers_test() {
   let conn = helper.new_connection(Client, Connected)
-  let assert Ok(#(conn, _events, _to_send)) =
+  let assert Ok(#(conn, _to_send)) =
     open_stream(conn, helper.request_headers(), False)
   let assert Ok(stream) = dict.get(conn.streams, 1)
   assert stream.state == Open
@@ -214,7 +214,7 @@ pub fn open_stream_with_valid_headers_test() {
 pub fn send_headers_response_missing_status_is_error_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, _events, headers)) =
+  let assert Ok(#(_client, headers)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) =
     h2_core.receive_data(server, headers)
@@ -227,10 +227,10 @@ pub fn send_headers_response_missing_status_is_error_test() {
 pub fn send_headers_response_with_status_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, _events, headers)) =
+  let assert Ok(#(_client, headers)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) =
     h2_core.receive_data(server, headers)
-  let assert Ok(#(_server, _events, _to_send)) =
+  let assert Ok(#(_server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
 }

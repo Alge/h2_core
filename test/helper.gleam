@@ -42,7 +42,7 @@ pub fn new_stream(state: StreamState) -> h2_core.Stream {
 pub fn server_with_open_stream() -> #(Connection, Connection) {
   let server = new_connection(Server, Connected)
   let client = new_connection(Client, Connected)
-  let assert Ok(#(client, _events, headers)) =
+  let assert Ok(#(client, headers)) =
     open_stream(client, request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   #(server, client)
@@ -53,7 +53,7 @@ pub fn server_with_open_stream() -> #(Connection, Connection) {
 pub fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
   let server = new_connection(Server, Connected)
   let client = new_connection(Client, Connected)
-  let assert Ok(#(client, _events, headers)) =
+  let assert Ok(#(client, headers)) =
     open_stream(client, request_headers(), True)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   #(server, client)

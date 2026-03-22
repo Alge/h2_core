@@ -324,7 +324,7 @@ pub fn new_connection(
 
   use _ <- result.try(validate_settings(settings))
 
-  use #(conn, _events, encoded_settings) <- result.try(send_settings(
+  use #(conn, encoded_settings) <- result.try(send_settings(
     conn,
     to_settings_list(settings, role),
   ))
@@ -394,17 +394,6 @@ fn add_stream(conn: Connection, stream: Stream) -> #(Connection, Int) {
     ),
     conn.next_stream_id,
   )
-}
-
-pub type StreamEvent {
-  SendHeaders
-  RecvHeaders
-  SendEndStream
-  RecvEndStream
-  SendRstStream
-  RecvRstStream
-  SendPushPromise
-  RecvPushPromise
 }
 
 pub type Indexing {
@@ -1068,7 +1057,7 @@ pub fn open_stream(
   conn conn: Connection,
   headers headers: List(Header),
   end_stream end_stream: Bool,
-) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+) -> Result(#(Connection, BitArray), H2Error) {
   // Not allowed to open streams while in Draining state (we have received a GOAWAY)
   use <- bool.guard(
     conn.state == Draining,
@@ -1087,7 +1076,7 @@ pub fn send_headers(
   stream_id stream_id: Int,
   headers headers: List(Header),
   end_stream end_stream: Bool,
-) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+) -> Result(#(Connection, BitArray), H2Error) {
   // headers cannot be sent on the connection level, it must be on a stream
   use <- bool.guard(
     stream_id == 0,
@@ -1159,7 +1148,7 @@ pub fn send_headers(
         )
         |> result.map_error(map_frame_error),
       )
-      Ok(#(conn, [], frame))
+      Ok(#(conn, frame))
     }
 
     [header_chunk, ..rest] -> {
@@ -1177,7 +1166,7 @@ pub fn send_headers(
       use continuation_frames <- result.try(
         encode_header_continuations(rest, stream_id, <<>>),
       )
-      Ok(#(conn, [], <<headers_frame:bits, continuation_frames:bits>>))
+      Ok(#(conn, <<headers_frame:bits, continuation_frames:bits>>))
     }
   }
 }
@@ -1186,7 +1175,7 @@ pub fn send_push_promise(
   conn conn: Connection,
   stream_id stream_id: Int,
   headers headers: List(Header),
-) -> Result(#(Connection, List(StreamEvent), BitArray, Int), H2Error) {
+) -> Result(#(Connection, BitArray, Int), H2Error) {
   // Not allowed to open streams while in Draining state (we have received a GOAWAY)
   use <- bool.guard(
     conn.state == Draining,
@@ -1241,7 +1230,7 @@ pub fn send_push_promise(
         )
         |> result.map_error(map_frame_error),
       )
-      Ok(#(conn, [], push_promise_frame, promised_stream_id))
+      Ok(#(conn, push_promise_frame, promised_stream_id))
     }
 
     [header_chunk, ..rest] -> {
@@ -1260,7 +1249,6 @@ pub fn send_push_promise(
       )
       Ok(#(
         conn,
-        [],
         <<push_promise_frame:bits, continuation_frames:bits>>,
         promised_stream_id,
       ))
@@ -1274,7 +1262,7 @@ pub fn send_data(
   data data: BitArray,
   end_stream end_stream: Bool,
   padding padding: option.Option(Int),
-) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+) -> Result(#(Connection, BitArray), H2Error) {
   use <- bool.guard(
     stream_id == 0,
     Error(ConnectionError(h2_frame.ProtocolError)),
@@ -1358,7 +1346,7 @@ pub fn send_data(
       streams: dict.insert(conn.streams, stream_id, stream),
     )
 
-  Ok(#(conn, [], encoded_frame))
+  Ok(#(conn, encoded_frame))
 }
 
 pub fn get_send_window_size(
@@ -1375,7 +1363,7 @@ pub fn get_send_window_size(
 pub fn send_settings(
   conn conn: Connection,
   settings settings: List(h2_frame.Setting),
-) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+) -> Result(#(Connection, BitArray), H2Error) {
   let conn =
     Connection(
       ..conn,
@@ -1383,7 +1371,7 @@ pub fn send_settings(
     )
   case h2_frame.encode_settings(ack: False, settings: settings) {
     Ok(encoded) -> {
-      Ok(#(conn, [], encoded))
+      Ok(#(conn, encoded))
     }
     Error(error) -> Error(map_frame_error(error))
   }
@@ -1392,10 +1380,10 @@ pub fn send_settings(
 pub fn send_ping(
   conn conn: Connection,
   data data: BitArray,
-) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+) -> Result(#(Connection, BitArray), H2Error) {
   case h2_frame.encode_ping(ack: False, data: data) {
     Ok(encoded) -> {
-      Ok(#(conn, [], encoded))
+      Ok(#(conn, encoded))
     }
     Error(error) -> Error(map_frame_error(error))
   }
@@ -1405,21 +1393,21 @@ pub fn send_goaway(
   conn conn: Connection,
   error_code error_code: h2_frame.ErrorCode,
   debug_data debug_data: BitArray,
-) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+) -> Result(#(Connection, BitArray), H2Error) {
   let encoded_frame =
     h2_frame.encode_goaway(
       last_stream_id: conn.last_remote_stream_id,
       error_code: error_code,
       debug_data: debug_data,
     )
-  Ok(#(Connection(..conn, state: Draining), [], encoded_frame))
+  Ok(#(Connection(..conn, state: Draining), encoded_frame))
 }
 
 pub fn send_window_update(
   conn conn: Connection,
   stream_id stream_id: Int,
   window_size_increment window_size_increment: Int,
-) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+) -> Result(#(Connection, BitArray), H2Error) {
   // Update the connection
 
   use conn <- result.try(case stream_id {
@@ -1474,7 +1462,7 @@ pub fn send_window_update(
       window_size_increment: window_size_increment,
     )
   {
-    Ok(encoded_frame) -> Ok(#(conn, [], encoded_frame))
+    Ok(encoded_frame) -> Ok(#(conn, encoded_frame))
     Error(error) -> Error(map_frame_error(error))
   }
 }
@@ -1483,7 +1471,7 @@ pub fn send_rst_stream(
   conn conn: Connection,
   stream_id stream_id: Int,
   error_code error_code: h2_frame.ErrorCode,
-) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+) -> Result(#(Connection, BitArray), H2Error) {
   // Must be sent on a existing stream
   use stream <- result.try(
     dict.get(conn.streams, stream_id)
@@ -1510,7 +1498,7 @@ pub fn send_rst_stream(
   case
     h2_frame.encode_rst_stream(stream_id: stream_id, error_code: error_code)
   {
-    Ok(encoded_frame) -> Ok(#(conn, [], encoded_frame))
+    Ok(encoded_frame) -> Ok(#(conn, encoded_frame))
     Error(error) -> Error(map_frame_error(error))
   }
 }
