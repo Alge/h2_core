@@ -314,3 +314,53 @@ pub fn send_goaway_must_not_increase_last_stream_id_test() {
     h2_frame.decode_frame(frame_data)
   assert last_id == 3
 }
+
+// RFC 9113 Section 6.8 - "Once the GOAWAY is sent, the sender will
+// ignore frames sent on streams initiated by the receiver if the
+// stream has an identifier higher than the included last stream
+// identifier."
+//
+// After sending GOAWAY with last_stream_id=1, receiving HEADERS on
+// stream 3 (above last_stream_id) should be silently discarded.
+// HPACK state must still be maintained.
+pub fn send_goaway_ignores_streams_above_last_stream_id_test() {
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
+  // Client opens stream 1
+  let assert Ok(#(client, headers1)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers1)
+
+  // Server sends GOAWAY with last_stream_id=1
+  let assert Ok(#(server, _to_send)) =
+    send_goaway(server, h2_frame.NoError, <<>>)
+
+  // Client opens stream 3 (doesn't know about GOAWAY yet)
+  let assert Ok(#(client, headers3)) =
+    open_stream(
+      client,
+      list.append(helper.request_headers(), [
+        Header("x-custom", "value", WithIndexing),
+      ]),
+      False,
+    )
+
+  // Server receives stream 3 — should be silently discarded (no event)
+  // but HPACK state must be maintained
+  let assert Ok(#(server, events, _to_send)) = receive_data(server, headers3)
+  assert events == []
+
+  // Client opens stream 5 — also above last_stream_id, also discarded
+  // If HPACK state from stream 3 was not decoded, this will fail
+  // with CompressionError
+  let assert Ok(#(_client, headers5)) =
+    open_stream(
+      client,
+      list.append(helper.request_headers(), [
+        Header("x-other", "test", WithIndexing),
+      ]),
+      False,
+    )
+  let assert Ok(#(_server, events2, _to_send)) = receive_data(server, headers5)
+  assert events2 == []
+}
