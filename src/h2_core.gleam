@@ -488,6 +488,14 @@ fn validate_header_value(header: Header) -> Result(Nil, Nil) {
     string.starts_with(header.value, " ") || string.ends_with(header.value, " "),
     Error(Nil),
   )
+
+  // header values must not start or end with a tab character
+  use <- bool.guard(
+    string.starts_with(header.value, "\t")
+      || string.ends_with(header.value, "\t"),
+    Error(Nil),
+  )
+
   Ok(Nil)
 }
 

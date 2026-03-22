@@ -1449,3 +1449,49 @@ pub fn receive_headers_field_value_trailing_space_is_malformed_test() {
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
 }
+
+pub fn receive_headers_field_value_leading_tab_is_malformed_test() {
+  let server = helper.new_connection(Server, Connected)
+  let bad_hpack = <<
+    0x82, 0x87, 0x84,
+    0x40, 0x05, "x-foo":utf8, 0x06, "\tvalue":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_server, events, to_send)) =
+    receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+pub fn receive_headers_field_value_trailing_tab_is_malformed_test() {
+  let server = helper.new_connection(Server, Connected)
+  let bad_hpack = <<
+    0x82, 0x87, 0x84,
+    0x40, 0x05, "x-foo":utf8, 0x06, "value\t":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_server, events, to_send)) =
+    receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
