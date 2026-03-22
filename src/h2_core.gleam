@@ -996,6 +996,9 @@ fn handle_headers_on_new_stream(
     ),
   )
 
+  // Ignore new streams if state is Draining, we are shutting down
+  use <- bool.guard(conn.state == Draining, Ok(#(conn, events, to_send)))
+
   // Make sure content length is valid if present
   let content_length_result = extract_content_length(decoded_headers)
 
