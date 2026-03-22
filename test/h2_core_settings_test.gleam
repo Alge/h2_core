@@ -4,7 +4,8 @@ import h2_core.{
   Client, CompressionError, ConnectionError, FlowControlError, FrameSizeError,
   HeaderTableSize, InitialWindowSize, MaxConcurrentStreams, MaxFrameSize,
   ProtocolError, RemoteSettingsChanged, Server, SettingsAcknowledged,
-  open_stream, receive_data, send_settings,
+  get_local_settings, get_pending_settings, get_remote_settings, open_stream,
+  receive_data, send_settings,
 }
 import h2_core/internal/stream.{Open, Stream}
 import h2_frame
@@ -27,16 +28,16 @@ pub fn send_settings_adds_to_pending_test() {
   let conn = helper.connected_connection(Client)
   let settings = [MaxConcurrentStreams(100)]
   let assert Ok(#(conn, _to_send)) = send_settings(conn, settings)
-  assert conn.pending_settings == [settings]
+  assert get_pending_settings(conn) == [settings]
 }
 
 // Local settings should not change until ack received
 pub fn send_settings_does_not_change_local_settings_test() {
   let conn = helper.connected_connection(Client)
-  let original_settings = conn.local_settings
+  let original_settings = get_local_settings(conn)
   let assert Ok(#(conn, _to_send)) =
     send_settings(conn, [MaxConcurrentStreams(100)])
-  assert conn.local_settings == original_settings
+  assert get_local_settings(conn) == original_settings
 }
 
 pub fn send_settings_multiple_values_test() {
@@ -63,7 +64,7 @@ pub fn send_settings_twice_queues_both_test() {
   let second = [InitialWindowSize(32_768)]
   let assert Ok(#(conn, _to_send)) = send_settings(conn, first)
   let assert Ok(#(conn, _to_send)) = send_settings(conn, second)
-  assert conn.pending_settings == [first, second]
+  assert get_pending_settings(conn) == [first, second]
 }
 
 // RFC 9113 Section 6.5.3 - Spurious SETTINGS ack is a PROTOCOL_ERROR
@@ -83,7 +84,7 @@ pub fn receive_settings_updates_remote_settings_test() {
       h2_frame.MaxConcurrentStreams(100),
     ])
   let assert Ok(#(conn, _events, _to_send)) = receive_data(conn, settings_frame)
-  assert conn.remote_settings.max_concurrent_streams == Some(100)
+  assert get_remote_settings(conn).max_concurrent_streams == Some(100)
 }
 
 pub fn receive_settings_sends_ack_test() {
@@ -104,18 +105,18 @@ pub fn receive_settings_emits_event_test() {
       h2_frame.MaxConcurrentStreams(100),
     ])
   let assert Ok(#(conn, events, _to_send)) = receive_data(conn, settings_frame)
-  assert events == [RemoteSettingsChanged(conn.remote_settings)]
+  assert events == [RemoteSettingsChanged(get_remote_settings(conn))]
 }
 
 pub fn receive_settings_does_not_change_local_settings_test() {
   let conn = helper.connected_connection(Client)
-  let original = conn.local_settings
+  let original = get_local_settings(conn)
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.MaxConcurrentStreams(100),
     ])
   let assert Ok(#(conn, _events, _to_send)) = receive_data(conn, settings_frame)
-  assert conn.local_settings == original
+  assert get_local_settings(conn) == original
 }
 
 // RFC 9113 Section 6.5.3 - Receiving SETTINGS ack applies local pending settings
@@ -123,12 +124,12 @@ pub fn receive_settings_ack_applies_pending_test() {
   let conn = helper.connected_connection(Client)
   let settings = [MaxConcurrentStreams(200)]
   let assert Ok(#(conn, _to_send)) = send_settings(conn, settings)
-  assert conn.local_settings.max_concurrent_streams == None
+  assert get_local_settings(conn).max_concurrent_streams == None
   let assert Ok(settings_ack) =
     h2_frame.encode_settings(ack: True, settings: [])
   let assert Ok(#(conn, events, _to_send)) = receive_data(conn, settings_ack)
-  assert conn.local_settings.max_concurrent_streams == Some(200)
-  assert events == [SettingsAcknowledged(conn.local_settings)]
+  assert get_local_settings(conn).max_concurrent_streams == Some(200)
+  assert events == [SettingsAcknowledged(get_local_settings(conn))]
 }
 
 pub fn receive_settings_ack_removes_from_pending_test() {
@@ -140,7 +141,7 @@ pub fn receive_settings_ack_removes_from_pending_test() {
   let assert Ok(settings_ack) =
     h2_frame.encode_settings(ack: True, settings: [])
   let assert Ok(#(conn, _events, _to_send)) = receive_data(conn, settings_ack)
-  assert conn.pending_settings == [second]
+  assert get_pending_settings(conn) == [second]
 }
 
 // RFC 9113 Section 6.5.2 - ENABLE_PUSH invalid value is PROTOCOL_ERROR
@@ -197,7 +198,7 @@ pub fn receive_settings_enable_push_zero_test() {
       h2_frame.EnablePush(0),
     ])
   let assert Ok(#(conn, _events, _to_send)) = receive_data(conn, settings_frame)
-  assert conn.remote_settings.enable_push == False
+  assert get_remote_settings(conn).enable_push == False
 }
 
 // ENABLE_PUSH=1 from a client (received by server) is valid
@@ -208,7 +209,7 @@ pub fn receive_settings_enable_push_one_test() {
       h2_frame.EnablePush(1),
     ])
   let assert Ok(#(conn, _events, _to_send)) = receive_data(conn, settings_frame)
-  assert conn.remote_settings.enable_push == True
+  assert get_remote_settings(conn).enable_push == True
 }
 
 // RFC 9113 Section 6.5.2 - Valid boundary values
@@ -220,7 +221,7 @@ pub fn receive_settings_initial_window_size_max_valid_test() {
       h2_frame.InitialWindowSize(2_147_483_647),
     ])
   let assert Ok(#(conn, _events, _to_send)) = receive_data(conn, settings_frame)
-  assert conn.remote_settings.initial_window_size == 2_147_483_647
+  assert get_remote_settings(conn).initial_window_size == 2_147_483_647
 }
 
 pub fn receive_settings_max_frame_size_boundary_valid_test() {
@@ -231,7 +232,7 @@ pub fn receive_settings_max_frame_size_boundary_valid_test() {
       h2_frame.MaxFrameSize(16_777_215),
     ])
   let assert Ok(#(conn, _events, _to_send)) = receive_data(conn, settings_frame)
-  assert conn.remote_settings.max_frame_size == 16_777_215
+  assert get_remote_settings(conn).max_frame_size == 16_777_215
 }
 
 // RFC 9113 Section 6.5.2 - Client MUST treat ENABLE_PUSH=1 from server as PROTOCOL_ERROR
@@ -258,7 +259,7 @@ pub fn receive_settings_last_value_wins_test() {
       h2_frame.MaxConcurrentStreams(200),
     ])
   let assert Ok(#(conn, _events, _to_send)) = receive_data(conn, settings_frame)
-  assert conn.remote_settings.max_concurrent_streams == Some(200)
+  assert get_remote_settings(conn).max_concurrent_streams == Some(200)
 }
 
 // RFC 9113 Section 6.5.2 - Unknown settings MUST be ignored
@@ -270,7 +271,7 @@ pub fn receive_settings_unknown_setting_ignored_test() {
       h2_frame.MaxConcurrentStreams(100),
     ])
   let assert Ok(#(conn, _events, _to_send)) = receive_data(conn, settings_frame)
-  assert conn.remote_settings.max_concurrent_streams == Some(100)
+  assert get_remote_settings(conn).max_concurrent_streams == Some(100)
 }
 
 // RFC 9113 Section 6.9.2 - "When the value of

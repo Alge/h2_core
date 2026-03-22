@@ -1,6 +1,7 @@
 import h2_core.{
   Client, ConnectionError, FlowControlError, FrameSizeError, Header,
   HeadersReceived, ProtocolError, Server, StreamReset, WithIndexing,
+  get_connection_recv_window_size, get_connection_send_window_size,
   get_stream_state, open_stream, receive_data, send_window_update,
 }
 import h2_core/internal/stream.{Closed, HalfClosedLocal, HalfClosedRemote, Open}
@@ -10,8 +11,8 @@ import helper
 // RFC 9113 Section 6.9.2 - Initial flow control window is 65,535
 pub fn new_connection_default_window_sizes_test() {
   let conn = helper.connected_connection(Client)
-  assert conn.send_window_size == 65_535
-  assert conn.recv_window_size == 65_535
+  assert get_connection_send_window_size(conn) == 65_535
+  assert get_connection_recv_window_size(conn) == 65_535
 }
 
 // RFC 9113 Section 6.9.2 - New streams start with the initial window
@@ -57,7 +58,7 @@ pub fn send_window_update_max_increment_test() {
   let conn = helper.connected_connection(Client)
   let max_increment = 2_147_483_647 - 65_535
   let assert Ok(#(conn, to_send)) = send_window_update(conn, 0, max_increment)
-  assert conn.recv_window_size == 2_147_483_647
+  assert get_connection_recv_window_size(conn) == 2_147_483_647
   let assert Ok(expected) =
     h2_frame.encode_window_update(
       stream_id: 0,
@@ -78,9 +79,9 @@ pub fn send_window_update_min_increment_test() {
 // Sending connection-level WINDOW_UPDATE increases recv_window_size
 pub fn send_window_update_increases_recv_window_test() {
   let conn = helper.connected_connection(Client)
-  assert conn.recv_window_size == 65_535
+  assert get_connection_recv_window_size(conn) == 65_535
   let assert Ok(#(conn, _to_send)) = send_window_update(conn, 0, 10_000)
-  assert conn.recv_window_size == 75_535
+  assert get_connection_recv_window_size(conn) == 75_535
 }
 
 // Multiple sent WINDOW_UPDATEs accumulate on recv_window_size
@@ -88,7 +89,7 @@ pub fn send_window_update_recv_window_accumulates_test() {
   let conn = helper.connected_connection(Client)
   let assert Ok(#(conn, _to_send)) = send_window_update(conn, 0, 1000)
   let assert Ok(#(conn, _to_send)) = send_window_update(conn, 0, 2000)
-  assert conn.recv_window_size == 68_535
+  assert get_connection_recv_window_size(conn) == 68_535
 }
 
 // RFC 9113 Section 6.9.1 - Sending WINDOW_UPDATE that would overflow recv_window_size
@@ -108,7 +109,7 @@ pub fn send_window_update_stream_does_not_affect_connection_test() {
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   let assert Ok(#(server, _to_send)) = send_window_update(server, 1, 10_000)
-  assert server.recv_window_size == 65_535
+  assert get_connection_recv_window_size(server) == 65_535
   let assert Ok(75_535) = h2_core.get_stream_recv_window_size(server, 1)
 }
 
@@ -143,11 +144,11 @@ pub fn send_window_update_stream_overflow_recv_window_test() {
 // Connection-level WINDOW_UPDATE increases send_window_size
 pub fn receive_window_update_connection_level_test() {
   let conn = helper.connected_connection(Client)
-  assert conn.send_window_size == 65_535
+  assert get_connection_send_window_size(conn) == 65_535
   let assert Ok(wu) =
     h2_frame.encode_window_update(stream_id: 0, window_size_increment: 1000)
   let assert Ok(#(conn, events, to_send)) = receive_data(conn, wu)
-  assert conn.send_window_size == 66_535
+  assert get_connection_send_window_size(conn) == 66_535
   assert events == []
   assert to_send == <<>>
 }
@@ -161,7 +162,7 @@ pub fn receive_window_update_accumulates_test() {
   let assert Ok(wu2) =
     h2_frame.encode_window_update(stream_id: 0, window_size_increment: 500)
   let assert Ok(#(conn, _events, _to_send)) = receive_data(conn, wu2)
-  assert conn.send_window_size == 67_035
+  assert get_connection_send_window_size(conn) == 67_035
 }
 
 // RFC 9113 Section 6.9 - Increment of 0 on stream 0 is connection error PROTOCOL_ERROR
@@ -270,7 +271,7 @@ pub fn receive_window_update_stream_does_not_affect_connection_window_test() {
   let assert Ok(wu) =
     h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, wu)
-  assert server.send_window_size == 65_535
+  assert get_connection_send_window_size(server) == 65_535
   let assert Ok(66_535) = h2_core.get_stream_send_window_size(server, 1)
 }
 

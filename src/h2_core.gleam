@@ -1473,6 +1473,51 @@ pub fn get_stream_recv_window_size(
   }
 }
 
+@internal
+pub fn get_connection_state(conn conn: Connection) -> ConnectionState {
+  conn.state
+}
+
+@internal
+pub fn get_connection_send_window_size(conn conn: Connection) -> Int {
+  conn.send_window_size
+}
+
+@internal
+pub fn get_connection_recv_window_size(conn conn: Connection) -> Int {
+  conn.recv_window_size
+}
+
+@internal
+pub fn get_remote_settings(conn conn: Connection) -> Settings {
+  conn.remote_settings
+}
+
+@internal
+pub fn get_local_settings(conn conn: Connection) -> Settings {
+  conn.local_settings
+}
+
+@internal
+pub fn get_pending_settings(conn conn: Connection) -> List(List(Setting)) {
+  conn.pending_settings
+}
+
+@internal
+pub fn get_last_remote_stream_id(conn conn: Connection) -> Int {
+  conn.last_remote_stream_id
+}
+
+@internal
+pub fn get_role(conn conn: Connection) -> Role {
+  conn.role
+}
+
+@internal
+pub fn get_recv_buffer(conn conn: Connection) -> BitArray {
+  conn.recv_buffer
+}
+
 pub fn send_settings(
   conn conn: Connection,
   settings settings: List(Setting),

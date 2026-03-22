@@ -159,7 +159,7 @@ pub fn receive_goaway_does_not_affect_buffer_test() {
   let data = <<goaway:bits, trailing:bits>>
   let assert Ok(#(conn, events, _to_send)) = receive_data(conn, data)
   assert events == [GoawayReceived(0, NoError, <<>>)]
-  assert conn.recv_buffer == trailing
+  assert h2_core.get_recv_buffer(conn) == trailing
 }
 
 // RFC 9113 Section 6.8 - "However, any frames that alter connection

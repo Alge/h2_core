@@ -244,11 +244,11 @@ pub fn receive_headers_updates_last_remote_stream_id_test() {
     open_stream(client, headers, False)
 
   let server = helper.connected_connection(Server)
-  assert server.last_remote_stream_id == 0
+  assert h2_core.get_last_remote_stream_id(server) == 0
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
-  assert server.last_remote_stream_id == 1
+  assert h2_core.get_last_remote_stream_id(server) == 1
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded2)
-  assert server.last_remote_stream_id == 3
+  assert h2_core.get_last_remote_stream_id(server) == 3
 }
 
 // RFC 9113 Section 5.1.1 - Stream IDs must be monotonically increasing
@@ -266,7 +266,7 @@ pub fn receive_headers_decreasing_stream_id_is_protocol_error_test() {
   let server = helper.connected_connection(Server)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded3)
-  assert server.last_remote_stream_id == 3
+  assert h2_core.get_last_remote_stream_id(server) == 3
 
   // Craft a HEADERS frame for stream 2 (even = server-initiated, never opened)
   // stream 2 doesn't exist in conn.streams and 2 < 3 = last_remote_stream_id
@@ -676,7 +676,7 @@ pub fn receive_headers_exceeding_max_concurrent_streams_test() {
     Connection(
       ..server,
       local_settings: h2_core.Settings(
-        ..server.local_settings,
+        ..h2_core.get_local_settings(server),
         max_concurrent_streams: option.Some(1),
       ),
       pending_settings: [],

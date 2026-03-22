@@ -3,7 +3,8 @@ import gleam/option.{None, Some}
 import h2_core.{
   type Connection, Client, ConnectionError, DataReceived, FlowControlError,
   FrameSizeError, Header, HeadersReceived, NoError, ProtocolError, Server,
-  StreamClosed, StreamError, StreamReset, WithIndexing, open_stream,
+  StreamClosed, StreamError, StreamReset, WithIndexing,
+  get_connection_recv_window_size, get_connection_send_window_size, open_stream,
   receive_data, send_headers,
 }
 import h2_core/internal/stream.{
@@ -284,7 +285,7 @@ pub fn receive_data_decrements_connection_recv_window_test() {
       padding: None,
     )
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
-  assert server.recv_window_size == 65_535 - 11
+  assert get_connection_recv_window_size(server) == 65_535 - 11
 }
 
 // RFC 9113 Section 6.9 - "A receiver that receives a flow-controlled frame
@@ -489,7 +490,7 @@ pub fn send_data_decrements_connection_send_window_test() {
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<"hello world":utf8>>, False, None)
-  assert server.send_window_size == 65_535 - 11
+  assert get_connection_send_window_size(server) == 65_535 - 11
 }
 
 // send_data with empty data should be valid
@@ -606,7 +607,7 @@ pub fn send_padded_data_decrements_connection_send_window_test() {
   // 5 bytes data + 1 byte pad_length + 10 bytes padding = 16 bytes total payload
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<"hello":utf8>>, False, Some(10))
-  assert server.send_window_size == 65_535 - 16
+  assert get_connection_send_window_size(server) == 65_535 - 16
 }
 
 // RFC 9113 Section 4.2 - "An endpoint MUST send an error code of
@@ -728,7 +729,7 @@ pub fn send_data_exactly_at_window_boundary_test() {
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<"hello":utf8>>, False, None)
   let assert Ok(0) = h2_core.get_stream_send_window_size(server, 1)
-  assert server.send_window_size == 0
+  assert get_connection_send_window_size(server) == 0
 }
 
 // RFC 9113 Section 6.9.1 - "Frames with zero length with the END_STREAM
@@ -868,7 +869,7 @@ pub fn receive_data_exceeding_stream_window_still_decrements_connection_window_t
   // Stream error (not connection error) — receive_data returns Ok with RST_STREAM
   let assert Ok(#(server, _events, to_send)) = receive_data(server, data_frame)
   // Connection window MUST still be decremented despite the stream error
-  assert server.recv_window_size == 65_535 - data_size
+  assert get_connection_recv_window_size(server) == 65_535 - data_size
   // Data is discarded, so auto-reclaim via WINDOW_UPDATE
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(
@@ -911,7 +912,7 @@ pub fn receive_data_on_closed_stream_still_counts_toward_connection_window_test(
     )
   let assert Ok(#(server, _events, to_send)) = receive_data(server, more_data)
   // Connection window is decremented then reclaimed via auto WINDOW_UPDATE
-  assert server.recv_window_size == 65_535 - 5
+  assert get_connection_recv_window_size(server) == 65_535 - 5
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.StreamClosed)
   let assert Ok(expected_wu) =
@@ -1018,7 +1019,7 @@ pub fn receive_padded_data_decrements_connection_recv_window_test() {
       padding: Some(10),
     )
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
-  assert server.recv_window_size == 65_535 - 16
+  assert get_connection_recv_window_size(server) == 65_535 - 16
 }
 
 // RFC 9113 Section 6.1 - "The entire DATA frame payload is included in flow

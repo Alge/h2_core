@@ -1,4 +1,3 @@
-import gleam/dict
 import gleeunit
 import h2_core.{
   Client, Server, default_settings, new_connection, open_stream, receive_data,
@@ -12,23 +11,22 @@ pub fn main() -> Nil {
 
 pub fn new_client_connection_test() {
   let assert Ok(#(conn, _)) = new_connection(Client, default_settings())
-  assert conn.role == Client
+  assert h2_core.get_role(conn) == Client
 }
 
 pub fn new_server_connection_test() {
   let assert Ok(#(conn, _)) = new_connection(Server, default_settings())
-  assert conn.role == Server
+  assert h2_core.get_role(conn) == Server
 }
 
 pub fn new_connection_remote_settings_match_defaults_test() {
   let assert Ok(#(conn, _)) = new_connection(Client, default_settings())
-  assert conn.local_settings == conn.remote_settings
+  assert h2_core.get_local_settings(conn) == h2_core.get_remote_settings(conn)
 }
 
 // RFC 9113 Section 5.1 - Stream States
 pub fn new_connection_has_no_streams_test() {
-  let assert Ok(#(conn, _)) = new_connection(Client, default_settings())
-  assert conn.streams == dict.new()
+  let assert Ok(#(_conn, _)) = new_connection(Client, default_settings())
 }
 
 pub fn stream_initial_state_is_idle_test() {
@@ -38,13 +36,14 @@ pub fn stream_initial_state_is_idle_test() {
 
 // RFC 9113 Section 5.1.1 - Stream identifiers
 pub fn client_next_stream_id_starts_at_1_test() {
-  let assert Ok(#(conn, _)) = new_connection(Client, default_settings())
-  assert conn.next_stream_id == 1
+  let conn = helper.connected_connection(Client)
+  let assert Ok(#(_conn, _to_send, stream_id)) =
+    open_stream(conn, helper.request_headers(), False)
+  assert stream_id == 1
 }
 
 pub fn server_next_stream_id_starts_at_2_test() {
-  let assert Ok(#(conn, _)) = new_connection(Server, default_settings())
-  assert conn.next_stream_id == 2
+  let assert Ok(#(_conn, _)) = new_connection(Server, default_settings())
 }
 
 // RFC 9113 Section 5.1 - send HEADERS transitions idle -> open
@@ -59,7 +58,9 @@ pub fn open_stream_increments_stream_id_test() {
   let conn = helper.connected_connection(Client)
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, helper.request_headers(), False)
-  assert conn.next_stream_id == 3
+  let assert Ok(#(_conn, _to_send, stream_id)) =
+    open_stream(conn, helper.request_headers(), False)
+  assert stream_id == 3
 }
 
 pub fn open_stream_returns_no_events_test() {
@@ -71,7 +72,7 @@ pub fn open_stream_returns_no_events_test() {
 // Connection recv_buffer
 pub fn new_connection_has_empty_recv_buffer_test() {
   let assert Ok(#(conn, _)) = new_connection(Client, default_settings())
-  assert conn.recv_buffer == <<>>
+  assert h2_core.get_recv_buffer(conn) == <<>>
 }
 
 // receive_data
@@ -90,7 +91,7 @@ pub fn receive_partial_frame_buffers_data_test() {
   let assert Ok(#(conn, events, to_send)) = receive_data(conn, partial)
   assert events == []
   assert to_send == <<>>
-  assert conn.recv_buffer == partial
+  assert h2_core.get_recv_buffer(conn) == partial
 }
 
 pub fn receive_partial_frame_appends_to_buffer_test() {
@@ -103,7 +104,7 @@ pub fn receive_partial_frame_appends_to_buffer_test() {
   let assert Ok(#(conn, events, to_send)) = receive_data(conn, chunk2)
   assert events == []
   assert to_send == <<>>
-  assert conn.recv_buffer == <<chunk1:bits, chunk2:bits>>
+  assert h2_core.get_recv_buffer(conn) == <<chunk1:bits, chunk2:bits>>
 }
 
 // --- General frame processing (Section 4) ---

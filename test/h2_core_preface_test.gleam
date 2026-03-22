@@ -3,7 +3,8 @@ import gleam/option
 import h2_core.{
   AwaitingPreface, AwaitingSettings, Client, Connected, ConnectionError,
   ProtocolError, RemoteSettingsChanged, Server, SettingsAcknowledged,
-  default_settings, new_connection, receive_data,
+  default_settings, get_connection_state, get_remote_settings, new_connection,
+  receive_data,
 }
 import h2_frame
 import helper
@@ -23,7 +24,7 @@ const client_preface_magic = <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8>>
 // AwaitingPreface state.
 pub fn server_starts_in_awaiting_preface_state_test() {
   let assert Ok(#(conn, _)) = new_connection(Server, default_settings())
-  assert conn.state == AwaitingPreface
+  assert get_connection_state(conn) == AwaitingPreface
 }
 
 // RFC 9113 Section 3.4:
@@ -35,7 +36,7 @@ pub fn server_starts_in_awaiting_preface_state_test() {
 // SETTINGS frame. So the client starts in AwaitingSettings state.
 pub fn client_starts_in_awaiting_settings_state_test() {
   let assert Ok(#(conn, _)) = new_connection(Client, default_settings())
-  assert conn.state == AwaitingSettings
+  assert get_connection_state(conn) == AwaitingSettings
 }
 
 // =============================================================================
@@ -106,7 +107,7 @@ pub fn server_receives_new_client_preface_test() {
     new_connection(Client, default_settings())
   let assert Ok(#(server, [RemoteSettingsChanged(_)], _to_send)) =
     receive_data(server, client_preface)
-  assert server.state == Connected
+  assert get_connection_state(server) == Connected
 }
 
 // Round-trip: a client can receive_data the bytes from new_connection(Server).
@@ -116,7 +117,7 @@ pub fn client_receives_new_server_preface_test() {
     new_connection(Server, default_settings())
   let assert Ok(#(client, [RemoteSettingsChanged(_)], _to_send)) =
     receive_data(client, server_preface)
-  assert client.state == Connected
+  assert get_connection_state(client) == Connected
 }
 
 // RFC 9113 Section 6.5.2:
@@ -173,7 +174,7 @@ pub fn server_receives_valid_client_preface_test() {
   let data = <<client_preface_magic:bits, settings_frame:bits>>
   let assert Ok(#(conn, events, _to_send)) = receive_data(conn, data)
   let assert [RemoteSettingsChanged(_)] = events
-  assert conn.state == Connected
+  assert get_connection_state(conn) == Connected
 }
 
 // A server receiving the correct preface with non-empty SETTINGS should work.
@@ -186,8 +187,8 @@ pub fn server_receives_valid_preface_with_settings_test() {
   let data = <<client_preface_magic:bits, settings_frame:bits>>
   let assert Ok(#(conn, events, _to_send)) = receive_data(conn, data)
   let assert [RemoteSettingsChanged(_)] = events
-  let assert option.Some(100) = conn.remote_settings.max_concurrent_streams
-  assert conn.state == Connected
+  let assert option.Some(100) = get_remote_settings(conn).max_concurrent_streams
+  assert get_connection_state(conn) == Connected
 }
 
 // After receiving the magic but before receiving SETTINGS, the server
@@ -198,7 +199,7 @@ pub fn server_transitions_to_awaiting_settings_after_magic_test() {
     receive_data(conn, client_preface_magic)
   assert events == []
   assert to_send == <<>>
-  assert conn.state == AwaitingSettings
+  assert get_connection_state(conn) == AwaitingSettings
 }
 
 // =============================================================================
@@ -278,13 +279,13 @@ pub fn server_receives_only_preface_magic_waits_for_settings_test() {
     receive_data(conn, client_preface_magic)
   assert events == []
   assert to_send == <<>>
-  assert conn.state == AwaitingSettings
+  assert get_connection_state(conn) == AwaitingSettings
   // Now send the SETTINGS frame
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [])
   let assert Ok(#(conn, events, _to_send)) = receive_data(conn, settings_frame)
   let assert [RemoteSettingsChanged(_)] = events
-  assert conn.state == Connected
+  assert get_connection_state(conn) == Connected
 }
 
 // Server receives the magic in two separate chunks (split mid-magic).
@@ -296,14 +297,14 @@ pub fn server_receives_preface_magic_in_chunks_test() {
   let assert Ok(#(conn, events, to_send)) = receive_data(conn, part1)
   assert events == []
   assert to_send == <<>>
-  assert conn.state == AwaitingPreface
+  assert get_connection_state(conn) == AwaitingPreface
   // Send the rest of the magic + SETTINGS
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [])
   let data = <<part2:bits, settings_frame:bits>>
   let assert Ok(#(conn, events, _to_send)) = receive_data(conn, data)
   let assert [RemoteSettingsChanged(_)] = events
-  assert conn.state == Connected
+  assert get_connection_state(conn) == Connected
 }
 
 // Server receives magic byte-by-byte, then SETTINGS in a final chunk.
@@ -340,13 +341,13 @@ pub fn server_receives_preface_magic_byte_by_byte_test() {
     b18, b19, b20, b21, b22, b23, b24,
   ]
   let conn = feed_bytes(conn, bytes)
-  assert conn.state == AwaitingSettings
+  assert get_connection_state(conn) == AwaitingSettings
   // Now send SETTINGS
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [])
   let assert Ok(#(conn, events, _to_send)) = receive_data(conn, settings_frame)
   let assert [RemoteSettingsChanged(_)] = events
-  assert conn.state == Connected
+  assert get_connection_state(conn) == Connected
 }
 
 fn feed_bytes(conn, bytes) {
@@ -380,8 +381,8 @@ pub fn client_receives_valid_server_preface_test() {
     ])
   let assert Ok(#(conn, events, _to_send)) = receive_data(conn, settings_frame)
   let assert [RemoteSettingsChanged(_)] = events
-  let assert option.Some(128) = conn.remote_settings.max_concurrent_streams
-  assert conn.state == Connected
+  let assert option.Some(128) = get_remote_settings(conn).max_concurrent_streams
+  assert get_connection_state(conn) == Connected
 }
 
 // A client receiving a non-SETTINGS frame as the first frame from the server
@@ -461,7 +462,7 @@ pub fn server_processes_frames_after_valid_preface_test() {
   let assert Ok(#(conn, events, to_send)) = receive_data(conn, data)
   // Should have RemoteSettingsChanged from the SETTINGS frame
   let assert [RemoteSettingsChanged(_)] = events
-  assert conn.state == Connected
+  assert get_connection_state(conn) == Connected
   // to_send should contain: SETTINGS ACK + PING ACK
   let assert Ok(expected_settings_ack) =
     h2_frame.encode_settings(ack: True, settings: [])
@@ -481,7 +482,7 @@ pub fn client_processes_frames_after_valid_preface_test() {
   let data = <<settings_frame:bits, ping_frame:bits>>
   let assert Ok(#(conn, events, to_send)) = receive_data(conn, data)
   let assert [RemoteSettingsChanged(_)] = events
-  assert conn.state == Connected
+  assert get_connection_state(conn) == Connected
   let assert Ok(expected_settings_ack) =
     h2_frame.encode_settings(ack: True, settings: [])
   let assert Ok(expected_ping_ack) =
@@ -499,7 +500,7 @@ pub fn server_receives_empty_data_test() {
   let assert Ok(#(conn, events, to_send)) = receive_data(conn, <<>>)
   assert events == []
   assert to_send == <<>>
-  assert conn.state == AwaitingPreface
+  assert get_connection_state(conn) == AwaitingPreface
 }
 
 pub fn client_receives_empty_data_test() {
@@ -507,5 +508,5 @@ pub fn client_receives_empty_data_test() {
   let assert Ok(#(conn, events, to_send)) = receive_data(conn, <<>>)
   assert events == []
   assert to_send == <<>>
-  assert conn.state == AwaitingSettings
+  assert get_connection_state(conn) == AwaitingSettings
 }

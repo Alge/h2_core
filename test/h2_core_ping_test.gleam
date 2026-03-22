@@ -12,7 +12,7 @@ pub fn receive_ping_sends_ack_test() {
   let assert Ok(ping_frame) = h2_frame.encode_ping(ack: False, data: ping_data)
   let assert Ok(#(conn, events, to_send)) = receive_data(conn, ping_frame)
   assert events == []
-  assert conn.recv_buffer == <<>>
+  assert h2_core.get_recv_buffer(conn) == <<>>
   let assert Ok(expected) = h2_frame.encode_ping(ack: True, data: ping_data)
   assert to_send == expected
 }

@@ -19,7 +19,7 @@ fn connection_with_small_frame_size(role: h2_core.Role) -> h2_core.Connection {
   let conn = helper.connected_connection(role)
   let settings =
     Settings(
-      ..conn.remote_settings,
+      ..h2_core.get_remote_settings(conn),
       // Use a very small frame size to force splitting.
       // Note: 16,384 is the RFC minimum, but for testing we go lower.
       max_frame_size: 32,
@@ -388,7 +388,8 @@ pub fn receive_continuation_across_calls_test() {
 pub fn receive_multiple_continuation_frames_test() {
   // Use an even smaller frame size to force more splits
   let conn = helper.connected_connection(Client)
-  let settings = Settings(..conn.remote_settings, max_frame_size: 16)
+  let settings =
+    Settings(..h2_core.get_remote_settings(conn), max_frame_size: 16)
   let conn = Connection(..conn, remote_settings: settings)
   let headers = large_headers()
   let assert Ok(#(_conn, to_send, _stream_id)) =

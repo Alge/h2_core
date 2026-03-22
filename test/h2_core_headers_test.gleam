@@ -1,5 +1,4 @@
 import gleam/bit_array
-import gleam/dict
 import gleam/list
 import gleam/option.{None}
 import h2_core.{Client, Header, Server, WithIndexing, open_stream, send_headers}
@@ -36,22 +35,22 @@ pub fn open_stream_opens_stream_test() {
 pub fn open_stream_increments_stream_id_test() {
   let conn = helper.connected_connection(Client)
   let headers = helper.request_headers()
-  let assert Ok(#(conn, _to_send, _stream_id)) =
+  let assert Ok(#(conn, _to_send, stream_id)) =
     open_stream(conn, headers, False)
-  assert conn.next_stream_id == 3
-  let assert Ok(#(conn, _to_send, _stream_id)) =
+  assert stream_id == 1
+  let assert Ok(#(_conn, _to_send, stream_id)) =
     open_stream(conn, headers, False)
-  assert conn.next_stream_id == 5
+  assert stream_id == 3
 }
 
 // Server uses even stream IDs
 pub fn open_stream_server_uses_even_stream_ids_test() {
   let conn = helper.connected_connection(Server)
   let headers = [Header(":status", "200", WithIndexing)]
-  let assert Ok(#(conn, _to_send, _stream_id)) =
+  let assert Ok(#(conn, _to_send, stream_id)) =
     open_stream(conn, headers, False)
-  let assert Ok(_stream) = dict.get(conn.streams, 2)
-  assert conn.next_stream_id == 4
+  assert stream_id == 2
+  let assert Ok(_) = h2_core.get_stream_state(conn, 2)
 }
 
 // RFC 9113 Section 6.2 - END_STREAM flag transitions stream to half-closed (local)
