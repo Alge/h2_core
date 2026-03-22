@@ -1,8 +1,8 @@
 import gleam/list
 import h2_core.{
-  Client, Connected, Connection, ConnectionError, EnhanceYourCalm,
-  GoawayReceived, Header, InternalError, NoError, ProtocolError, Server,
-  WithIndexing, open_stream, receive_data, send_goaway, send_headers,
+  Client, Connection, ConnectionError, EnhanceYourCalm, GoawayReceived, Header,
+  InternalError, NoError, ProtocolError, Server, WithIndexing, open_stream,
+  receive_data, send_goaway, send_headers,
 }
 import h2_frame
 import helper
@@ -10,7 +10,7 @@ import helper
 // RFC 9113 Section 6.8 - Sending GOAWAY
 
 pub fn send_goaway_returns_encoded_frame_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Ok(#(_conn, to_send)) = send_goaway(conn, NoError, <<>>)
   let expected =
     h2_frame.encode_goaway(
@@ -22,7 +22,7 @@ pub fn send_goaway_returns_encoded_frame_test() {
 }
 
 pub fn send_goaway_with_error_code_test() {
-  let conn = helper.new_connection(Server, Connected)
+  let conn = helper.connected_connection(Server)
   let assert Ok(#(_conn, to_send)) = send_goaway(conn, ProtocolError, <<>>)
   let expected =
     h2_frame.encode_goaway(
@@ -34,7 +34,7 @@ pub fn send_goaway_with_error_code_test() {
 }
 
 pub fn send_goaway_uses_last_remote_stream_id_test() {
-  let conn = helper.new_connection(Server, Connected)
+  let conn = helper.connected_connection(Server)
   let conn = Connection(..conn, last_remote_stream_id: 7)
   let assert Ok(#(_conn, to_send)) = send_goaway(conn, NoError, <<>>)
   let expected =
@@ -47,7 +47,7 @@ pub fn send_goaway_uses_last_remote_stream_id_test() {
 }
 
 pub fn send_goaway_with_debug_data_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let debug = <<"something went wrong":utf8>>
   let assert Ok(#(_conn, to_send)) = send_goaway(conn, InternalError, debug)
   let expected =
@@ -62,7 +62,7 @@ pub fn send_goaway_with_debug_data_test() {
 // RFC 9113 Section 6.8 - Receiving GOAWAY
 
 pub fn receive_goaway_emits_event_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let goaway =
     h2_frame.encode_goaway(
       last_stream_id: 0,
@@ -75,7 +75,7 @@ pub fn receive_goaway_emits_event_test() {
 }
 
 pub fn receive_goaway_with_error_code_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let goaway =
     h2_frame.encode_goaway(
       last_stream_id: 5,
@@ -87,7 +87,7 @@ pub fn receive_goaway_with_error_code_test() {
 }
 
 pub fn receive_goaway_with_debug_data_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let debug = <<"too many requests":utf8>>
   let goaway =
     h2_frame.encode_goaway(
@@ -100,7 +100,7 @@ pub fn receive_goaway_with_debug_data_test() {
 }
 
 pub fn receive_goaway_no_response_sent_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let goaway =
     h2_frame.encode_goaway(
       last_stream_id: 0,
@@ -114,7 +114,7 @@ pub fn receive_goaway_no_response_sent_test() {
 
 // RFC 9113 Section 6.8 - GOAWAY on non-zero stream is PROTOCOL_ERROR
 pub fn receive_goaway_nonzero_stream_is_protocol_error_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   // Manually craft a GOAWAY frame on stream 1
   // Length=8 (4 last_stream_id + 4 error_code, no debug), Type=0x07, Flags=0, Stream ID=1
   let bad_goaway = <<
@@ -133,7 +133,7 @@ pub fn receive_goaway_nonzero_stream_is_protocol_error_test() {
 
 // RFC 9113 Section 6.8 - last_stream_id can be 0 (no streams processed)
 pub fn receive_goaway_last_stream_id_zero_test() {
-  let conn = helper.new_connection(Server, Connected)
+  let conn = helper.connected_connection(Server)
   let goaway =
     h2_frame.encode_goaway(
       last_stream_id: 0,
@@ -146,7 +146,7 @@ pub fn receive_goaway_last_stream_id_zero_test() {
 
 // Receiving GOAWAY should not clear the receive buffer of remaining data
 pub fn receive_goaway_does_not_affect_buffer_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let goaway =
     h2_frame.encode_goaway(
       last_stream_id: 0,
@@ -173,8 +173,8 @@ pub fn receive_goaway_does_not_affect_buffer_test() {
 // table in sync. If it doesn't, subsequent header decoding will fail
 // with a CompressionError.
 pub fn receive_headers_after_goaway_maintains_hpack_state_test() {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
 
   // Client sends three HEADERS frames — HPACK state accumulates across all three
   let assert Ok(#(client, encoded1, _stream_id)) =
@@ -224,7 +224,7 @@ pub fn receive_headers_after_goaway_maintains_hpack_state_test() {
 //
 // After receiving GOAWAY, attempting to open a new stream should error.
 pub fn receive_goaway_prevents_opening_new_streams_test() {
-  let client = helper.new_connection(Client, Connected)
+  let client = helper.connected_connection(Client)
   // Open stream 1
   let assert Ok(#(client, _to_send, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
@@ -281,8 +281,8 @@ pub fn receive_goaway_prevents_push_promise_test() {
 //
 // Sending a second GOAWAY with a higher last_stream_id should error.
 pub fn send_goaway_must_not_increase_last_stream_id_test() {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
   let assert Ok(#(client, headers1, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(_client, headers2, _stream_id)) =
@@ -317,8 +317,8 @@ pub fn send_goaway_must_not_increase_last_stream_id_test() {
 // stream 3 (above last_stream_id) should be silently discarded.
 // HPACK state must still be maintained.
 pub fn send_goaway_ignores_streams_above_last_stream_id_test() {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
   // Client opens stream 1
   let assert Ok(#(client, headers1, _stream_id)) =
     open_stream(client, helper.request_headers(), False)

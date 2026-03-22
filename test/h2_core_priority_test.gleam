@@ -1,5 +1,5 @@
 import h2_core.{
-  Client, Connected, ConnectionError, FrameSizeError, ProtocolError, StreamReset,
+  Client, ConnectionError, FrameSizeError, ProtocolError, StreamReset,
   receive_data,
 }
 import h2_frame
@@ -11,7 +11,7 @@ import helper
 // any stream (Section 5.1)."
 // A valid PRIORITY frame should be accepted and silently ignored.
 pub fn receive_priority_accepted_and_ignored_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Ok(priority_frame) =
     h2_frame.encode_priority(
       stream_id: 1,
@@ -29,7 +29,7 @@ pub fn receive_priority_accepted_and_ignored_test() {
 // the recipient MUST respond with a connection error (Section 5.4.1)
 // of type PROTOCOL_ERROR."
 pub fn receive_priority_stream_zero_is_protocol_error_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   // Manually craft a PRIORITY frame on stream 0
   // h2_frame.encode_priority guards against stream_id 0, so we craft it by hand.
   // Length=5, Type=0x02 (PRIORITY), Flags=0, Reserved=0, Stream ID=0
@@ -51,7 +51,7 @@ pub fn receive_priority_stream_zero_is_protocol_error_test() {
 // "A PRIORITY frame with a length other than 5 octets MUST be treated
 // as a stream error (Section 5.4.2) of type FRAME_SIZE_ERROR."
 pub fn receive_priority_wrong_length_is_stream_error_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   // Manually craft a PRIORITY frame with 4 bytes payload instead of 5
   // Length=4, Type=0x02 (PRIORITY), Flags=0, Reserved=0, Stream ID=1
   let bad_priority = <<
@@ -78,7 +78,7 @@ pub fn receive_priority_wrong_length_is_stream_error_test() {
 // 'idle' or 'closed'."
 // Receiving PRIORITY on an idle stream (never opened) should succeed.
 pub fn receive_priority_on_idle_stream_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   // Stream 3 has never been opened — it is idle
   let assert Ok(priority_frame) =
     h2_frame.encode_priority(
@@ -97,7 +97,7 @@ pub fn receive_priority_on_idle_stream_test() {
 // any stream (Section 5.1)."
 // Verify the exclusive flag variant is also accepted without error.
 pub fn receive_priority_with_exclusive_flag_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Ok(priority_frame) =
     h2_frame.encode_priority(
       stream_id: 1,

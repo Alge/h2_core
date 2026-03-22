@@ -1,9 +1,8 @@
 import gleam/bit_array
 import gleam/dict
 import h2_core.{
-  type Connection, Connected, ConnectionError, Header, ProtocolError, Server,
-  StreamClosed, StreamError, WithIndexing, open_stream, receive_data,
-  send_headers,
+  type Connection, ConnectionError, Header, ProtocolError, Server, StreamClosed,
+  StreamError, WithIndexing, open_stream, receive_data, send_headers,
 }
 import h2_core/internal/stream.{
   Closed, HalfClosedLocal, HalfClosedRemote, Open, ReservedLocal, ReservedRemote,
@@ -72,7 +71,7 @@ pub fn send_headers_with_end_stream_on_half_closed_remote_closes_stream_test() {
 // RFC 9113 Section 5.1 - "reserved (local): The endpoint can send a HEADERS
 // frame. This causes the stream to open in a 'half-closed (remote)' state."
 pub fn send_headers_on_reserved_local_transitions_to_half_closed_remote_test() {
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let server = helper.set_stream_state(server, 2, ReservedLocal)
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 2, [Header(":status", "200", WithIndexing)], False)
@@ -107,7 +106,7 @@ pub fn send_headers_without_end_stream_does_not_change_state_test() {
 // cannot be used for sending frames other than WINDOW_UPDATE, PRIORITY, and
 // RST_STREAM."
 pub fn send_headers_on_half_closed_local_is_stream_closed_error_test() {
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let server = helper.set_stream_state(server, 1, HalfClosedLocal)
   let assert Error(StreamError(1, StreamClosed)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
@@ -116,7 +115,7 @@ pub fn send_headers_on_half_closed_local_is_stream_closed_error_test() {
 // RFC 9113 Section 5.1 - "An endpoint MUST NOT send frames other than PRIORITY
 // on a closed stream."
 pub fn send_headers_on_closed_stream_is_error_test() {
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let server = helper.set_stream_state(server, 1, Closed)
   let assert Error(StreamError(1, StreamClosed)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
@@ -126,7 +125,7 @@ pub fn send_headers_on_closed_stream_is_error_test() {
 // than RST_STREAM, WINDOW_UPDATE, or PRIORITY in this ['reserved (remote)']
 // state."
 pub fn send_headers_on_reserved_remote_is_protocol_error_test() {
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let server = helper.set_stream_state(server, 2, ReservedRemote)
   let assert Error(ConnectionError(ProtocolError)) =
     send_headers(server, 2, [Header(":status", "200", WithIndexing)], False)
@@ -135,7 +134,7 @@ pub fn send_headers_on_reserved_remote_is_protocol_error_test() {
 // RFC 9113 Section 5.1 - An idle stream has no existing connection state;
 // use open_stream to initiate new streams instead.
 pub fn send_headers_on_idle_stream_is_error_test() {
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Error(_) =
     send_headers(server, 99, [Header(":status", "200", WithIndexing)], False)
 }
@@ -145,7 +144,7 @@ pub fn send_headers_on_idle_stream_is_error_test() {
 // recipient MUST respond with a connection error of type PROTOCOL_ERROR."
 // The same applies when sending.
 pub fn send_headers_on_stream_zero_is_protocol_error_test() {
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Error(ConnectionError(ProtocolError)) =
     send_headers(server, 0, [Header(":status", "200", WithIndexing)], False)
 }

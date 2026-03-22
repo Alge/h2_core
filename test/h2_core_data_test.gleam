@@ -1,10 +1,10 @@
 import gleam/dict
 import gleam/option.{None, Some}
 import h2_core.{
-  type Connection, Client, Connected, ConnectionError, DataReceived,
-  FlowControlError, FrameSizeError, Header, HeadersReceived, NoError,
-  ProtocolError, Server, StreamClosed, StreamError, StreamReset, WithIndexing,
-  open_stream, receive_data, send_headers,
+  type Connection, Client, ConnectionError, DataReceived, FlowControlError,
+  FrameSizeError, Header, HeadersReceived, NoError, ProtocolError, Server,
+  StreamClosed, StreamError, StreamReset, WithIndexing, open_stream,
+  receive_data, send_headers,
 }
 import h2_core/internal/stream.{
   Closed, HalfClosedLocal, HalfClosedRemote, Open, ReservedLocal, ReservedRemote,
@@ -96,8 +96,8 @@ pub fn receive_data_with_end_stream_test() {
 // RFC 9113 Section 6.1 - DATA with END_STREAM on a half-closed (local)
 // stream transitions to closed.
 pub fn receive_data_with_end_stream_on_half_closed_local_closes_stream_test() {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
   // Client opens stream 1
   let assert Ok(#(client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
@@ -154,7 +154,7 @@ pub fn receive_data_on_half_closed_remote_is_stream_closed_error_test() {
 // on a stream in this [idle] state MUST be treated as a connection error
 // (Section 5.4.1) of type PROTOCOL_ERROR."
 pub fn receive_data_on_idle_stream_is_protocol_error_test() {
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   // Stream 1 was never opened
   let assert Ok(data_frame) =
     h2_frame.encode_data(
@@ -430,7 +430,7 @@ pub fn send_data_on_stream_zero_is_error_test() {
 // RFC 9113 Section 6.1 - DATA can only be sent on open or half-closed (remote).
 // Sending on a stream that was never opened (idle state) must be an error.
 pub fn send_data_on_idle_stream_is_error_test() {
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   // Stream 99 was never opened — it is in idle state
   let assert Error(_) =
     h2_core.send_data(server, 99, <<"bad":utf8>>, False, None)
@@ -827,7 +827,7 @@ pub fn get_send_window_size_default_values_test() {
 }
 
 pub fn get_send_window_size_unknown_stream_is_error_test() {
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Error(_) = h2_core.get_send_window_size(server, 99)
 }
 
@@ -1223,8 +1223,8 @@ pub fn receive_data_exceeding_max_frame_size_is_frame_size_error_test() {
 //
 // Receiving more DATA than declared in content-length is malformed.
 pub fn receive_data_exceeding_content_length_is_malformed_test() {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
   // Client sends request with content-length: 5
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(
@@ -1262,8 +1262,8 @@ pub fn receive_data_exceeding_content_length_is_malformed_test() {
 // RFC 9113 Section 8.1.1 - Receiving less DATA than declared in
 // content-length with END_STREAM is malformed.
 pub fn receive_data_less_than_content_length_with_end_stream_is_malformed_test() {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
   // Client sends request with content-length: 10
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(
@@ -1300,8 +1300,8 @@ pub fn receive_data_less_than_content_length_with_end_stream_is_malformed_test()
 
 // RFC 9113 Section 8.1.1 - Content-length matching exactly should succeed.
 pub fn receive_data_matching_content_length_succeeds_test() {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(
       client,
@@ -1329,8 +1329,8 @@ pub fn receive_data_matching_content_length_succeeds_test() {
 // RFC 9113 Section 8.1.1 - Multiple DATA frames totaling the correct
 // content-length should succeed.
 pub fn receive_multiple_data_matching_content_length_succeeds_test() {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(
       client,
@@ -1369,8 +1369,8 @@ pub fn receive_multiple_data_matching_content_length_succeeds_test() {
 // RFC 9113 Section 8.1.1 - Content-length of 0 with no DATA and
 // END_STREAM on HEADERS should succeed.
 pub fn receive_content_length_zero_no_data_succeeds_test() {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(
       client,
@@ -1389,8 +1389,8 @@ pub fn receive_content_length_zero_no_data_succeeds_test() {
 // RFC 9113 Section 8.1.1 - A non-numeric content-length value is
 // malformed.
 pub fn receive_headers_invalid_content_length_is_malformed_test() {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(
       client,

@@ -2,11 +2,13 @@ import gleam/dict
 import gleam/list
 import gleam/option
 import h2_core.{
-  type Connection, type ConnectionState, type Header, Client, Connected,
-  Connection, Header, Server, WithIndexing, open_stream, receive_data,
+  type Connection, type Header, Client, Connection, Header, Server, WithIndexing,
+  open_stream, receive_data,
 }
 import h2_core/internal/stream.{type Stream, type StreamState, Stream}
 import h2_frame
+
+const client_preface_magic = <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8>>
 
 pub fn request_headers() -> List(Header) {
   [
@@ -20,12 +22,57 @@ pub fn response_headers() -> List(Header) {
   [Header(":status", "200", WithIndexing)]
 }
 
-pub fn new_connection(role: h2_core.Role, state: ConnectionState) -> Connection {
-  let assert Ok(#(conn, _)) =
-    h2_core.new_connection(role, h2_core.default_settings())
-  Connection(..conn, state: state, pending_settings: [])
+/// Create a connected client+server pair by completing the full preface exchange.
+pub fn connected_pair() -> #(Connection, Connection) {
+  let assert Ok(#(server, server_preface)) =
+    h2_core.new_connection(Server, h2_core.default_settings())
+  let assert Ok(#(client, client_preface)) =
+    h2_core.new_connection(Client, h2_core.default_settings())
+
+  // Each side receives the other's preface
+  let assert Ok(#(server, _events, server_to_send)) =
+    receive_data(server, client_preface)
+  let assert Ok(#(client, _events, client_to_send)) =
+    receive_data(client, server_preface)
+
+  // Each side receives the SETTINGS ACK from the other
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, client_to_send)
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, server_to_send)
+
+  #(server, client)
 }
 
+/// Create a connected connection for a given role.
+pub fn connected_connection(role: h2_core.Role) -> Connection {
+  let #(server, client) = connected_pair()
+  case role {
+    Server -> server
+    Client -> client
+  }
+}
+
+/// Create a server and client with an open client-initiated stream 1.
+pub fn server_with_open_stream() -> #(Connection, Connection) {
+  let #(server, client) = connected_pair()
+  let assert Ok(#(client, headers, _stream_id)) =
+    open_stream(client, request_headers(), False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+  #(server, client)
+}
+
+/// Create a server and client where stream 1 is half-closed (remote)
+/// (client sent END_STREAM with headers).
+pub fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
+  let #(server, client) = connected_pair()
+  let assert Ok(#(client, headers, _stream_id)) =
+    open_stream(client, request_headers(), True)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+  #(server, client)
+}
+
+// TODO: Remove these once Connection is opaque (Step 6)
 pub fn new_stream(state: StreamState) -> Stream {
   Stream(
     state: state,
@@ -38,28 +85,6 @@ pub fn new_stream(state: StreamState) -> Stream {
   )
 }
 
-/// Create a server and client with an open client-initiated stream 1.
-pub fn server_with_open_stream() -> #(Connection, Connection) {
-  let server = new_connection(Server, Connected)
-  let client = new_connection(Client, Connected)
-  let assert Ok(#(client, headers, _stream_id)) =
-    open_stream(client, request_headers(), False)
-  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
-  #(server, client)
-}
-
-/// Create a server and client where stream 1 is half-closed (remote)
-/// (client sent END_STREAM with headers).
-pub fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
-  let server = new_connection(Server, Connected)
-  let client = new_connection(Client, Connected)
-  let assert Ok(#(client, headers, _stream_id)) =
-    open_stream(client, request_headers(), True)
-  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
-  #(server, client)
-}
-
-/// Override the state of a stream on a connection.
 pub fn set_stream_state(
   conn: Connection,
   stream_id: Int,

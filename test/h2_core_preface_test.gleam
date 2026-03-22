@@ -2,8 +2,8 @@ import gleam/list
 import gleam/option
 import h2_core.{
   AwaitingPreface, AwaitingSettings, Client, Connected, ConnectionError,
-  ProtocolError, RemoteSettingsChanged, Server, default_settings, new_connection,
-  receive_data,
+  ProtocolError, RemoteSettingsChanged, Server, SettingsAcknowledged,
+  default_settings, new_connection, receive_data,
 }
 import h2_frame
 import helper
@@ -119,6 +119,40 @@ pub fn client_receives_new_server_preface_test() {
   assert client.state == Connected
 }
 
+// RFC 9113 Section 6.5.2:
+// "A client MUST treat receipt of a SETTINGS frame with
+//  SETTINGS_ENABLE_PUSH set to 1 as a connection error"
+//
+// This restriction applies to SETTINGS frames *received from the server*,
+// not to the client's own pending settings being acknowledged via
+// SETTINGS ACK. The client's default settings include ENABLE_PUSH=1
+// (Section 6.5.2: "The initial value of SETTINGS_ENABLE_PUSH is 1"),
+// and acknowledging those must not trigger a PROTOCOL_ERROR.
+pub fn client_receives_settings_ack_after_preface_test() {
+  let assert Ok(#(client, _)) = new_connection(Client, default_settings())
+  let assert Ok(#(_server, server_preface)) =
+    new_connection(Server, default_settings())
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, server_preface)
+  let assert Ok(settings_ack) =
+    h2_frame.encode_settings(ack: True, settings: [])
+  let assert Ok(#(_client, [SettingsAcknowledged(_)], _to_send)) =
+    receive_data(client, settings_ack)
+}
+
+// Same for server side — receiving a SETTINGS ACK after preface should work.
+pub fn server_receives_settings_ack_after_preface_test() {
+  let assert Ok(#(server, _)) = new_connection(Server, default_settings())
+  let assert Ok(#(_client, client_preface)) =
+    new_connection(Client, default_settings())
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, client_preface)
+  let assert Ok(settings_ack) =
+    h2_frame.encode_settings(ack: True, settings: [])
+  let assert Ok(#(_server, [SettingsAcknowledged(_)], _to_send)) =
+    receive_data(server, settings_ack)
+}
+
 // =============================================================================
 // Server: client preface magic — RFC 9113 Section 3.4
 //
@@ -133,7 +167,7 @@ pub fn client_receives_new_server_preface_test() {
 // A server receiving the correct client preface (magic + SETTINGS) should
 // succeed and emit a RemoteSettingsChanged event for the peer's SETTINGS.
 pub fn server_receives_valid_client_preface_test() {
-  let conn = helper.new_connection(Server, AwaitingPreface)
+  let assert Ok(#(conn, _preface)) = new_connection(Server, default_settings())
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [])
   let data = <<client_preface_magic:bits, settings_frame:bits>>
@@ -144,7 +178,7 @@ pub fn server_receives_valid_client_preface_test() {
 
 // A server receiving the correct preface with non-empty SETTINGS should work.
 pub fn server_receives_valid_preface_with_settings_test() {
-  let conn = helper.new_connection(Server, AwaitingPreface)
+  let assert Ok(#(conn, _preface)) = new_connection(Server, default_settings())
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.MaxConcurrentStreams(100),
@@ -159,7 +193,7 @@ pub fn server_receives_valid_preface_with_settings_test() {
 // After receiving the magic but before receiving SETTINGS, the server
 // should be in AwaitingSettings state.
 pub fn server_transitions_to_awaiting_settings_after_magic_test() {
-  let conn = helper.new_connection(Server, AwaitingPreface)
+  let assert Ok(#(conn, _preface)) = new_connection(Server, default_settings())
   let assert Ok(#(conn, events, to_send)) =
     receive_data(conn, client_preface_magic)
   assert events == []
@@ -177,7 +211,7 @@ pub fn server_transitions_to_awaiting_settings_after_magic_test() {
 // A server receiving garbage bytes instead of the client preface magic
 // MUST result in a connection error of type PROTOCOL_ERROR.
 pub fn server_receives_invalid_preface_bytes_test() {
-  let conn = helper.new_connection(Server, AwaitingPreface)
+  let assert Ok(#(conn, _preface)) = new_connection(Server, default_settings())
   let garbage = <<"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n":utf8>>
   let assert Error(ConnectionError(ProtocolError)) = receive_data(conn, garbage)
 }
@@ -185,7 +219,7 @@ pub fn server_receives_invalid_preface_bytes_test() {
 // A server receiving partially correct magic followed by wrong bytes
 // MUST result in PROTOCOL_ERROR.
 pub fn server_receives_corrupted_preface_magic_test() {
-  let conn = helper.new_connection(Server, AwaitingPreface)
+  let assert Ok(#(conn, _preface)) = new_connection(Server, default_settings())
   // First 10 bytes correct, then garbage
   let corrupted = <<"PRI * HTTP/XXXXXXXXXXXXXX":utf8>>
   let assert Error(ConnectionError(ProtocolError)) =
@@ -201,7 +235,7 @@ pub fn server_receives_corrupted_preface_magic_test() {
 // Client preface magic followed by a non-SETTINGS frame (e.g. PING)
 // MUST be a PROTOCOL_ERROR.
 pub fn server_receives_preface_magic_followed_by_non_settings_test() {
-  let conn = helper.new_connection(Server, AwaitingPreface)
+  let assert Ok(#(conn, _preface)) = new_connection(Server, default_settings())
   let assert Ok(ping_frame) =
     h2_frame.encode_ping(ack: False, data: <<1, 2, 3, 4, 5, 6, 7, 8>>)
   let data = <<client_preface_magic:bits, ping_frame:bits>>
@@ -212,7 +246,7 @@ pub fn server_receives_preface_magic_followed_by_non_settings_test() {
 // MUST be a PROTOCOL_ERROR because the first frame must be a SETTINGS
 // (non-ack) frame.
 pub fn server_receives_preface_magic_followed_by_settings_ack_test() {
-  let conn = helper.new_connection(Server, AwaitingPreface)
+  let assert Ok(#(conn, _preface)) = new_connection(Server, default_settings())
   let assert Ok(settings_ack) =
     h2_frame.encode_settings(ack: True, settings: [])
   let data = <<client_preface_magic:bits, settings_ack:bits>>
@@ -221,8 +255,8 @@ pub fn server_receives_preface_magic_followed_by_settings_ack_test() {
 
 // Client preface magic followed by HEADERS is PROTOCOL_ERROR.
 pub fn server_receives_preface_magic_followed_by_headers_test() {
-  let conn = helper.new_connection(Server, AwaitingPreface)
-  let client = helper.new_connection(Client, Connected)
+  let assert Ok(#(conn, _preface)) = new_connection(Server, default_settings())
+  let client = helper.connected_connection(Client)
   let assert Ok(#(_client, headers_frame, _stream_id)) =
     h2_core.open_stream(client, helper.request_headers(), False)
   let data = <<client_preface_magic:bits, headers_frame:bits>>
@@ -239,7 +273,7 @@ pub fn server_receives_preface_magic_followed_by_headers_test() {
 // Server receives only the 24-byte magic without a SETTINGS frame yet.
 // This is incomplete, not an error — the server should wait for more data.
 pub fn server_receives_only_preface_magic_waits_for_settings_test() {
-  let conn = helper.new_connection(Server, AwaitingPreface)
+  let assert Ok(#(conn, _preface)) = new_connection(Server, default_settings())
   let assert Ok(#(conn, events, to_send)) =
     receive_data(conn, client_preface_magic)
   assert events == []
@@ -256,7 +290,7 @@ pub fn server_receives_only_preface_magic_waits_for_settings_test() {
 // Server receives the magic in two separate chunks (split mid-magic).
 // Both chunks are individually incomplete — the connection should buffer.
 pub fn server_receives_preface_magic_in_chunks_test() {
-  let conn = helper.new_connection(Server, AwaitingPreface)
+  let assert Ok(#(conn, _preface)) = new_connection(Server, default_settings())
   // Split the 24-byte magic into two parts
   let assert <<part1:bytes-size(12), part2:bytes>> = client_preface_magic
   let assert Ok(#(conn, events, to_send)) = receive_data(conn, part1)
@@ -274,7 +308,7 @@ pub fn server_receives_preface_magic_in_chunks_test() {
 
 // Server receives magic byte-by-byte, then SETTINGS in a final chunk.
 pub fn server_receives_preface_magic_byte_by_byte_test() {
-  let conn = helper.new_connection(Server, AwaitingPreface)
+  let assert Ok(#(conn, _preface)) = new_connection(Server, default_settings())
   let assert <<
     b1,
     b2,
@@ -339,7 +373,7 @@ fn feed_bytes(conn, bytes) {
 // A client receiving a valid SETTINGS frame as the first frame should succeed
 // and transition to Open state.
 pub fn client_receives_valid_server_preface_test() {
-  let conn = helper.new_connection(Client, AwaitingSettings)
+  let assert Ok(#(conn, _preface)) = new_connection(Client, default_settings())
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.MaxConcurrentStreams(128),
@@ -353,7 +387,7 @@ pub fn client_receives_valid_server_preface_test() {
 // A client receiving a non-SETTINGS frame as the first frame from the server
 // MUST treat it as PROTOCOL_ERROR.
 pub fn client_receives_non_settings_as_first_frame_test() {
-  let conn = helper.new_connection(Client, AwaitingSettings)
+  let assert Ok(#(conn, _preface)) = new_connection(Client, default_settings())
   let assert Ok(ping_frame) =
     h2_frame.encode_ping(ack: False, data: <<1, 2, 3, 4, 5, 6, 7, 8>>)
   let assert Error(ConnectionError(ProtocolError)) =
@@ -363,7 +397,7 @@ pub fn client_receives_non_settings_as_first_frame_test() {
 // A client receiving a SETTINGS ACK as the first frame is PROTOCOL_ERROR
 // because the server must send a non-ack SETTINGS first.
 pub fn client_receives_settings_ack_as_first_frame_test() {
-  let conn = helper.new_connection(Client, AwaitingSettings)
+  let assert Ok(#(conn, _preface)) = new_connection(Client, default_settings())
   let assert Ok(settings_ack) =
     h2_frame.encode_settings(ack: True, settings: [])
   let assert Error(ConnectionError(ProtocolError)) =
@@ -372,7 +406,7 @@ pub fn client_receives_settings_ack_as_first_frame_test() {
 
 // A client receiving GOAWAY as the first frame is PROTOCOL_ERROR.
 pub fn client_receives_goaway_as_first_frame_test() {
-  let conn = helper.new_connection(Client, AwaitingSettings)
+  let assert Ok(#(conn, _preface)) = new_connection(Client, default_settings())
   let goaway_frame =
     h2_frame.encode_goaway(
       last_stream_id: 0,
@@ -385,7 +419,7 @@ pub fn client_receives_goaway_as_first_frame_test() {
 
 // A client receiving WINDOW_UPDATE as the first frame is PROTOCOL_ERROR.
 pub fn client_receives_window_update_as_first_frame_test() {
-  let conn = helper.new_connection(Client, AwaitingSettings)
+  let assert Ok(#(conn, _preface)) = new_connection(Client, default_settings())
   let assert Ok(wu_frame) =
     h2_frame.encode_window_update(stream_id: 0, window_size_increment: 1024)
   let assert Error(ConnectionError(ProtocolError)) =
@@ -401,7 +435,7 @@ pub fn client_receives_window_update_as_first_frame_test() {
 // =============================================================================
 
 pub fn client_receiving_magic_bytes_is_error_test() {
-  let conn = helper.new_connection(Client, AwaitingSettings)
+  let assert Ok(#(conn, _preface)) = new_connection(Client, default_settings())
   let assert Error(_) = receive_data(conn, client_preface_magic)
 }
 
@@ -414,7 +448,7 @@ pub fn client_receiving_magic_bytes_is_error_test() {
 // After a valid client preface, the server should process subsequent frames
 // normally (e.g. a PING after the initial SETTINGS).
 pub fn server_processes_frames_after_valid_preface_test() {
-  let conn = helper.new_connection(Server, AwaitingPreface)
+  let assert Ok(#(conn, _preface)) = new_connection(Server, default_settings())
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [])
   let assert Ok(ping_frame) =
@@ -439,7 +473,7 @@ pub fn server_processes_frames_after_valid_preface_test() {
 // After a valid server preface, the client should process subsequent frames
 // normally.
 pub fn client_processes_frames_after_valid_preface_test() {
-  let conn = helper.new_connection(Client, AwaitingSettings)
+  let assert Ok(#(conn, _preface)) = new_connection(Client, default_settings())
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [])
   let assert Ok(ping_frame) =
@@ -461,7 +495,7 @@ pub fn client_processes_frames_after_valid_preface_test() {
 
 // Empty data should not cause an error regardless of connection state.
 pub fn server_receives_empty_data_test() {
-  let conn = helper.new_connection(Server, AwaitingPreface)
+  let assert Ok(#(conn, _preface)) = new_connection(Server, default_settings())
   let assert Ok(#(conn, events, to_send)) = receive_data(conn, <<>>)
   assert events == []
   assert to_send == <<>>
@@ -469,7 +503,7 @@ pub fn server_receives_empty_data_test() {
 }
 
 pub fn client_receives_empty_data_test() {
-  let conn = helper.new_connection(Client, AwaitingSettings)
+  let assert Ok(#(conn, _preface)) = new_connection(Client, default_settings())
   let assert Ok(#(conn, events, to_send)) = receive_data(conn, <<>>)
   assert events == []
   assert to_send == <<>>

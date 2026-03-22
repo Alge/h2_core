@@ -164,25 +164,40 @@ fn apply_settings(
   role: Role,
   settings: Settings,
   new: List(Setting),
+  remote remote: Bool,
 ) -> Result(Settings, H2Error) {
   case new {
     [] -> Ok(settings)
     [HeaderTableSize(value), ..rest] ->
-      apply_settings(role, Settings(..settings, header_table_size: value), rest)
+      apply_settings(
+        role,
+        Settings(..settings, header_table_size: value),
+        rest,
+        remote:,
+      )
     [EnablePush(value), ..rest] -> {
       case value {
         0 ->
-          apply_settings(role, Settings(..settings, enable_push: False), rest)
+          apply_settings(
+            role,
+            Settings(..settings, enable_push: False),
+            rest,
+            remote:,
+          )
         1 -> {
-          case role {
-            Server ->
+          // RFC 9113 Section 6.5.2: "A client MUST treat receipt of a
+          // SETTINGS frame with SETTINGS_ENABLE_PUSH set to 1 as a
+          // connection error of type PROTOCOL_ERROR."
+          // This only applies to received (remote) settings.
+          case remote && role == Client {
+            True -> Error(ConnectionError(ProtocolError))
+            False ->
               apply_settings(
                 role,
                 Settings(..settings, enable_push: True),
                 rest,
+                remote:,
               )
-            // Client should never receive enable_push == 1
-            Client -> Error(ConnectionError(ProtocolError))
           }
         }
         _ -> Error(ConnectionError(ProtocolError))
@@ -193,6 +208,7 @@ fn apply_settings(
         role,
         Settings(..settings, max_concurrent_streams: option.Some(value)),
         rest,
+        remote:,
       )
     [InitialWindowSize(value), ..rest] -> {
       use <- bool.guard(
@@ -203,6 +219,7 @@ fn apply_settings(
         role,
         Settings(..settings, initial_window_size: value),
         rest,
+        remote:,
       )
     }
     [MaxFrameSize(value), ..rest] -> {
@@ -211,13 +228,19 @@ fn apply_settings(
         value > 16_777_215,
         Error(ConnectionError(ProtocolError)),
       )
-      apply_settings(role, Settings(..settings, max_frame_size: value), rest)
+      apply_settings(
+        role,
+        Settings(..settings, max_frame_size: value),
+        rest,
+        remote:,
+      )
     }
     [MaxHeaderListSize(value), ..rest] ->
       apply_settings(
         role,
         Settings(..settings, max_header_list_size: option.Some(value)),
         rest,
+        remote:,
       )
   }
 }
@@ -1790,7 +1813,14 @@ fn parse_loop(
             h2_frame.Settings(ack: False, settings: frame_settings) -> {
               // Apply these settings to the remote settings
               let settings = from_frame_settings(frame_settings)
-              case apply_settings(conn.role, conn.remote_settings, settings) {
+              case
+                apply_settings(
+                  conn.role,
+                  conn.remote_settings,
+                  settings,
+                  remote: True,
+                )
+              {
                 Ok(new_settings) -> {
                   let old_settings = conn.remote_settings
 
@@ -1828,7 +1858,12 @@ fn parse_loop(
               case conn.pending_settings {
                 [settings, ..rest] -> {
                   case
-                    apply_settings(conn.role, conn.local_settings, settings)
+                    apply_settings(
+                      conn.role,
+                      conn.local_settings,
+                      settings,
+                      remote: False,
+                    )
                   {
                     // Apply settings
                     Ok(new_settings) -> {

@@ -2,9 +2,7 @@ import gleam/bit_array
 import gleam/dict
 import gleam/list
 import gleam/option.{None}
-import h2_core.{
-  Client, Connected, Header, Server, WithIndexing, open_stream, send_headers,
-}
+import h2_core.{Client, Header, Server, WithIndexing, open_stream, send_headers}
 import h2_core/internal/stream.{HalfClosedLocal, Open}
 import h2_frame
 import helper
@@ -13,7 +11,7 @@ import helper
 
 // open_stream encodes headers and produces a HEADERS frame
 pub fn open_stream_produces_encoded_frame_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let headers = [
     Header(":method", "GET", WithIndexing),
     Header(":path", "/", WithIndexing),
@@ -27,7 +25,7 @@ pub fn open_stream_produces_encoded_frame_test() {
 
 // open_stream opens a new stream in Open state
 pub fn open_stream_opens_stream_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let headers = helper.request_headers()
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, headers, False)
@@ -37,7 +35,7 @@ pub fn open_stream_opens_stream_test() {
 
 // open_stream increments next_stream_id by 2
 pub fn open_stream_increments_stream_id_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let headers = helper.request_headers()
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, headers, False)
@@ -49,7 +47,7 @@ pub fn open_stream_increments_stream_id_test() {
 
 // Server uses even stream IDs
 pub fn open_stream_server_uses_even_stream_ids_test() {
-  let conn = helper.new_connection(Server, Connected)
+  let conn = helper.connected_connection(Server)
   let headers = [Header(":status", "200", WithIndexing)]
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, headers, False)
@@ -59,7 +57,7 @@ pub fn open_stream_server_uses_even_stream_ids_test() {
 
 // RFC 9113 Section 6.2 - END_STREAM flag transitions stream to half-closed (local)
 pub fn open_stream_with_end_stream_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let headers = helper.request_headers()
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, headers, True)
@@ -69,7 +67,7 @@ pub fn open_stream_with_end_stream_test() {
 
 // The encoded frame can be parsed back by h2_frame
 pub fn open_stream_produces_parseable_frame_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let headers = helper.request_headers()
   let assert Ok(#(_conn, to_send, _stream_id)) =
     open_stream(conn, headers, False)
@@ -88,7 +86,7 @@ pub fn open_stream_produces_parseable_frame_test() {
 
 // END_STREAM is reflected in the encoded frame
 pub fn open_stream_end_stream_in_frame_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let headers = helper.request_headers()
   let assert Ok(#(_conn, to_send, _stream_id)) =
     open_stream(conn, headers, True)
@@ -105,7 +103,7 @@ pub fn open_stream_end_stream_in_frame_test() {
 
 // HPACK encoder state is updated after sending headers
 pub fn open_stream_updates_hpack_encoder_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let headers =
     list.append(helper.request_headers(), [
       Header("custom-header", "custom-value", WithIndexing),
@@ -125,13 +123,13 @@ pub fn open_stream_updates_hpack_encoder_test() {
 //
 // Sending headers with empty list is missing mandatory pseudo-headers.
 pub fn open_stream_empty_headers_is_error_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Error(_) = open_stream(conn, [], False)
 }
 
 // RFC 9113 Section 8.3.1 - Missing :scheme is malformed.
 pub fn open_stream_missing_scheme_is_error_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Error(_) =
     open_stream(
       conn,
@@ -145,7 +143,7 @@ pub fn open_stream_missing_scheme_is_error_test() {
 
 // RFC 9113 Section 8.3.1 - Missing :path is malformed.
 pub fn open_stream_missing_path_is_error_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Error(_) =
     open_stream(
       conn,
@@ -159,7 +157,7 @@ pub fn open_stream_missing_path_is_error_test() {
 
 // RFC 9113 Section 8.3.1 - Missing :method is malformed.
 pub fn open_stream_missing_method_is_error_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Error(_) =
     open_stream(
       conn,
@@ -174,7 +172,7 @@ pub fn open_stream_missing_method_is_error_test() {
 // RFC 9113 Section 8.3 - "All pseudo-header fields MUST appear in a
 // field block before all regular field lines."
 pub fn open_stream_pseudo_after_regular_is_error_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Error(_) =
     open_stream(
       conn,
@@ -191,7 +189,7 @@ pub fn open_stream_pseudo_after_regular_is_error_test() {
 // RFC 9113 Section 8.3 - "The same pseudo-header field name MUST NOT
 // appear more than once in a field block."
 pub fn open_stream_duplicate_pseudo_is_error_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Error(_) =
     open_stream(
       conn,
@@ -208,7 +206,7 @@ pub fn open_stream_duplicate_pseudo_is_error_test() {
 // RFC 9113 Section 8.2.2 - "Any message containing connection-specific
 // header fields MUST be treated as malformed."
 pub fn open_stream_with_connection_header_is_error_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Error(_) =
     open_stream(
       conn,
@@ -224,7 +222,7 @@ pub fn open_stream_with_connection_header_is_error_test() {
 
 // RFC 9113 Section 8.2.2 - TE header must only have value "trailers".
 pub fn open_stream_with_te_non_trailers_is_error_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Error(_) =
     open_stream(
       conn,
@@ -240,7 +238,7 @@ pub fn open_stream_with_te_non_trailers_is_error_test() {
 
 // Valid headers should succeed.
 pub fn open_stream_with_valid_headers_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, helper.request_headers(), False)
   let assert Ok(stream) = dict.get(conn.streams, 1)
@@ -249,8 +247,8 @@ pub fn open_stream_with_valid_headers_test() {
 
 // RFC 9113 Section 8.3.2 - Server responses must include :status.
 pub fn send_headers_response_missing_status_is_error_test() {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) =
@@ -267,8 +265,8 @@ pub fn send_headers_response_missing_status_is_error_test() {
 
 // Valid server response should succeed.
 pub fn send_headers_response_with_status_test() {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) =

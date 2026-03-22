@@ -2,9 +2,9 @@ import gleam/bit_array
 import gleam/dict
 import gleam/list
 import h2_core.{
-  Client, CompressionError, Connected, Connection, ConnectionError, Header,
-  HeadersReceived, ProtocolError, Server, Settings, StreamClosed, StreamReset,
-  WithIndexing, open_stream, receive_data,
+  Client, CompressionError, Connection, ConnectionError, Header, HeadersReceived,
+  ProtocolError, Server, Settings, StreamClosed, StreamReset, WithIndexing,
+  open_stream, receive_data,
 }
 import h2_core/internal/stream.{Closed, HalfClosedLocal, HalfClosedRemote, Open}
 import h2_frame
@@ -17,7 +17,7 @@ import helper
 // The implementation should use remote_settings.max_frame_size
 // to decide when to split.
 fn connection_with_small_frame_size(role: h2_core.Role) -> h2_core.Connection {
-  let conn = helper.new_connection(role, Connected)
+  let conn = helper.connected_connection(role)
   let settings =
     Settings(
       ..conn.remote_settings,
@@ -169,7 +169,7 @@ pub fn open_stream_continuation_round_trip_test() {
   assert list.length(frames) > 1
 
   // Feed the entire output to a server and verify headers decode correctly
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, to_send)
   let assert [
     HeadersReceived(stream_id: 1, headers: recv_headers, end_stream: False),
@@ -252,7 +252,7 @@ pub fn receive_non_continuation_during_header_block_is_protocol_error_test() {
   let assert Ok(ping) = h2_frame.encode_ping(ack: False, data: <<1:64>>)
   let bad_data = <<headers_only:bits, ping:bits>>
 
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Error(ConnectionError(ProtocolError)) =
     receive_data(server, bad_data)
 }
@@ -276,7 +276,7 @@ pub fn receive_settings_during_header_block_is_protocol_error_test() {
   let assert Ok(settings) = h2_frame.encode_settings(ack: False, settings: [])
   let bad_data = <<headers_only:bits, settings:bits>>
 
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Error(ConnectionError(ProtocolError)) =
     receive_data(server, bad_data)
 }
@@ -312,7 +312,7 @@ pub fn receive_extension_frame_during_header_block_is_protocol_error_test() {
   >>
   let bad_data = <<headers_only:bits, unknown_frame:bits>>
 
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Error(ConnectionError(ProtocolError)) =
     receive_data(server, bad_data)
 }
@@ -341,14 +341,14 @@ pub fn receive_continuation_wrong_stream_is_protocol_error_test() {
     )
   let bad_data = <<headers_only:bits, wrong_cont:bits>>
 
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Error(ConnectionError(ProtocolError)) =
     receive_data(server, bad_data)
 }
 
 // Receiving CONTINUATION when no header block is pending is PROTOCOL_ERROR
 pub fn receive_unexpected_continuation_is_protocol_error_test() {
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Ok(cont) =
     h2_frame.encode_continuation(
       stream_id: 1,
@@ -373,7 +373,7 @@ pub fn receive_continuation_across_calls_test() {
     bit_array.byte_size(to_send) - bit_array.byte_size(rest)
   let assert Ok(headers_only) = bit_array.slice(to_send, 0, headers_frame_size)
 
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   // First call: only the HEADERS frame (no events yet, block incomplete)
   let assert Ok(#(server, events1, _to_send)) =
     receive_data(server, headers_only)
@@ -390,7 +390,7 @@ pub fn receive_continuation_across_calls_test() {
 // Header block split across 3+ frames (HEADERS + multiple CONTINUATIONs)
 pub fn receive_multiple_continuation_frames_test() {
   // Use an even smaller frame size to force more splits
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let settings = Settings(..conn.remote_settings, max_frame_size: 16)
   let conn = Connection(..conn, remote_settings: settings)
   let headers = large_headers()
@@ -402,7 +402,7 @@ pub fn receive_multiple_continuation_frames_test() {
   assert list.length(frames) >= 3
 
   // Server should decode them all correctly
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, to_send)
   let assert [
     HeadersReceived(stream_id: 1, headers: recv_headers, end_stream: False),
@@ -420,7 +420,7 @@ pub fn receive_continuation_clears_pending_state_test() {
   let frames = helper.parse_all_frames(to_send, [])
   assert list.length(frames) > 1
 
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, to_send)
 
   // A normal single-frame HEADERS on a new stream must work after reassembly
@@ -450,7 +450,7 @@ pub fn receive_continuation_preserves_end_stream_test() {
   let frames = helper.parse_all_frames(to_send, [])
   assert list.length(frames) > 1
 
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Ok(#(server, events, _to_send)) = receive_data(server, to_send)
   let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: True)] =
     events
@@ -470,7 +470,7 @@ pub fn receive_continuation_preserves_header_order_test() {
   let frames = helper.parse_all_frames(to_send, [])
   assert list.length(frames) > 1
 
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, to_send)
   let assert [
     HeadersReceived(stream_id: 1, headers: recv_headers, end_stream: False),
@@ -512,14 +512,14 @@ pub fn receive_continuation_invalid_hpack_is_compression_error_test() {
     )
   let bad_data = <<headers_only:bits, bad_cont:bits>>
 
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Error(ConnectionError(CompressionError)) =
     receive_data(server, bad_data)
 }
 
 // RFC 9113 Section 6.10 - CONTINUATION on stream 0 is PROTOCOL_ERROR
 pub fn receive_continuation_on_stream_zero_is_protocol_error_test() {
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   // Manually craft: Length=0, Type=0x09, Flags=0x04 (END_HEADERS), Stream ID=0
   let bad_cont = <<
     0:size(24),
@@ -556,7 +556,7 @@ pub fn receive_continuation_on_open_stream_is_valid_test() {
   assert list.length(frames) > 1
   let patched = helper.patch_all_frames_stream_id(encoded2, 1)
 
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == Open
@@ -587,7 +587,7 @@ pub fn receive_continuation_on_half_closed_local_is_valid_test() {
   assert list.length(frames) > 1
   let patched = helper.patch_all_frames_stream_id(encoded2, 1)
 
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
   // Simulate server having sent END_STREAM
   let server = helper.set_stream_state(server, 1, HalfClosedLocal)
@@ -623,7 +623,7 @@ pub fn receive_continuation_on_closed_stream_is_discarded_test() {
   assert list.length(frames) > 1
   let patched = helper.patch_all_frames_stream_id(encoded2, 1)
 
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, rst)
   let assert Ok(stream) = dict.get(server.streams, 1)
@@ -677,7 +677,7 @@ pub fn receive_continuation_rejected_preserves_hpack_state_test() {
   // Patch all frames in block 2 to target stream 1
   let patched2 = helper.patch_all_frames_stream_id(encoded2, 1)
 
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   // Receive block 1 — stream 1 becomes HalfClosedRemote
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
   let assert Ok(stream) = dict.get(server.streams, 1)

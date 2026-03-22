@@ -1,8 +1,7 @@
 import gleam/dict
 import gleeunit
 import h2_core.{
-  Client, Connected, Server, default_settings, new_connection, open_stream,
-  receive_data,
+  Client, Server, default_settings, new_connection, open_stream, receive_data,
 }
 import h2_core/internal/stream.{Idle, Open}
 import helper
@@ -50,7 +49,7 @@ pub fn server_next_stream_id_starts_at_2_test() {
 
 // RFC 9113 Section 5.1 - send HEADERS transitions idle -> open
 pub fn open_stream_opens_stream_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, helper.request_headers(), False)
   let assert Ok(stream) = dict.get(conn.streams, 1)
@@ -58,14 +57,14 @@ pub fn open_stream_opens_stream_test() {
 }
 
 pub fn open_stream_increments_stream_id_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, helper.request_headers(), False)
   assert conn.next_stream_id == 3
 }
 
 pub fn open_stream_returns_no_events_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Ok(#(_conn, _to_send, _stream_id)) =
     open_stream(conn, helper.request_headers(), False)
 }
@@ -78,14 +77,14 @@ pub fn new_connection_has_empty_recv_buffer_test() {
 
 // receive_data
 pub fn receive_empty_data_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Ok(#(_conn, events, to_send)) = receive_data(conn, <<>>)
   assert events == []
   assert to_send == <<>>
 }
 
 pub fn receive_partial_frame_buffers_data_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   // A partial frame header: length=5, then 2 bytes of the remaining 6 header bytes.
   // Not enough for a complete 9-byte header, so this should buffer.
   let partial = <<0, 0, 5, 0x06, 0>>
@@ -96,7 +95,7 @@ pub fn receive_partial_frame_buffers_data_test() {
 }
 
 pub fn receive_partial_frame_appends_to_buffer_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   // First chunk: length=5, partial header
   let chunk1 = <<0, 0, 5, 0x06>>
   let assert Ok(#(conn, _events, _to_send)) = receive_data(conn, chunk1)
@@ -116,7 +115,7 @@ pub fn receive_partial_frame_appends_to_buffer_test() {
 // An unknown frame type should not cause an error; the connection
 // should continue processing subsequent frames normally.
 pub fn receive_unknown_frame_type_is_ignored_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   // Craft a frame with unknown type 0xFF
   // Length=5, Type=0xFF, Flags=0, Stream ID=0, Payload=5 bytes
   let unknown_frame = <<
@@ -138,8 +137,8 @@ pub fn receive_unknown_frame_type_is_ignored_test() {
 
 // Unknown frame types on a stream should also be ignored.
 pub fn receive_unknown_frame_type_on_stream_is_ignored_test() {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
@@ -170,7 +169,7 @@ pub fn receive_unknown_frame_type_on_stream_is_ignored_test() {
 //
 // A frame with the reserved bit set should be processed normally.
 pub fn receive_frame_with_reserved_bit_set_is_accepted_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   // Craft a valid PING frame but with the reserved bit set to 1
   // Length=8, Type=0x06, Flags=0, Reserved=1, Stream ID=0
   let ping_with_reserved_bit = <<

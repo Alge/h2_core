@@ -1,9 +1,9 @@
 import gleam/dict
 import gleam/option.{None}
 import h2_core.{
-  type Connection, Cancel, Client, Connected, ConnectionError, Header,
-  ProtocolError, PushPromiseReceived, Server, StreamReset, WithIndexing,
-  open_stream, receive_data, send_headers, send_rst_stream,
+  type Connection, Cancel, Client, ConnectionError, Header, ProtocolError,
+  PushPromiseReceived, Server, StreamReset, WithIndexing, open_stream,
+  receive_data, send_headers, send_rst_stream,
 }
 import h2_core/internal/stream.{
   Closed, HalfClosedRemote, ReservedLocal, ReservedRemote,
@@ -43,7 +43,7 @@ pub fn receive_push_promise_from_client_is_protocol_error_test() {
 // =============================================================================
 
 pub fn receive_push_promise_on_stream_zero_is_protocol_error_test() {
-  let client = helper.new_connection(Client, Connected)
+  let client = helper.connected_connection(Client)
   // Manually craft a PUSH_PROMISE on stream 0
   // Type=0x05, Flags=0x04 (END_HEADERS), Stream ID=0, Promised ID=2
   let bad_pp = <<
@@ -106,7 +106,7 @@ pub fn receive_push_promise_when_push_disabled_is_protocol_error_test() {
 // =============================================================================
 
 pub fn receive_push_promise_on_idle_stream_is_protocol_error_test() {
-  let client = helper.new_connection(Client, Connected)
+  let client = helper.connected_connection(Client)
   // Stream 1 was never opened — it's idle
   let assert Ok(pp) =
     h2_frame.encode_push_promise(
@@ -141,8 +141,8 @@ pub fn receive_push_promise_on_open_stream_is_valid_test() {
 }
 
 pub fn receive_push_promise_on_half_closed_local_is_valid_test() {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
   // Client sends headers with END_STREAM — stream 1 is half-closed (local)
   // on the client side
   let assert Ok(#(client, headers, _stream_id)) =
@@ -390,8 +390,8 @@ pub fn send_push_promise_on_open_peer_stream_test() {
 }
 
 pub fn send_push_promise_on_half_closed_remote_test() {
-  let server = helper.new_connection(Server, Connected)
-  let client = helper.new_connection(Client, Connected)
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
   // Client sends headers with END_STREAM
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), True)
@@ -408,7 +408,7 @@ pub fn send_push_promise_on_half_closed_remote_test() {
 // RFC 9113 Section 6.6 - "A sender MUST NOT send a PUSH_PROMISE on a stream
 // unless that stream is either 'open' or 'half-closed (remote)'"
 pub fn send_push_promise_on_idle_stream_is_error_test() {
-  let server = helper.new_connection(Server, Connected)
+  let server = helper.connected_connection(Server)
   let assert Error(_) =
     h2_core.send_push_promise(server, 1, [
       Header(":method", "GET", WithIndexing),
@@ -453,8 +453,8 @@ pub fn send_push_promise_when_peer_disabled_push_is_error_test() {
 // RFC 9113 Section 8.4 - "A client cannot push."
 // Clients should not be able to send PUSH_PROMISE.
 pub fn client_send_push_promise_is_error_test() {
-  let client = helper.new_connection(Client, Connected)
-  let server = helper.new_connection(Server, Connected)
+  let client = helper.connected_connection(Client)
+  let server = helper.connected_connection(Server)
   // Open stream 1 from client
   let assert Ok(#(client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)

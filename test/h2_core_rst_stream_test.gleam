@@ -1,7 +1,7 @@
 import gleam/dict
 import h2_core.{
-  Cancel, Client, Connected, ConnectionError, FrameSizeError, InternalError,
-  ProtocolError, Server, StreamReset, open_stream, receive_data, send_rst_stream,
+  Cancel, Client, ConnectionError, FrameSizeError, InternalError, ProtocolError,
+  Server, StreamReset, open_stream, receive_data, send_rst_stream,
 }
 import h2_core/internal/stream.{Closed, Open}
 import h2_frame
@@ -10,7 +10,7 @@ import helper
 // RFC 9113 Section 6.4 - Sending RST_STREAM
 
 pub fn send_rst_stream_returns_encoded_frame_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, helper.request_headers(), False)
   let assert Ok(#(_conn, to_send)) = send_rst_stream(conn, 1, Cancel)
@@ -20,7 +20,7 @@ pub fn send_rst_stream_returns_encoded_frame_test() {
 }
 
 pub fn send_rst_stream_with_different_error_codes_test() {
-  let conn = helper.new_connection(Server, Connected)
+  let conn = helper.connected_connection(Server)
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, helper.response_headers(), False)
   let assert Ok(#(_conn, to_send)) = send_rst_stream(conn, 2, InternalError)
@@ -31,7 +31,7 @@ pub fn send_rst_stream_with_different_error_codes_test() {
 
 // RFC 9113 Section 6.4 - RST_STREAM on stream 0 is PROTOCOL_ERROR
 pub fn send_rst_stream_on_stream_zero_is_error_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Error(ConnectionError(ProtocolError)) =
     send_rst_stream(conn, 0, Cancel)
 }
@@ -39,7 +39,7 @@ pub fn send_rst_stream_on_stream_zero_is_error_test() {
 // RFC 9113 Section 5.1 - "Either endpoint can send a RST_STREAM frame
 // from this state, causing it to transition immediately to 'closed'."
 pub fn send_rst_stream_transitions_to_closed_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, helper.request_headers(), False)
   let assert Ok(stream) = dict.get(conn.streams, 1)
@@ -51,7 +51,7 @@ pub fn send_rst_stream_transitions_to_closed_test() {
 
 // RFC 9113 Section 6.4 - RST_STREAM MUST NOT be sent for idle stream
 pub fn send_rst_stream_on_idle_stream_is_error_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   // Stream 1 was never opened, so it's idle
   let assert Error(ConnectionError(ProtocolError)) =
     send_rst_stream(conn, 1, Cancel)
@@ -60,7 +60,7 @@ pub fn send_rst_stream_on_idle_stream_is_error_test() {
 // RFC 9113 Section 6.4 - Receiving RST_STREAM
 
 pub fn receive_rst_stream_emits_event_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   // Open a stream first so it's not idle
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, helper.request_headers(), False)
@@ -72,7 +72,7 @@ pub fn receive_rst_stream_emits_event_test() {
 }
 
 pub fn receive_rst_stream_with_internal_error_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, helper.request_headers(), False)
   let assert Ok(rst) =
@@ -86,7 +86,7 @@ pub fn receive_rst_stream_with_internal_error_test() {
 
 // RFC 9113 Section 6.4 - RST_STREAM transitions stream to closed
 pub fn receive_rst_stream_closes_stream_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, helper.request_headers(), False)
   let assert Ok(stream) = dict.get(conn.streams, 1)
@@ -100,7 +100,7 @@ pub fn receive_rst_stream_closes_stream_test() {
 
 // RFC 9113 Section 6.4 - RST_STREAM on stream 0 is PROTOCOL_ERROR
 pub fn receive_rst_stream_on_stream_zero_is_protocol_error_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   // Manually craft RST_STREAM on stream 0
   // Length=4, Type=0x03, Flags=0, Stream ID=0, Error Code=0 (NoError)
   let bad_rst = <<
@@ -116,7 +116,7 @@ pub fn receive_rst_stream_on_stream_zero_is_protocol_error_test() {
 
 // RFC 9113 Section 6.4 - RST_STREAM on idle stream is PROTOCOL_ERROR
 pub fn receive_rst_stream_on_idle_stream_is_protocol_error_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   // Stream 1 has never been opened, so it's idle
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
@@ -125,7 +125,7 @@ pub fn receive_rst_stream_on_idle_stream_is_protocol_error_test() {
 
 // RFC 9113 Section 6.4 - Wrong frame size is FRAME_SIZE_ERROR
 pub fn receive_rst_stream_wrong_length_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   // Manually craft RST_STREAM with 3 bytes payload instead of 4
   // Length=3, Type=0x03, Flags=0, Stream ID=1
   let bad_rst = <<
@@ -144,7 +144,7 @@ pub fn receive_rst_stream_wrong_length_test() {
 
 // Receiving multiple frames in one receive_data call continues parsing
 pub fn receive_rst_stream_continues_parse_loop_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   // Open two streams
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, helper.request_headers(), False)
@@ -170,7 +170,7 @@ pub fn receive_rst_stream_continues_parse_loop_test() {
 
 // RST_STREAM does not send any response frame
 pub fn receive_rst_stream_no_response_test() {
-  let conn = helper.new_connection(Client, Connected)
+  let conn = helper.connected_connection(Client)
   let assert Ok(#(conn, _to_send, _stream_id)) =
     open_stream(conn, helper.request_headers(), False)
   let assert Ok(rst) =
