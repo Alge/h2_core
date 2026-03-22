@@ -253,6 +253,7 @@ pub type ConnectionState {
   AwaitingPreface
   AwaitingSettings
   Connected
+  Draining
 }
 
 pub type PendingHeaderBlock {
@@ -904,6 +905,12 @@ pub fn open_stream(
   headers: List(Header),
   end_stream: Bool,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
+  // Not allowed to open streams while in Draining state (we have received a GOAWAY)
+  use <- bool.guard(
+    conn.state == Draining,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
   let stream = new_stream()
   let #(conn, stream_id) = add_stream(conn, stream)
 
@@ -1638,7 +1645,7 @@ fn parse_loop(
             // Goaway
             h2_frame.Goaway(last_stream_id, error_code, debug_data) -> {
               parse_loop(
-                conn,
+                Connection(..conn, state: Draining),
                 [
                   GoawayReceived(
                     last_stream_id: last_stream_id,

@@ -2,6 +2,7 @@ import gleam/list
 import h2_core.{
   Client, Connected, Connection, ConnectionError, GoawayReceived, Header,
   HeadersReceived, Server, WithIndexing, open_stream, receive_data, send_goaway,
+  send_headers,
 }
 import h2_frame
 import helper
@@ -230,6 +231,41 @@ pub fn receive_goaway_prevents_opening_new_streams_test() {
   // Attempt to open a new stream — must be rejected
   let assert Error(_) =
     open_stream(client, helper.request_headers(), False)
+}
+
+// RFC 9113 Section 6.8 - "Activity on streams numbered lower than or
+// equal to the last stream identifier might still complete successfully."
+//
+// After receiving GOAWAY, existing streams should still work.
+pub fn receive_goaway_existing_streams_still_work_test() {
+  let #(_server, client) = helper.server_with_open_stream()
+
+  // Receive GOAWAY from server (as client)
+  let goaway =
+    h2_frame.encode_goaway(
+      last_stream_id: 1,
+      error_code: h2_frame.NoError,
+      debug_data: <<>>,
+    )
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, goaway)
+
+  // Client can still send trailers on stream 1
+  let assert Ok(#(_client, _events, _to_send)) =
+    send_headers(client, 1, [Header("x-trailer", "done", WithIndexing)], True)
+}
+
+// RFC 9113 Section 6.8 - After receiving GOAWAY, the server should not
+// be able to send PUSH_PROMISE (which opens new streams).
+pub fn receive_goaway_prevents_push_promise_test() {
+  let #(server, _client) = helper.server_with_open_stream()
+
+  // Server sends GOAWAY
+  let assert Ok(#(server, _events, _to_send)) =
+    send_goaway(server, h2_frame.NoError, <<>>)
+
+  // Server tries to push — must be rejected (no new streams)
+  let assert Error(_) =
+    h2_core.send_push_promise(server, 1, helper.request_headers())
 }
 
 // RFC 9113 Section 6.8 - "Endpoints MUST NOT increase the value they
