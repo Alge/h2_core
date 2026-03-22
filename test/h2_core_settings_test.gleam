@@ -2,8 +2,7 @@ import gleam/dict
 import gleam/option.{None, Some}
 import h2_core.{
   Client, Connected, ConnectionError, RemoteSettingsChanged, Server,
-  SettingsAcknowledged, Stream, open_stream, receive_data,
-  send_settings,
+  SettingsAcknowledged, Stream, open_stream, receive_data, send_settings,
 }
 import h2_frame
 import helper

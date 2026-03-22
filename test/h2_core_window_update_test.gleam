@@ -46,8 +46,7 @@ pub fn send_window_update_stream_level_test() {
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
-  let assert Ok(#(_server, to_send)) =
-    send_window_update(server, 1, 32_768)
+  let assert Ok(#(_server, to_send)) = send_window_update(server, 1, 32_768)
   let assert Ok(expected) =
     h2_frame.encode_window_update(stream_id: 1, window_size_increment: 32_768)
   assert to_send == expected
@@ -58,8 +57,7 @@ pub fn send_window_update_stream_level_test() {
 pub fn send_window_update_max_increment_test() {
   let conn = helper.new_connection(Client, Connected)
   let max_increment = 2_147_483_647 - 65_535
-  let assert Ok(#(conn, to_send)) =
-    send_window_update(conn, 0, max_increment)
+  let assert Ok(#(conn, to_send)) = send_window_update(conn, 0, max_increment)
   assert conn.recv_window_size == 2_147_483_647
   let assert Ok(expected) =
     h2_frame.encode_window_update(
@@ -82,8 +80,7 @@ pub fn send_window_update_min_increment_test() {
 pub fn send_window_update_increases_recv_window_test() {
   let conn = helper.new_connection(Client, Connected)
   assert conn.recv_window_size == 65_535
-  let assert Ok(#(conn, _to_send)) =
-    send_window_update(conn, 0, 10_000)
+  let assert Ok(#(conn, _to_send)) = send_window_update(conn, 0, 10_000)
   assert conn.recv_window_size == 75_535
 }
 
@@ -111,8 +108,7 @@ pub fn send_window_update_stream_does_not_affect_connection_test() {
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
-  let assert Ok(#(server, _to_send)) =
-    send_window_update(server, 1, 10_000)
+  let assert Ok(#(server, _to_send)) = send_window_update(server, 1, 10_000)
   assert server.recv_window_size == 65_535
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.recv_window_size == 75_535
@@ -126,10 +122,8 @@ pub fn send_window_update_stream_recv_window_accumulates_test() {
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
-  let assert Ok(#(server, _to_send)) =
-    send_window_update(server, 1, 1000)
-  let assert Ok(#(server, _to_send)) =
-    send_window_update(server, 1, 2000)
+  let assert Ok(#(server, _to_send)) = send_window_update(server, 1, 1000)
+  let assert Ok(#(server, _to_send)) = send_window_update(server, 1, 2000)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.recv_window_size == 68_535
 }
@@ -450,7 +444,15 @@ pub fn receive_window_update_connection_survives_stream_overflow_test() {
 
   // Connection should still work — open stream 3
   let assert Ok(#(_client, headers3)) =
-    open_stream(client, [Header(":method", "POST", WithIndexing), Header(":scheme", "https", WithIndexing), Header(":path", "/", WithIndexing)], False)
+    open_stream(
+      client,
+      [
+        Header(":method", "POST", WithIndexing),
+        Header(":scheme", "https", WithIndexing),
+        Header(":path", "/", WithIndexing),
+      ],
+      False,
+    )
   let assert Ok(#(server, events, _to_send)) = receive_data(server, headers3)
   let assert [HeadersReceived(stream_id: 3, headers: _, end_stream: False)] =
     events

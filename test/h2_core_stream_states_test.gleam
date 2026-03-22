@@ -1,9 +1,9 @@
 import gleam/dict
 import gleam/option.{None}
 import h2_core.{
-  type Connection, Closed, HalfClosedRemote, Header,
-  ReservedLocal, ReservedRemote, StreamReset, WithIndexing,
-  receive_data, send_headers, send_rst_stream,
+  type Connection, Closed, HalfClosedRemote, Header, ReservedLocal,
+  ReservedRemote, StreamReset, WithIndexing, receive_data, send_headers,
+  send_rst_stream,
 }
 import h2_frame
 import helper
@@ -46,11 +46,7 @@ fn server_with_reserved_local_stream() -> Connection {
   let server =
     h2_core.Connection(
       ..server,
-      streams: dict.insert(
-        server.streams,
-        2,
-        helper.new_stream(ReservedLocal),
-      ),
+      streams: dict.insert(server.streams, 2, helper.new_stream(ReservedLocal)),
     )
   server
 }
@@ -146,12 +142,8 @@ pub fn receive_headers_on_reserved_local_is_protocol_error_test() {
   // Length=3, Type=0x01, Flags=0x04 (END_HEADERS), Stream ID=2
   // HPACK: 0x82 = :method GET, 0x87 = :scheme https, 0x84 = :path /
   let bad_headers = <<
-    3:size(24),
-    0x01:size(8),
-    0x04:size(8),
-    0:size(1),
-    2:size(31),
-    0x82, 0x87, 0x84,
+    3:size(24), 0x01:size(8), 0x04:size(8), 0:size(1), 2:size(31), 0x82, 0x87,
+    0x84,
   >>
   let assert Error(h2_core.ConnectionError(h2_frame.ProtocolError)) =
     receive_data(server, bad_headers)
@@ -368,8 +360,7 @@ pub fn send_window_update_on_closed_stream_is_error_test() {
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == Closed
 
-  let assert Error(_) =
-    h2_core.send_window_update(server, 1, 1024)
+  let assert Error(_) = h2_core.send_window_update(server, 1, 1024)
 }
 
 // =============================================================================

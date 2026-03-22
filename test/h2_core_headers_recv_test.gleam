@@ -37,8 +37,7 @@ pub fn receive_headers_emits_event_test() {
 pub fn receive_headers_opens_stream_test() {
   let client = helper.new_connection(Client, Connected)
   let headers = helper.request_headers()
-  let assert Ok(#(_client, encoded)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(_client, encoded)) = open_stream(client, headers, False)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded)
@@ -50,8 +49,7 @@ pub fn receive_headers_opens_stream_test() {
 pub fn receive_headers_end_stream_test() {
   let client = helper.new_connection(Client, Connected)
   let headers = helper.request_headers()
-  let assert Ok(#(_client, encoded)) =
-    open_stream(client, headers, True)
+  let assert Ok(#(_client, encoded)) = open_stream(client, headers, True)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, events, _to_send)) = receive_data(server, encoded)
@@ -64,12 +62,12 @@ pub fn receive_headers_end_stream_test() {
 // Receiving HEADERS updates the HPACK decoder state
 pub fn receive_headers_updates_hpack_decoder_test() {
   let client = helper.new_connection(Client, Connected)
-  let headers = list.append(helper.request_headers(), [
-    Header("custom-header", "custom-value", WithIndexing),
-  ])
+  let headers =
+    list.append(helper.request_headers(), [
+      Header("custom-header", "custom-value", WithIndexing),
+    ])
   // Send headers twice from the same client (HPACK state accumulates)
-  let assert Ok(#(client, first_encoded)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(client, first_encoded)) = open_stream(client, headers, False)
   let assert Ok(#(_client, second_encoded)) =
     open_stream(client, headers, False)
 
@@ -101,11 +99,11 @@ pub fn receive_headers_updates_hpack_decoder_test() {
 // The second encoded frame should be smaller due to HPACK dynamic table
 pub fn receive_headers_hpack_compression_works_test() {
   let client = helper.new_connection(Client, Connected)
-  let headers = list.append(helper.request_headers(), [
-    Header("custom-header", "custom-value", WithIndexing),
-  ])
-  let assert Ok(#(client, first_encoded)) =
-    open_stream(client, headers, False)
+  let headers =
+    list.append(helper.request_headers(), [
+      Header("custom-header", "custom-value", WithIndexing),
+    ])
+  let assert Ok(#(client, first_encoded)) = open_stream(client, headers, False)
   let assert Ok(#(_client, second_encoded)) =
     open_stream(client, headers, False)
 
@@ -149,8 +147,7 @@ pub fn receive_headers_on_stream_zero_is_protocol_error_test() {
 pub fn receive_headers_no_response_test() {
   let client = helper.new_connection(Client, Connected)
   let headers = helper.request_headers()
-  let assert Ok(#(_client, encoded)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(_client, encoded)) = open_stream(client, headers, False)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(_server, _events, to_send)) = receive_data(server, encoded)
@@ -163,12 +160,19 @@ pub fn receive_headers_no_response_test() {
 pub fn receive_headers_empty_block_is_malformed_test() {
   // Manually craft HEADERS with empty field block to bypass outbound validation
   // Length=0, Type=0x01, Flags=0x04 (END_HEADERS), Stream ID=1
-  let encoded = <<0:size(24), 0x01:size(8), 0x04:size(8), 0:size(1), 1:size(31)>>
+  let encoded = <<
+    0:size(24),
+    0x01:size(8),
+    0x04:size(8),
+    0:size(1),
+    1:size(31),
+  >>
 
   let server = helper.new_connection(Server, Connected)
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_server, events, to_send)) = receive_data(server, encoded)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -179,7 +183,11 @@ pub fn receive_multiple_headers_creates_streams_test() {
   let client = helper.new_connection(Client, Connected)
   let h1 = helper.request_headers()
   let assert Ok(#(client, encoded1)) = open_stream(client, h1, False)
-  let h2 = [Header(":method", "POST", WithIndexing), Header(":scheme", "https", WithIndexing), Header(":path", "/", WithIndexing)]
+  let h2 = [
+    Header(":method", "POST", WithIndexing),
+    Header(":scheme", "https", WithIndexing),
+    Header(":path", "/", WithIndexing),
+  ]
   let assert Ok(#(_client, encoded2)) = open_stream(client, h2, False)
 
   let server = helper.new_connection(Server, Connected)
@@ -202,7 +210,11 @@ pub fn receive_multiple_headers_in_one_call_test() {
   let client = helper.new_connection(Client, Connected)
   let h1 = helper.request_headers()
   let assert Ok(#(client, encoded1)) = open_stream(client, h1, False)
-  let h2 = [Header(":method", "POST", WithIndexing), Header(":scheme", "https", WithIndexing), Header(":path", "/", WithIndexing)]
+  let h2 = [
+    Header(":method", "POST", WithIndexing),
+    Header(":scheme", "https", WithIndexing),
+    Header(":path", "/", WithIndexing),
+  ]
   let assert Ok(#(_client, encoded2)) = open_stream(client, h2, False)
 
   let server = helper.new_connection(Server, Connected)
@@ -224,10 +236,8 @@ pub fn receive_multiple_headers_in_one_call_test() {
 pub fn receive_headers_updates_last_remote_stream_id_test() {
   let client = helper.new_connection(Client, Connected)
   let headers = helper.request_headers()
-  let assert Ok(#(client, encoded1)) =
-    open_stream(client, headers, False)
-  let assert Ok(#(_client, encoded2)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(client, encoded1)) = open_stream(client, headers, False)
+  let assert Ok(#(_client, encoded2)) = open_stream(client, headers, False)
 
   let server = helper.new_connection(Server, Connected)
   assert server.last_remote_stream_id == 0
@@ -244,10 +254,8 @@ pub fn receive_headers_decreasing_stream_id_is_protocol_error_test() {
   let client = helper.new_connection(Client, Connected)
   let headers = helper.request_headers()
   // Open streams 1 and 3
-  let assert Ok(#(client, encoded1)) =
-    open_stream(client, headers, False)
-  let assert Ok(#(_client, encoded3)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(client, encoded1)) = open_stream(client, headers, False)
+  let assert Ok(#(_client, encoded3)) = open_stream(client, headers, False)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
@@ -268,11 +276,16 @@ pub fn receive_headers_decreasing_stream_id_is_protocol_error_test() {
 pub fn receive_headers_on_open_stream_is_valid_test() {
   let client = helper.new_connection(Client, Connected)
   let headers = helper.request_headers()
-  let assert Ok(#(client, encoded1)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(client, encoded1)) = open_stream(client, headers, False)
   // Produce a second HEADERS for stream 3, then patch to stream 1
   let assert Ok(#(_client, encoded2)) =
-    open_stream(client, list.append(helper.request_headers(), [Header("x-trailer", "value", WithIndexing)]), False)
+    open_stream(
+      client,
+      list.append(helper.request_headers(), [
+        Header("x-trailer", "value", WithIndexing),
+      ]),
+      False,
+    )
   let patched = helper.patch_stream_id(encoded2, 1)
 
   let server = helper.new_connection(Server, Connected)
@@ -297,7 +310,13 @@ pub fn receive_headers_on_half_closed_local_stream_is_valid_test() {
   let assert Ok(#(client, encoded1)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(_client, encoded2)) =
-    open_stream(client, list.append(helper.request_headers(), [Header("x-trailer", "value", WithIndexing)]), False)
+    open_stream(
+      client,
+      list.append(helper.request_headers(), [
+        Header("x-trailer", "value", WithIndexing),
+      ]),
+      False,
+    )
   let patched = helper.patch_stream_id(encoded2, 1)
 
   let server = helper.new_connection(Server, Connected)
@@ -371,16 +390,8 @@ pub fn receive_headers_nonzero_padding_bytes_accepted_by_default_test() {
   // Flags=0x0C (PADDED | END_HEADERS), Stream ID=1
   // HPACK: 0x82 = :method GET, 0x87 = :scheme https, 0x84 = :path /
   let non_zero_padded = <<
-    7:size(24),
-    0x01:size(8),
-    0x0C:size(8),
-    0:size(1),
-    1:size(31),
-    3:size(8),
-    0x82, 0x87, 0x84,
-    0xFF,
-    0xFF,
-    0xFF,
+    7:size(24), 0x01:size(8), 0x0C:size(8), 0:size(1), 1:size(31), 3:size(8),
+    0x82, 0x87, 0x84, 0xFF, 0xFF, 0xFF,
   >>
   let assert Ok(#(_server, events, _to_send)) =
     receive_data(server, non_zero_padded)
@@ -411,11 +422,11 @@ pub fn receive_headers_invalid_hpack_is_compression_error_test() {
 // Receiving HEADERS preserves indexing information from WithoutIndexing headers
 pub fn receive_headers_without_indexing_test() {
   let client = helper.new_connection(Client, Connected)
-  let headers = list.append(helper.request_headers(), [
-    Header("authorization", "Bearer secret", WithoutIndexing),
-  ])
-  let assert Ok(#(_client, encoded)) =
-    open_stream(client, headers, False)
+  let headers =
+    list.append(helper.request_headers(), [
+      Header("authorization", "Bearer secret", WithoutIndexing),
+    ])
+  let assert Ok(#(_client, encoded)) = open_stream(client, headers, False)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, encoded)
@@ -433,11 +444,11 @@ pub fn receive_headers_without_indexing_test() {
 // Receiving HEADERS preserves NeverIndexed headers
 pub fn receive_headers_never_indexed_test() {
   let client = helper.new_connection(Client, Connected)
-  let headers = list.append(helper.request_headers(), [
-    Header("secret-token", "abc123", NeverIndexed),
-  ])
-  let assert Ok(#(_client, encoded)) =
-    open_stream(client, headers, False)
+  let headers =
+    list.append(helper.request_headers(), [
+      Header("secret-token", "abc123", NeverIndexed),
+    ])
+  let assert Ok(#(_client, encoded)) = open_stream(client, headers, False)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, encoded)
@@ -464,14 +475,12 @@ pub fn receive_headers_on_closed_stream_is_discarded_test() {
   let client = helper.new_connection(Client, Connected)
   let headers = helper.request_headers()
   // Open stream 1
-  let assert Ok(#(client, encoded1)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(client, encoded1)) = open_stream(client, headers, False)
   // Encode a RST_STREAM to close stream 1
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
   // Produce a second HEADERS, patch to stream 1
-  let assert Ok(#(_client, encoded2)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(_client, encoded2)) = open_stream(client, headers, False)
   let patched = helper.patch_stream_id(encoded2, 1)
 
   let server = helper.new_connection(Server, Connected)
@@ -503,7 +512,15 @@ pub fn receive_headers_on_half_closed_remote_is_stream_error_test() {
   let assert Ok(#(client, encoded1)) =
     open_stream(client, helper.request_headers(), True)
   let assert Ok(#(_client, encoded2)) =
-    open_stream(client, [Header(":method", "POST", WithIndexing), Header(":scheme", "https", WithIndexing), Header(":path", "/", WithIndexing)], False)
+    open_stream(
+      client,
+      [
+        Header(":method", "POST", WithIndexing),
+        Header(":scheme", "https", WithIndexing),
+        Header(":path", "/", WithIndexing),
+      ],
+      False,
+    )
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
@@ -523,7 +540,15 @@ pub fn receive_headers_on_half_closed_remote_sends_rst_stream_test() {
   let assert Ok(#(client, encoded1)) =
     open_stream(client, helper.request_headers(), True)
   let assert Ok(#(_client, encoded2)) =
-    open_stream(client, [Header(":method", "POST", WithIndexing), Header(":scheme", "https", WithIndexing), Header(":path", "/", WithIndexing)], False)
+    open_stream(
+      client,
+      [
+        Header(":method", "POST", WithIndexing),
+        Header(":scheme", "https", WithIndexing),
+        Header(":path", "/", WithIndexing),
+      ],
+      False,
+    )
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
@@ -542,9 +567,25 @@ pub fn receive_headers_after_stream_error_succeeds_test() {
   let assert Ok(#(client, encoded1)) =
     open_stream(client, helper.request_headers(), True)
   let assert Ok(#(client, encoded2)) =
-    open_stream(client, [Header(":method", "POST", WithIndexing), Header(":scheme", "https", WithIndexing), Header(":path", "/", WithIndexing)], False)
+    open_stream(
+      client,
+      [
+        Header(":method", "POST", WithIndexing),
+        Header(":scheme", "https", WithIndexing),
+        Header(":path", "/", WithIndexing),
+      ],
+      False,
+    )
   let assert Ok(#(_client, encoded3)) =
-    open_stream(client, [Header(":method", "PUT", WithIndexing), Header(":scheme", "https", WithIndexing), Header(":path", "/", WithIndexing)], False)
+    open_stream(
+      client,
+      [
+        Header(":method", "PUT", WithIndexing),
+        Header(":scheme", "https", WithIndexing),
+        Header(":path", "/", WithIndexing),
+      ],
+      False,
+    )
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
@@ -570,11 +611,29 @@ pub fn receive_headers_after_stream_error_succeeds_test() {
 pub fn rejected_headers_must_still_update_hpack_state_test() {
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, encoded1)) =
-    open_stream(client, list.append(helper.request_headers(), [Header("x-custom", "value1", WithIndexing)]), True)
+    open_stream(
+      client,
+      list.append(helper.request_headers(), [
+        Header("x-custom", "value1", WithIndexing),
+      ]),
+      True,
+    )
   let assert Ok(#(client, encoded2)) =
-    open_stream(client, list.append(helper.request_headers(), [Header("x-custom", "value2", WithIndexing)]), False)
+    open_stream(
+      client,
+      list.append(helper.request_headers(), [
+        Header("x-custom", "value2", WithIndexing),
+      ]),
+      False,
+    )
   let assert Ok(#(_client, encoded3)) =
-    open_stream(client, list.append(helper.request_headers(), [Header("x-custom", "value3", WithIndexing)]), False)
+    open_stream(
+      client,
+      list.append(helper.request_headers(), [
+        Header("x-custom", "value3", WithIndexing),
+      ]),
+      False,
+    )
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
@@ -721,9 +780,7 @@ pub fn receive_headers_pseudo_after_regular_is_malformed_test() {
   // HPACK: regular header first, then pseudo-header
   // 0x40 0x05 "x-foo" 0x03 "bar" = literal with indexing: x-foo: bar
   // 0x82 = :method GET (indexed)
-  let bad_hpack = <<
-    0x40, 0x05, "x-foo":utf8, 0x03, "bar":utf8, 0x82,
-  >>
+  let bad_hpack = <<0x40, 0x05, "x-foo":utf8, 0x03, "bar":utf8, 0x82>>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
       stream_id: 1,
@@ -737,7 +794,8 @@ pub fn receive_headers_pseudo_after_regular_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -765,7 +823,8 @@ pub fn receive_headers_duplicate_pseudo_header_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -800,7 +859,8 @@ pub fn receive_trailers_with_pseudo_header_is_malformed_test() {
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, trailer_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -815,8 +875,7 @@ pub fn receive_headers_with_connection_header_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   // HPACK: :method GET, :scheme https, :path /, then "connection: close"
   let bad_hpack = <<
-    0x82, 0x87, 0x84,
-    0x40, 0x0A, "connection":utf8, 0x05, "close":utf8,
+    0x82, 0x87, 0x84, 0x40, 0x0A, "connection":utf8, 0x05, "close":utf8,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -831,7 +890,8 @@ pub fn receive_headers_with_connection_header_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -840,8 +900,7 @@ pub fn receive_headers_with_connection_header_is_malformed_test() {
 pub fn receive_headers_with_transfer_encoding_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   let bad_hpack = <<
-    0x82, 0x87, 0x84,
-    0x40, 0x11, "transfer-encoding":utf8, 0x07, "chunked":utf8,
+    0x82, 0x87, 0x84, 0x40, 0x11, "transfer-encoding":utf8, 0x07, "chunked":utf8,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -856,7 +915,8 @@ pub fn receive_headers_with_transfer_encoding_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -890,7 +950,8 @@ pub fn receive_informational_response_with_end_stream_is_malformed_test() {
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_client, events, to_send)) =
     receive_data(client, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -919,7 +980,8 @@ pub fn receive_request_missing_method_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -942,7 +1004,8 @@ pub fn receive_request_missing_scheme_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -965,7 +1028,8 @@ pub fn receive_request_missing_path_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -985,9 +1049,7 @@ pub fn receive_response_missing_status_is_malformed_test() {
   }
   // Response HEADERS with no :status — just a regular header
   // 0x40 0x0C "content-type" 0x09 "text/html"
-  let bad_hpack = <<
-    0x40, 0x0C, "content-type":utf8, 0x09, "text/html":utf8,
-  >>
+  let bad_hpack = <<0x40, 0x0C, "content-type":utf8, 0x09, "text/html":utf8>>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
       stream_id: 1,
@@ -1000,7 +1062,8 @@ pub fn receive_response_missing_status_is_malformed_test() {
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_client, events, to_send)) =
     receive_data(client, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1021,8 +1084,7 @@ pub fn receive_response_missing_status_is_malformed_test() {
 pub fn receive_headers_with_unrecognized_pseudo_header_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   let bad_hpack = <<
-    0x82, 0x87, 0x84,
-    0x40, 0x08, ":unknown":utf8, 0x03, "foo":utf8,
+    0x82, 0x87, 0x84, 0x40, 0x08, ":unknown":utf8, 0x03, "foo":utf8,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -1037,7 +1099,8 @@ pub fn receive_headers_with_unrecognized_pseudo_header_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1049,8 +1112,7 @@ pub fn receive_headers_with_unrecognized_pseudo_header_is_malformed_test() {
 pub fn receive_headers_with_te_non_trailers_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   let bad_hpack = <<
-    0x82, 0x87, 0x84,
-    0x40, 0x02, "te":utf8, 0x07, "chunked":utf8,
+    0x82, 0x87, 0x84, 0x40, 0x02, "te":utf8, 0x07, "chunked":utf8,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -1065,7 +1127,8 @@ pub fn receive_headers_with_te_non_trailers_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1075,8 +1138,7 @@ pub fn receive_headers_with_te_non_trailers_is_malformed_test() {
 pub fn receive_headers_with_te_trailers_is_accepted_test() {
   let server = helper.new_connection(Server, Connected)
   let valid_hpack = <<
-    0x82, 0x87, 0x84,
-    0x40, 0x02, "te":utf8, 0x08, "trailers":utf8,
+    0x82, 0x87, 0x84, 0x40, 0x02, "te":utf8, 0x08, "trailers":utf8,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -1131,7 +1193,8 @@ pub fn receive_informational_response_after_final_is_malformed_test() {
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_client, events, to_send)) =
     receive_data(client, informational_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1204,7 +1267,8 @@ pub fn receive_request_with_empty_path_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1222,9 +1286,7 @@ pub fn receive_connect_request_with_path_is_malformed_test() {
   // 0x86 = :method CONNECT? No — not in static table. Use literal.
   // Literal with indexing, name index 2 (:method), value "CONNECT"
   let bad_hpack = <<
-    0x42, 0x07, "CONNECT":utf8,
-    0x41, 0x0B, "example.com":utf8,
-    0x84,
+    0x42, 0x07, "CONNECT":utf8, 0x41, 0x0B, "example.com":utf8, 0x84,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -1239,7 +1301,8 @@ pub fn receive_connect_request_with_path_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1251,8 +1314,7 @@ pub fn receive_valid_connect_request_is_accepted_test() {
   let server = helper.new_connection(Server, Connected)
   // HPACK: :method CONNECT, :authority example.com
   let valid_hpack = <<
-    0x42, 0x07, "CONNECT":utf8,
-    0x41, 0x0B, "example.com":utf8,
+    0x42, 0x07, "CONNECT":utf8, 0x41, 0x0B, "example.com":utf8,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -1280,8 +1342,7 @@ pub fn receive_valid_connect_request_is_accepted_test() {
 pub fn receive_headers_uppercase_field_name_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   let bad_hpack = <<
-    0x82, 0x87, 0x84,
-    0x40, 0x07, "X-Upper":utf8, 0x05, "value":utf8,
+    0x82, 0x87, 0x84, 0x40, 0x07, "X-Upper":utf8, 0x05, "value":utf8,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -1295,7 +1356,8 @@ pub fn receive_headers_uppercase_field_name_is_malformed_test() {
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1310,8 +1372,7 @@ pub fn receive_headers_uppercase_field_name_is_malformed_test() {
 pub fn receive_headers_colon_in_field_name_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   let bad_hpack = <<
-    0x82, 0x87, 0x84,
-    0x40, 0x05, "x:bad":utf8, 0x05, "value":utf8,
+    0x82, 0x87, 0x84, 0x40, 0x05, "x:bad":utf8, 0x05, "value":utf8,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -1324,7 +1385,8 @@ pub fn receive_headers_colon_in_field_name_is_malformed_test() {
     )
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1336,8 +1398,8 @@ pub fn receive_headers_colon_in_field_name_is_malformed_test() {
 pub fn receive_headers_field_value_with_nul_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   let bad_hpack = <<
-    0x82, 0x87, 0x84,
-    0x40, 0x05, "x-foo":utf8, 0x07, "bad":utf8, 0x00, "val":utf8,
+    0x82, 0x87, 0x84, 0x40, 0x05, "x-foo":utf8, 0x07, "bad":utf8, 0x00,
+    "val":utf8,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -1350,7 +1412,8 @@ pub fn receive_headers_field_value_with_nul_is_malformed_test() {
     )
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1359,8 +1422,8 @@ pub fn receive_headers_field_value_with_nul_is_malformed_test() {
 pub fn receive_headers_field_value_with_lf_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   let bad_hpack = <<
-    0x82, 0x87, 0x84,
-    0x40, 0x05, "x-foo":utf8, 0x07, "bad":utf8, 0x0a, "val":utf8,
+    0x82, 0x87, 0x84, 0x40, 0x05, "x-foo":utf8, 0x07, "bad":utf8, 0x0a,
+    "val":utf8,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -1373,7 +1436,8 @@ pub fn receive_headers_field_value_with_lf_is_malformed_test() {
     )
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1382,8 +1446,8 @@ pub fn receive_headers_field_value_with_lf_is_malformed_test() {
 pub fn receive_headers_field_value_with_cr_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   let bad_hpack = <<
-    0x82, 0x87, 0x84,
-    0x40, 0x05, "x-foo":utf8, 0x07, "bad":utf8, 0x0d, "val":utf8,
+    0x82, 0x87, 0x84, 0x40, 0x05, "x-foo":utf8, 0x07, "bad":utf8, 0x0d,
+    "val":utf8,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -1396,7 +1460,8 @@ pub fn receive_headers_field_value_with_cr_is_malformed_test() {
     )
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1407,8 +1472,7 @@ pub fn receive_headers_field_value_with_cr_is_malformed_test() {
 pub fn receive_headers_field_value_leading_space_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   let bad_hpack = <<
-    0x82, 0x87, 0x84,
-    0x40, 0x05, "x-foo":utf8, 0x06, " value":utf8,
+    0x82, 0x87, 0x84, 0x40, 0x05, "x-foo":utf8, 0x06, " value":utf8,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -1421,7 +1485,8 @@ pub fn receive_headers_field_value_leading_space_is_malformed_test() {
     )
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1430,8 +1495,7 @@ pub fn receive_headers_field_value_leading_space_is_malformed_test() {
 pub fn receive_headers_field_value_trailing_space_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   let bad_hpack = <<
-    0x82, 0x87, 0x84,
-    0x40, 0x05, "x-foo":utf8, 0x06, "value ":utf8,
+    0x82, 0x87, 0x84, 0x40, 0x05, "x-foo":utf8, 0x06, "value ":utf8,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -1444,7 +1508,8 @@ pub fn receive_headers_field_value_trailing_space_is_malformed_test() {
     )
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1453,8 +1518,7 @@ pub fn receive_headers_field_value_trailing_space_is_malformed_test() {
 pub fn receive_headers_field_value_leading_tab_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   let bad_hpack = <<
-    0x82, 0x87, 0x84,
-    0x40, 0x05, "x-foo":utf8, 0x06, "\tvalue":utf8,
+    0x82, 0x87, 0x84, 0x40, 0x05, "x-foo":utf8, 0x06, "\tvalue":utf8,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -1467,7 +1531,8 @@ pub fn receive_headers_field_value_leading_tab_is_malformed_test() {
     )
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1476,8 +1541,7 @@ pub fn receive_headers_field_value_leading_tab_is_malformed_test() {
 pub fn receive_headers_field_value_trailing_tab_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   let bad_hpack = <<
-    0x82, 0x87, 0x84,
-    0x40, 0x05, "x-foo":utf8, 0x06, "value\t":utf8,
+    0x82, 0x87, 0x84, 0x40, 0x05, "x-foo":utf8, 0x06, "value\t":utf8,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -1490,7 +1554,8 @@ pub fn receive_headers_field_value_trailing_tab_is_malformed_test() {
     )
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst

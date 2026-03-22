@@ -3,9 +3,8 @@ import gleam/option.{None, Some}
 import h2_core.{
   type Connection, Client, Closed, Connected, ConnectionError, DataReceived,
   HalfClosedRemote, Header, HeadersReceived, Open, ReservedLocal, ReservedRemote,
-  Server, Stream,
-  StreamError, StreamReset, WithIndexing, open_stream, receive_data,
-  send_headers,
+  Server, Stream, StreamError, StreamReset, WithIndexing, open_stream,
+  receive_data, send_headers,
 }
 import h2_frame
 import helper
@@ -783,11 +782,7 @@ pub fn send_data_connection_window_smaller_than_stream_window_is_error_test() {
     h2_core.Connection(
       ..server,
       send_window_size: 5,
-      streams: dict.insert(
-        server.streams,
-        1,
-        helper.new_stream(Open),
-      ),
+      streams: dict.insert(server.streams, 1, helper.new_stream(Open)),
     )
   // 13 bytes > 5 byte connection window
   let assert Error(ConnectionError(h2_frame.FlowControlError)) =
@@ -1231,12 +1226,16 @@ pub fn receive_data_exceeding_content_length_is_malformed_test() {
   let client = helper.new_connection(Client, Connected)
   // Client sends request with content-length: 5
   let assert Ok(#(_client, headers)) =
-    open_stream(client, [
-      Header(":method", "POST", WithIndexing),
-      Header(":scheme", "https", WithIndexing),
-      Header(":path", "/", WithIndexing),
-      Header("content-length", "5", WithIndexing),
-    ], False)
+    open_stream(
+      client,
+      [
+        Header(":method", "POST", WithIndexing),
+        Header(":scheme", "https", WithIndexing),
+        Header(":path", "/", WithIndexing),
+        Header("content-length", "5", WithIndexing),
+      ],
+      False,
+    )
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   // Send 10 bytes of data — exceeds content-length of 5
@@ -1251,7 +1250,8 @@ pub fn receive_data_exceeding_content_length_is_malformed_test() {
   // Data is discarded so a WINDOW_UPDATE is also sent to reclaim the
   // connection flow-control window.
   let assert Ok(#(_server, events, to_send)) = receive_data(server, data_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   let assert Ok(expected_wu) =
@@ -1266,12 +1266,16 @@ pub fn receive_data_less_than_content_length_with_end_stream_is_malformed_test()
   let client = helper.new_connection(Client, Connected)
   // Client sends request with content-length: 10
   let assert Ok(#(_client, headers)) =
-    open_stream(client, [
-      Header(":method", "POST", WithIndexing),
-      Header(":scheme", "https", WithIndexing),
-      Header(":path", "/", WithIndexing),
-      Header("content-length", "10", WithIndexing),
-    ], False)
+    open_stream(
+      client,
+      [
+        Header(":method", "POST", WithIndexing),
+        Header(":scheme", "https", WithIndexing),
+        Header(":path", "/", WithIndexing),
+        Header("content-length", "10", WithIndexing),
+      ],
+      False,
+    )
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   // Send only 5 bytes with END_STREAM — less than content-length of 10
@@ -1286,7 +1290,8 @@ pub fn receive_data_less_than_content_length_with_end_stream_is_malformed_test()
   // Data is discarded so a WINDOW_UPDATE is also sent to reclaim the
   // connection flow-control window.
   let assert Ok(#(_server, events, to_send)) = receive_data(server, data_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   let assert Ok(expected_wu) =
@@ -1299,12 +1304,16 @@ pub fn receive_data_matching_content_length_succeeds_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, headers)) =
-    open_stream(client, [
-      Header(":method", "POST", WithIndexing),
-      Header(":scheme", "https", WithIndexing),
-      Header(":path", "/", WithIndexing),
-      Header("content-length", "5", WithIndexing),
-    ], False)
+    open_stream(
+      client,
+      [
+        Header(":method", "POST", WithIndexing),
+        Header(":scheme", "https", WithIndexing),
+        Header(":path", "/", WithIndexing),
+        Header("content-length", "5", WithIndexing),
+      ],
+      False,
+    )
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   let assert Ok(data_frame) =
@@ -1324,12 +1333,16 @@ pub fn receive_multiple_data_matching_content_length_succeeds_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, headers)) =
-    open_stream(client, [
-      Header(":method", "POST", WithIndexing),
-      Header(":scheme", "https", WithIndexing),
-      Header(":path", "/", WithIndexing),
-      Header("content-length", "10", WithIndexing),
-    ], False)
+    open_stream(
+      client,
+      [
+        Header(":method", "POST", WithIndexing),
+        Header(":scheme", "https", WithIndexing),
+        Header(":path", "/", WithIndexing),
+        Header("content-length", "10", WithIndexing),
+      ],
+      False,
+    )
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
   // First DATA: 5 bytes
@@ -1360,12 +1373,16 @@ pub fn receive_content_length_zero_no_data_succeeds_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, headers)) =
-    open_stream(client, [
-      Header(":method", "POST", WithIndexing),
-      Header(":scheme", "https", WithIndexing),
-      Header(":path", "/", WithIndexing),
-      Header("content-length", "0", WithIndexing),
-    ], True)
+    open_stream(
+      client,
+      [
+        Header(":method", "POST", WithIndexing),
+        Header(":scheme", "https", WithIndexing),
+        Header(":path", "/", WithIndexing),
+        Header("content-length", "0", WithIndexing),
+      ],
+      True,
+    )
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, headers)
   let assert [HeadersReceived(stream_id: 1, ..)] = events
 }
@@ -1376,15 +1393,20 @@ pub fn receive_headers_invalid_content_length_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, headers)) =
-    open_stream(client, [
-      Header(":method", "POST", WithIndexing),
-      Header(":scheme", "https", WithIndexing),
-      Header(":path", "/", WithIndexing),
-      Header("content-length", "abc", WithIndexing),
-    ], False)
+    open_stream(
+      client,
+      [
+        Header(":method", "POST", WithIndexing),
+        Header(":scheme", "https", WithIndexing),
+        Header(":path", "/", WithIndexing),
+        Header("content-length", "abc", WithIndexing),
+      ],
+      False,
+    )
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_server, events, to_send)) = receive_data(server, headers)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst

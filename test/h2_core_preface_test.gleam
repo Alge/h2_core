@@ -226,11 +226,7 @@ pub fn server_receives_preface_magic_followed_by_headers_test() {
   let conn = helper.new_connection(Server, AwaitingPreface)
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(_client, headers_frame)) =
-    h2_core.open_stream(
-      client,
-      helper.request_headers(),
-      False,
-    )
+    h2_core.open_stream(client, helper.request_headers(), False)
   let data = <<client_preface_magic:bits, headers_frame:bits>>
   let assert Error(ConnectionError(h2_frame.ProtocolError)) =
     receive_data(conn, data)

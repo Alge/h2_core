@@ -10,9 +10,9 @@ import helper
 
 pub fn send_rst_stream_returns_encoded_frame_test() {
   let conn = helper.new_connection(Client, Connected)
-  let assert Ok(#(conn, _to_send)) = open_stream(conn, helper.request_headers(), False)
-  let assert Ok(#(_conn, to_send)) =
-    send_rst_stream(conn, 1, h2_frame.Cancel)
+  let assert Ok(#(conn, _to_send)) =
+    open_stream(conn, helper.request_headers(), False)
+  let assert Ok(#(_conn, to_send)) = send_rst_stream(conn, 1, h2_frame.Cancel)
   let assert Ok(expected) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
   assert to_send == expected
@@ -20,7 +20,8 @@ pub fn send_rst_stream_returns_encoded_frame_test() {
 
 pub fn send_rst_stream_with_different_error_codes_test() {
   let conn = helper.new_connection(Server, Connected)
-  let assert Ok(#(conn, _to_send)) = open_stream(conn, helper.response_headers(), False)
+  let assert Ok(#(conn, _to_send)) =
+    open_stream(conn, helper.response_headers(), False)
   let assert Ok(#(_conn, to_send)) =
     send_rst_stream(conn, 2, h2_frame.InternalError)
   let assert Ok(expected) =
@@ -39,11 +40,11 @@ pub fn send_rst_stream_on_stream_zero_is_error_test() {
 // from this state, causing it to transition immediately to 'closed'."
 pub fn send_rst_stream_transitions_to_closed_test() {
   let conn = helper.new_connection(Client, Connected)
-  let assert Ok(#(conn, _to_send)) = open_stream(conn, helper.request_headers(), False)
+  let assert Ok(#(conn, _to_send)) =
+    open_stream(conn, helper.request_headers(), False)
   let assert Ok(stream) = dict.get(conn.streams, 1)
   assert stream.state == Open
-  let assert Ok(#(conn, _to_send)) =
-    send_rst_stream(conn, 1, h2_frame.Cancel)
+  let assert Ok(#(conn, _to_send)) = send_rst_stream(conn, 1, h2_frame.Cancel)
   let assert Ok(stream) = dict.get(conn.streams, 1)
   assert stream.state == Closed
 }
@@ -61,7 +62,8 @@ pub fn send_rst_stream_on_idle_stream_is_error_test() {
 pub fn receive_rst_stream_emits_event_test() {
   let conn = helper.new_connection(Client, Connected)
   // Open a stream first so it's not idle
-  let assert Ok(#(conn, _to_send)) = open_stream(conn, helper.request_headers(), False)
+  let assert Ok(#(conn, _to_send)) =
+    open_stream(conn, helper.request_headers(), False)
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
   let assert Ok(#(_conn, events, to_send)) = receive_data(conn, rst)
@@ -71,7 +73,8 @@ pub fn receive_rst_stream_emits_event_test() {
 
 pub fn receive_rst_stream_with_internal_error_test() {
   let conn = helper.new_connection(Client, Connected)
-  let assert Ok(#(conn, _to_send)) = open_stream(conn, helper.request_headers(), False)
+  let assert Ok(#(conn, _to_send)) =
+    open_stream(conn, helper.request_headers(), False)
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.InternalError)
   let assert Ok(#(_conn, events, _to_send)) = receive_data(conn, rst)
@@ -84,7 +87,8 @@ pub fn receive_rst_stream_with_internal_error_test() {
 // RFC 9113 Section 6.4 - RST_STREAM transitions stream to closed
 pub fn receive_rst_stream_closes_stream_test() {
   let conn = helper.new_connection(Client, Connected)
-  let assert Ok(#(conn, _to_send)) = open_stream(conn, helper.request_headers(), False)
+  let assert Ok(#(conn, _to_send)) =
+    open_stream(conn, helper.request_headers(), False)
   let assert Ok(stream) = dict.get(conn.streams, 1)
   assert stream.state == Open
   let assert Ok(rst) =
@@ -144,8 +148,10 @@ pub fn receive_rst_stream_wrong_length_test() {
 pub fn receive_rst_stream_continues_parse_loop_test() {
   let conn = helper.new_connection(Client, Connected)
   // Open two streams
-  let assert Ok(#(conn, _to_send)) = open_stream(conn, helper.request_headers(), False)
-  let assert Ok(#(conn, _to_send)) = open_stream(conn, helper.request_headers(), False)
+  let assert Ok(#(conn, _to_send)) =
+    open_stream(conn, helper.request_headers(), False)
+  let assert Ok(#(conn, _to_send)) =
+    open_stream(conn, helper.request_headers(), False)
   // Concatenate two RST_STREAM frames
   let assert Ok(rst1) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
@@ -167,7 +173,8 @@ pub fn receive_rst_stream_continues_parse_loop_test() {
 // RST_STREAM does not send any response frame
 pub fn receive_rst_stream_no_response_test() {
   let conn = helper.new_connection(Client, Connected)
-  let assert Ok(#(conn, _to_send)) = open_stream(conn, helper.request_headers(), False)
+  let assert Ok(#(conn, _to_send)) =
+    open_stream(conn, helper.request_headers(), False)
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.NoError)
   let assert Ok(#(_conn, _events, to_send)) = receive_data(conn, rst)

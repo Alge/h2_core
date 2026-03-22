@@ -67,11 +67,7 @@ pub fn set_stream_state(
 ) -> Connection {
   Connection(
     ..conn,
-    streams: dict.insert(
-      conn.streams,
-      stream_id,
-      new_stream(state),
-    ),
+    streams: dict.insert(conn.streams, stream_id, new_stream(state)),
   )
 }
 

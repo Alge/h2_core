@@ -204,12 +204,10 @@ pub fn open_stream_intermediate_continuations_not_end_headers_test() {
 pub fn open_stream_continuation_hpack_state_persists_test() {
   let conn = connection_with_small_frame_size(Client)
   let headers = large_headers()
-  let assert Ok(#(conn, first_send)) =
-    open_stream(conn, headers, False)
+  let assert Ok(#(conn, first_send)) = open_stream(conn, headers, False)
   // Sending the same headers again should produce smaller output
   // because dynamic table entries were added on first send
-  let assert Ok(#(_conn, second_send)) =
-    open_stream(conn, headers, False)
+  let assert Ok(#(_conn, second_send)) = open_stream(conn, headers, False)
 
   let first_frames = helper.parse_all_frames(first_send, [])
   let second_frames = helper.parse_all_frames(second_send, [])
@@ -226,8 +224,7 @@ pub fn open_stream_continuation_hpack_state_persists_test() {
 pub fn receive_non_continuation_during_header_block_is_protocol_error_test() {
   let client = connection_with_small_frame_size(Client)
   let headers = large_headers()
-  let assert Ok(#(_client, to_send)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(_client, to_send)) = open_stream(client, headers, False)
 
   // Parse just the first frame (HEADERS with end_headers=False)
   let assert Ok(#(frame_data, rest)) = h2_frame.extract_frame(to_send, 16_384)
@@ -253,8 +250,7 @@ pub fn receive_non_continuation_during_header_block_is_protocol_error_test() {
 pub fn receive_settings_during_header_block_is_protocol_error_test() {
   let client = connection_with_small_frame_size(Client)
   let headers = large_headers()
-  let assert Ok(#(_client, to_send)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(_client, to_send)) = open_stream(client, headers, False)
 
   let assert Ok(#(frame_data, rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(h2_frame.Headers(end_headers: False, ..)) =
@@ -281,8 +277,7 @@ pub fn receive_settings_during_header_block_is_protocol_error_test() {
 pub fn receive_extension_frame_during_header_block_is_protocol_error_test() {
   let client = connection_with_small_frame_size(Client)
   let headers = large_headers()
-  let assert Ok(#(_client, to_send)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(_client, to_send)) = open_stream(client, headers, False)
 
   let assert Ok(#(frame_data, rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(h2_frame.Headers(end_headers: False, ..)) =
@@ -294,7 +289,14 @@ pub fn receive_extension_frame_during_header_block_is_protocol_error_test() {
 
   // Append an unknown frame type (0xFF) instead of CONTINUATION
   // Length=4, Type=0xFF, Flags=0, Stream ID=1
-  let unknown_frame = <<4:size(24), 0xFF:size(8), 0:size(8), 0:size(1), 1:size(31), 0:size(32)>>
+  let unknown_frame = <<
+    4:size(24),
+    0xFF:size(8),
+    0:size(8),
+    0:size(1),
+    1:size(31),
+    0:size(32),
+  >>
   let bad_data = <<headers_only:bits, unknown_frame:bits>>
 
   let server = helper.new_connection(Server, Connected)
@@ -306,8 +308,7 @@ pub fn receive_extension_frame_during_header_block_is_protocol_error_test() {
 pub fn receive_continuation_wrong_stream_is_protocol_error_test() {
   let client = connection_with_small_frame_size(Client)
   let headers = large_headers()
-  let assert Ok(#(_client, to_send)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(_client, to_send)) = open_stream(client, headers, False)
 
   let assert Ok(#(frame_data, rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(h2_frame.Headers(end_headers: False, ..)) =
@@ -348,8 +349,7 @@ pub fn receive_unexpected_continuation_is_protocol_error_test() {
 pub fn receive_continuation_across_calls_test() {
   let client = connection_with_small_frame_size(Client)
   let headers = large_headers()
-  let assert Ok(#(_client, to_send)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(_client, to_send)) = open_stream(client, headers, False)
 
   // Split: first frame in one call, rest in another
   let assert Ok(#(frame_data, rest)) = h2_frame.extract_frame(to_send, 16_384)
@@ -400,8 +400,7 @@ pub fn receive_multiple_continuation_frames_test() {
 pub fn receive_continuation_clears_pending_state_test() {
   let client = connection_with_small_frame_size(Client)
   let headers = large_headers()
-  let assert Ok(#(client, to_send)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(client, to_send)) = open_stream(client, headers, False)
   let frames = helper.parse_all_frames(to_send, [])
   assert list.length(frames) > 1
 
@@ -410,7 +409,15 @@ pub fn receive_continuation_clears_pending_state_test() {
 
   // A normal single-frame HEADERS on a new stream must work after reassembly
   let assert Ok(#(_client, encoded2)) =
-    open_stream(client, [Header(":method", "POST", WithIndexing), Header(":scheme", "https", WithIndexing), Header(":path", "/", WithIndexing)], False)
+    open_stream(
+      client,
+      [
+        Header(":method", "POST", WithIndexing),
+        Header(":scheme", "https", WithIndexing),
+        Header(":path", "/", WithIndexing),
+      ],
+      False,
+    )
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, encoded2)
   let assert [HeadersReceived(stream_id: 3, headers: _, end_stream: False)] =
     events
@@ -420,8 +427,7 @@ pub fn receive_continuation_clears_pending_state_test() {
 pub fn receive_continuation_preserves_end_stream_test() {
   let client = connection_with_small_frame_size(Client)
   let headers = large_headers()
-  let assert Ok(#(_client, to_send)) =
-    open_stream(client, headers, True)
+  let assert Ok(#(_client, to_send)) = open_stream(client, headers, True)
 
   // Verify it was actually split
   let frames = helper.parse_all_frames(to_send, [])
@@ -440,8 +446,7 @@ pub fn receive_continuation_preserves_end_stream_test() {
 pub fn receive_continuation_preserves_header_order_test() {
   let client = connection_with_small_frame_size(Client)
   let headers = large_headers()
-  let assert Ok(#(_client, to_send)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(_client, to_send)) = open_stream(client, headers, False)
 
   // Verify it was actually split
   let frames = helper.parse_all_frames(to_send, [])
@@ -469,8 +474,7 @@ pub fn receive_continuation_preserves_header_order_test() {
 pub fn receive_continuation_invalid_hpack_is_compression_error_test() {
   let client = connection_with_small_frame_size(Client)
   let headers = large_headers()
-  let assert Ok(#(_client, to_send)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(_client, to_send)) = open_stream(client, headers, False)
 
   // Parse the HEADERS frame, keep its bytes
   let assert Ok(#(frame_data, rest)) = h2_frame.extract_frame(to_send, 16_384)
@@ -518,8 +522,7 @@ pub fn receive_continuation_on_stream_zero_is_protocol_error_test() {
 pub fn receive_continuation_on_open_stream_is_valid_test() {
   let client = connection_with_small_frame_size(Client)
   let headers = large_headers()
-  let assert Ok(#(client, encoded1)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(client, encoded1)) = open_stream(client, headers, False)
 
   let h2 = [
     Header(":method", "POST", WithIndexing),
@@ -548,8 +551,7 @@ pub fn receive_continuation_on_open_stream_is_valid_test() {
 pub fn receive_continuation_on_half_closed_local_is_valid_test() {
   let client = connection_with_small_frame_size(Client)
   let headers = large_headers()
-  let assert Ok(#(client, encoded1)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(client, encoded1)) = open_stream(client, headers, False)
 
   let h2 = [
     Header(":method", "POST", WithIndexing),
@@ -581,8 +583,7 @@ pub fn receive_continuation_on_half_closed_local_is_valid_test() {
 pub fn receive_continuation_on_closed_stream_is_discarded_test() {
   let client = connection_with_small_frame_size(Client)
   let headers = large_headers()
-  let assert Ok(#(client, encoded1)) =
-    open_stream(client, headers, False)
+  let assert Ok(#(client, encoded1)) = open_stream(client, headers, False)
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
 

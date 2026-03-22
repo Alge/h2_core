@@ -133,8 +133,9 @@ pub fn receive_push_promise_on_open_stream_is_valid_test() {
     )
   let assert Ok(#(client, events, _to_send)) = receive_data(client, pp)
   // Should emit PushPromiseReceived event
-  let assert [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _)] =
-    events
+  let assert [
+    PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _),
+  ] = events
   // Promised stream 2 should be in reserved (remote) state
   let assert Ok(stream) = dict.get(client.streams, 2)
   assert stream.state == ReservedRemote
@@ -160,8 +161,9 @@ pub fn receive_push_promise_on_half_closed_local_is_valid_test() {
       padding: None,
     )
   let assert Ok(#(_client, events, _to_send)) = receive_data(client, pp)
-  let assert [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _)] =
-    events
+  let assert [
+    PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _),
+  ] = events
 }
 
 // =============================================================================
@@ -288,8 +290,9 @@ pub fn receive_push_promise_without_end_headers_expects_continuation_test() {
     )
   let assert Ok(#(_client, events, _to_send)) =
     receive_data(client, <<pp:bits, cont:bits>>)
-  let assert [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _)] =
-    events
+  let assert [
+    PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _),
+  ] = events
 }
 
 pub fn receive_push_promise_without_end_headers_then_wrong_frame_is_protocol_error_test() {
@@ -352,8 +355,9 @@ pub fn receive_push_promise_updates_hpack_state_test() {
     )
   let assert Ok(#(_client, events, _to_send)) = receive_data(client, pp1)
   // Should have decoded the header
-  let assert [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: h)] =
-    events
+  let assert [
+    PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: h),
+  ] = events
   let assert [
     Header(":method", "GET", _),
     Header(":scheme", "https", _),
@@ -527,8 +531,9 @@ pub fn receive_push_promise_on_closed_stream_is_handled_gracefully_test() {
       padding: None,
     )
   let assert Ok(#(client, events, _to_send)) = receive_data(client, pp)
-  let assert [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _)] =
-    events
+  let assert [
+    PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _),
+  ] = events
   // Promised stream should still be reserved
   let assert Ok(stream) = dict.get(client.streams, 2)
   assert stream.state == ReservedRemote
@@ -574,23 +579,14 @@ pub fn receive_push_promise_nonzero_padding_bytes_accepted_by_default_test() {
   // Type=0x05, Flags=0x0C (PADDED | END_HEADERS), Stream ID=1
   // HPACK: 0x82 = :method GET, 0x87 = :scheme https, 0x84 = :path /
   let non_zero_padded = <<
-    11:size(24),
-    0x05:size(8),
-    0x0C:size(8),
-    0:size(1),
-    1:size(31),
-    3:size(8),
-    0:size(1),
-    2:size(31),
-    0x82, 0x87, 0x84,
-    0xFF,
-    0xFF,
-    0xFF,
+    11:size(24), 0x05:size(8), 0x0C:size(8), 0:size(1), 1:size(31), 3:size(8),
+    0:size(1), 2:size(31), 0x82, 0x87, 0x84, 0xFF, 0xFF, 0xFF,
   >>
   let assert Ok(#(_client, events, _to_send)) =
     receive_data(client, non_zero_padded)
-  let assert [PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _)] =
-    events
+  let assert [
+    PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _),
+  ] = events
 }
 
 // =============================================================================
@@ -797,7 +793,8 @@ pub fn receive_push_promise_missing_method_is_malformed_test() {
     )
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_client, events, to_send)) = receive_data(client, pp)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -808,9 +805,7 @@ pub fn receive_push_promise_missing_method_is_malformed_test() {
 pub fn receive_push_promise_pseudo_after_regular_is_malformed_test() {
   let #(_server, client) = server_with_open_stream()
   // HPACK: regular header first, then pseudo-header
-  let bad_hpack = <<
-    0x40, 0x05, "x-foo":utf8, 0x03, "bar":utf8, 0x82,
-  >>
+  let bad_hpack = <<0x40, 0x05, "x-foo":utf8, 0x03, "bar":utf8, 0x82>>
   let assert Ok(pp) =
     h2_frame.encode_push_promise(
       stream_id: 1,
@@ -821,7 +816,8 @@ pub fn receive_push_promise_pseudo_after_regular_is_malformed_test() {
     )
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_client, events, to_send)) = receive_data(client, pp)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  assert events
+    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
