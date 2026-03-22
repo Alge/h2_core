@@ -145,7 +145,7 @@ pub fn receive_push_promise_on_half_closed_local_is_valid_test() {
   let client = helper.new_connection(Client, Connected)
   // Client sends headers with END_STREAM — stream 1 is half-closed (local)
   // on the client side
-  let assert Ok(#(client, headers)) =
+  let assert Ok(#(client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), True)
   let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
 
@@ -393,7 +393,7 @@ pub fn send_push_promise_on_half_closed_remote_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   // Client sends headers with END_STREAM
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), True)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   // Stream 1 is half-closed (remote) on server — push should work
@@ -456,7 +456,7 @@ pub fn client_send_push_promise_is_error_test() {
   let client = helper.new_connection(Client, Connected)
   let server = helper.new_connection(Server, Connected)
   // Open stream 1 from client
-  let assert Ok(#(client, headers)) =
+  let assert Ok(#(client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
   // Client tries to push — must be rejected

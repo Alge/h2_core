@@ -20,7 +20,7 @@ pub fn new_connection_default_window_sizes_test() {
 pub fn new_stream_default_window_sizes_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   let assert Ok(stream) = dict.get(server.streams, 1)
@@ -43,7 +43,7 @@ pub fn send_window_update_connection_level_test() {
 pub fn send_window_update_stream_level_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
@@ -105,7 +105,7 @@ pub fn send_window_update_overflow_recv_window_test() {
 pub fn send_window_update_stream_does_not_affect_connection_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
@@ -119,7 +119,7 @@ pub fn send_window_update_stream_does_not_affect_connection_test() {
 pub fn send_window_update_stream_recv_window_accumulates_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
@@ -134,7 +134,7 @@ pub fn send_window_update_stream_recv_window_accumulates_test() {
 pub fn send_window_update_stream_overflow_recv_window_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
@@ -249,7 +249,7 @@ pub fn receive_window_update_no_response_test() {
 pub fn receive_window_update_stream_level_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
@@ -268,7 +268,7 @@ pub fn receive_window_update_stream_level_test() {
 pub fn receive_window_update_stream_does_not_affect_connection_window_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
@@ -285,7 +285,7 @@ pub fn receive_window_update_stream_does_not_affect_connection_window_test() {
 pub fn receive_window_update_stream_accumulates_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
@@ -305,7 +305,7 @@ pub fn receive_window_update_stream_accumulates_test() {
 pub fn receive_window_update_stream_overflow_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
@@ -337,7 +337,7 @@ pub fn receive_window_update_idle_stream_is_protocol_error_test() {
 pub fn receive_window_update_on_open_stream_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   let assert Ok(stream) = dict.get(server.streams, 1)
@@ -358,7 +358,7 @@ pub fn receive_window_update_on_open_stream_test() {
 pub fn receive_window_update_on_half_closed_local_stream_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   let server = helper.set_stream_state(server, 1, HalfClosedLocal)
@@ -380,7 +380,7 @@ pub fn receive_window_update_on_half_closed_local_stream_test() {
 pub fn receive_window_update_on_half_closed_remote_stream_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), True)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   let assert Ok(stream) = dict.get(server.streams, 1)
@@ -404,7 +404,7 @@ pub fn receive_window_update_on_half_closed_remote_stream_test() {
 pub fn receive_window_update_on_closed_stream_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   let server = helper.set_stream_state(server, 1, Closed)
@@ -423,7 +423,7 @@ pub fn receive_window_update_on_closed_stream_test() {
 pub fn receive_window_update_connection_survives_stream_overflow_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(client, headers1)) =
+  let assert Ok(#(client, headers1, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers1)
 
@@ -437,7 +437,7 @@ pub fn receive_window_update_connection_survives_stream_overflow_test() {
   let assert [StreamReset(stream_id: 1, error_code: FlowControlError)] = events
 
   // Connection should still work — open stream 3
-  let assert Ok(#(_client, headers3)) =
+  let assert Ok(#(_client, headers3, _stream_id)) =
     open_stream(
       client,
       [

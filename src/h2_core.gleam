@@ -1123,7 +1123,7 @@ pub fn open_stream(
   conn conn: Connection,
   headers headers: List(Header),
   end_stream end_stream: Bool,
-) -> Result(#(Connection, BitArray), H2Error) {
+) -> Result(#(Connection, BitArray, Int), H2Error) {
   // Not allowed to open streams while in Draining state (we have received a GOAWAY)
   use <- bool.guard(
     conn.state == Draining,
@@ -1134,7 +1134,10 @@ pub fn open_stream(
   let #(conn, stream_id) = add_stream(conn, stream)
 
   // Send initial headers
-  send_headers(conn, stream_id, headers, end_stream)
+  case send_headers(conn, stream_id, headers, end_stream) {
+    Ok(#(conn, bytes)) -> Ok(#(conn, bytes, stream_id))
+    Error(e) -> Error(e)
+  }
 }
 
 pub fn send_headers(

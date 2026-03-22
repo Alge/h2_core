@@ -177,7 +177,7 @@ pub fn receive_headers_after_goaway_maintains_hpack_state_test() {
   let client = helper.new_connection(Client, Connected)
 
   // Client sends three HEADERS frames — HPACK state accumulates across all three
-  let assert Ok(#(client, encoded1)) =
+  let assert Ok(#(client, encoded1, _stream_id)) =
     open_stream(
       client,
       list.append(helper.request_headers(), [
@@ -185,7 +185,7 @@ pub fn receive_headers_after_goaway_maintains_hpack_state_test() {
       ]),
       False,
     )
-  let assert Ok(#(client, encoded2)) =
+  let assert Ok(#(client, encoded2, _stream_id)) =
     open_stream(
       client,
       list.append(helper.request_headers(), [
@@ -193,7 +193,7 @@ pub fn receive_headers_after_goaway_maintains_hpack_state_test() {
       ]),
       False,
     )
-  let assert Ok(#(_client, encoded3)) =
+  let assert Ok(#(_client, encoded3, _stream_id)) =
     open_stream(
       client,
       list.append(helper.request_headers(), [
@@ -226,7 +226,7 @@ pub fn receive_headers_after_goaway_maintains_hpack_state_test() {
 pub fn receive_goaway_prevents_opening_new_streams_test() {
   let client = helper.new_connection(Client, Connected)
   // Open stream 1
-  let assert Ok(#(client, _to_send)) =
+  let assert Ok(#(client, _to_send, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
 
   // Receive GOAWAY from server
@@ -283,9 +283,9 @@ pub fn receive_goaway_prevents_push_promise_test() {
 pub fn send_goaway_must_not_increase_last_stream_id_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(client, headers1)) =
+  let assert Ok(#(client, headers1, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
-  let assert Ok(#(_client, headers2)) =
+  let assert Ok(#(_client, headers2, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers1)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers2)
@@ -320,7 +320,7 @@ pub fn send_goaway_ignores_streams_above_last_stream_id_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   // Client opens stream 1
-  let assert Ok(#(client, headers1)) =
+  let assert Ok(#(client, headers1, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers1)
 
@@ -328,7 +328,7 @@ pub fn send_goaway_ignores_streams_above_last_stream_id_test() {
   let assert Ok(#(server, _to_send)) = send_goaway(server, NoError, <<>>)
 
   // Client opens stream 3 (doesn't know about GOAWAY yet)
-  let assert Ok(#(client, headers3)) =
+  let assert Ok(#(client, headers3, _stream_id)) =
     open_stream(
       client,
       list.append(helper.request_headers(), [
@@ -345,7 +345,7 @@ pub fn send_goaway_ignores_streams_above_last_stream_id_test() {
   // Client opens stream 5 — also above last_stream_id, also discarded
   // If HPACK state from stream 3 was not decoded, this will fail
   // with CompressionError
-  let assert Ok(#(_client, headers5)) =
+  let assert Ok(#(_client, headers5, _stream_id)) =
     open_stream(
       client,
       list.append(helper.request_headers(), [

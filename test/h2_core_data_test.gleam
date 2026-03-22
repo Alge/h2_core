@@ -99,7 +99,7 @@ pub fn receive_data_with_end_stream_on_half_closed_local_closes_stream_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   // Client opens stream 1
-  let assert Ok(#(client, headers)) =
+  let assert Ok(#(client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
@@ -1226,7 +1226,7 @@ pub fn receive_data_exceeding_content_length_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   // Client sends request with content-length: 5
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(
       client,
       [
@@ -1265,7 +1265,7 @@ pub fn receive_data_less_than_content_length_with_end_stream_is_malformed_test()
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
   // Client sends request with content-length: 10
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(
       client,
       [
@@ -1302,7 +1302,7 @@ pub fn receive_data_less_than_content_length_with_end_stream_is_malformed_test()
 pub fn receive_data_matching_content_length_succeeds_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(
       client,
       [
@@ -1331,7 +1331,7 @@ pub fn receive_data_matching_content_length_succeeds_test() {
 pub fn receive_multiple_data_matching_content_length_succeeds_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(
       client,
       [
@@ -1371,7 +1371,7 @@ pub fn receive_multiple_data_matching_content_length_succeeds_test() {
 pub fn receive_content_length_zero_no_data_succeeds_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(
       client,
       [
@@ -1391,7 +1391,7 @@ pub fn receive_content_length_zero_no_data_succeeds_test() {
 pub fn receive_headers_invalid_content_length_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(
       client,
       [

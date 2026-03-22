@@ -191,7 +191,7 @@ pub fn send_headers_end_stream_flag_not_set_when_false_test() {
 pub fn send_headers_updates_hpack_encoder_test() {
   let #(server, client) = server_with_open_stream()
   // Open a second stream on the same client — will use stream 3
-  let assert Ok(#(_client, request2)) =
+  let assert Ok(#(_client, request2, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, request2)
   let headers = [

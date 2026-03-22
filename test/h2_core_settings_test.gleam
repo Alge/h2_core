@@ -285,7 +285,7 @@ pub fn receive_settings_initial_window_size_adjusts_existing_streams_test() {
   let client = helper.new_connection(Client, Connected)
 
   // Open stream 1 on the server
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   let assert Ok(stream) = dict.get(server.streams, 1)
@@ -312,7 +312,7 @@ pub fn receive_settings_initial_window_size_overflow_is_flow_control_error_test(
   let client = helper.new_connection(Client, Connected)
 
   // Open stream 1 on the server (default send_window_size = 65535)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
@@ -328,7 +328,7 @@ pub fn receive_settings_initial_window_size_overflow_is_flow_control_error_test(
 
   // Start fresh with a known state
   let server = helper.new_connection(Server, Connected)
-  let assert Ok(#(_client2, headers2)) =
+  let assert Ok(#(_client2, headers2, _stream_id)) =
     open_stream(
       helper.new_connection(Client, Connected),
       helper.request_headers(),
@@ -415,7 +415,7 @@ pub fn settings_ack_initial_window_size_adjusts_recv_window_test() {
   let client = helper.new_connection(Client, Connected)
 
   // Client opens stream 1
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   let assert Ok(stream) = dict.get(server.streams, 1)
@@ -448,7 +448,7 @@ pub fn receive_settings_initial_window_size_can_go_negative_test() {
   let client = helper.new_connection(Client, Connected)
 
   // Client opens stream 1 (default send_window_size = 65535)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
@@ -479,7 +479,7 @@ pub fn receive_settings_initial_window_size_negative_window_tracked_test() {
   let client = helper.new_connection(Client, Connected)
 
   // Client opens stream 1 (send_window_size = 65535)
-  let assert Ok(#(_client, headers)) =
+  let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
@@ -537,7 +537,7 @@ pub fn receive_settings_non_multiple_of_six_length_is_frame_size_error_test() {
 pub fn receive_settings_header_table_size_reduction_affects_encoder_test() {
   let server = helper.new_connection(Server, Connected)
   let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(client, headers)) =
+  let assert Ok(#(client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
@@ -554,7 +554,7 @@ pub fn receive_settings_header_table_size_reduction_affects_encoder_test() {
   // Client sends headers on a new stream — the encoded block must
   // start with a Dynamic Table Size Update instruction. The server
   // should be able to decode it without COMPRESSION_ERROR.
-  let assert Ok(#(_client, encoded)) =
+  let assert Ok(#(_client, encoded, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
 
   // Server receives the new headers — if the encoder didn't emit
