@@ -480,6 +480,29 @@ fn validate_headers(
   }
 }
 
+fn validate_header_value(header: Header) -> Result(Nil, Nil) {
+  use _ <- result.try(check_header_value_bytes(<<header.value:utf8>>))
+  Ok(Nil)
+}
+
+fn check_header_value_bytes(bytes: BitArray) -> Result(Nil, Nil) {
+  case bytes {
+    <<>> -> Ok(Nil)
+    <<byte, rest:bits>> -> {
+      case byte {
+        // NUL
+        0x00 -> Error(Nil)
+        // LF
+        0x0a -> Error(Nil)
+        // CR
+        0x0d -> Error(Nil)
+        _ -> check_header_value_bytes(rest)
+      }
+    }
+    _ -> Error(Nil)
+  }
+}
+
 fn do_validate_headers(
   role role: Role,
   headers headers: List(Header),
@@ -506,6 +529,8 @@ fn do_validate_headers(
       )
 
       use <- bool.guard(is_pseudo && is_trailer, Error(Nil))
+
+      use _ <- result.try(validate_header_value(header))
 
       // TODO: Enable this when non-valid headers are allowed through alpacki
       // use <- bool.guard(
