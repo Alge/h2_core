@@ -1,13 +1,11 @@
-import gleam/dict
 import gleam/option.{None, Some}
 import h2_core.{
   Client, CompressionError, ConnectionError, FlowControlError, FrameSizeError,
   HeaderTableSize, InitialWindowSize, MaxConcurrentStreams, MaxFrameSize,
   ProtocolError, RemoteSettingsChanged, Server, SettingsAcknowledged,
   get_local_settings, get_pending_settings, get_remote_settings, open_stream,
-  receive_data, send_settings,
+  receive_data, send_data, send_headers, send_settings,
 }
-import h2_core/internal/stream.{Open, Stream}
 import h2_frame
 import helper
 
@@ -470,27 +468,21 @@ pub fn receive_settings_initial_window_size_can_go_negative_test() {
 // data), then the peer reduces INITIAL_WINDOW_SIZE enough to push the
 // remaining window negative. This must not error.
 pub fn receive_settings_initial_window_size_negative_window_tracked_test() {
-  let server = helper.connected_connection(Server)
-  let client = helper.connected_connection(Client)
+  let #(server, _client) = helper.server_with_open_stream()
 
-  // Client opens stream 1 (send_window_size = 65535)
-  let assert Ok(#(_client, headers, _stream_id)) =
-    open_stream(client, helper.request_headers(), False)
-  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+  // Server sends response headers (non-END_STREAM) so it can send data
+  let assert Ok(#(server, _to_send)) =
+    send_headers(server, 1, helper.response_headers(), False)
 
-  // Simulate having sent 60000 bytes: send_window_size = 65535 - 60000 = 5535
-  let server =
-    h2_core.Connection(
-      ..server,
-      streams: dict.insert(
-        server.streams,
-        1,
-        Stream(..helper.new_stream(Open), send_window_size: 5535),
-      ),
-    )
+  // Server sends 100 bytes of data, consuming window:
+  // send_window_size = 65535 - 100 = 65435
+  let assert Ok(#(server, _to_send)) =
+    send_data(server, 1, <<0:size(800)>>, False, None)
+  let assert Ok(v) = h2_core.get_stream_send_window_size(server, 1)
+  assert v == 65_435
 
-  // Peer reduces INITIAL_WINDOW_SIZE to 0. Delta = 0 - 65535 = -65535
-  // send_window_size = 5535 + (-65535) = -60000
+  // Client (peer) reduces INITIAL_WINDOW_SIZE to 0. Delta = 0 - 65535 = -65535
+  // send_window_size = 65435 + (-65535) = -100
   let assert Ok(settings_frame) =
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.InitialWindowSize(0),
@@ -498,7 +490,7 @@ pub fn receive_settings_initial_window_size_negative_window_tracked_test() {
   let assert Ok(#(server, _events, _to_send)) =
     receive_data(server, settings_frame)
   let assert Ok(v) = h2_core.get_stream_send_window_size(server, 1)
-  assert v == -60_000
+  assert v == -100
 }
 
 // RFC 9113 Section 6.5 - "A SETTINGS frame with a length other than a

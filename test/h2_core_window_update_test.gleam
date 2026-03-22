@@ -4,7 +4,7 @@ import h2_core.{
   get_connection_recv_window_size, get_connection_send_window_size,
   get_stream_state, open_stream, receive_data, send_window_update,
 }
-import h2_core/internal/stream.{Closed, HalfClosedLocal, HalfClosedRemote, Open}
+import h2_core/internal/stream.{HalfClosedRemote, Open}
 import h2_frame
 import helper
 
@@ -353,7 +353,8 @@ pub fn receive_window_update_on_half_closed_local_stream_test() {
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
-  let server = helper.set_stream_state(server, 1, HalfClosedLocal)
+  let assert Ok(#(server, _to_send)) =
+    h2_core.send_headers(server, 1, helper.response_headers(), True)
 
   let assert Ok(wu) =
     h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)
@@ -396,7 +397,8 @@ pub fn receive_window_update_on_closed_stream_test() {
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
-  let server = helper.set_stream_state(server, 1, Closed)
+  let assert Ok(#(server, _to_send)) =
+    h2_core.send_rst_stream(server, 1, h2_core.NoError)
 
   let assert Ok(wu) =
     h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)

@@ -3,9 +3,7 @@ import h2_core.{
   type Connection, ConnectionError, Header, ProtocolError, Server, StreamClosed,
   StreamError, WithIndexing, open_stream, receive_data, send_headers,
 }
-import h2_core/internal/stream.{
-  Closed, HalfClosedLocal, HalfClosedRemote, Open, ReservedLocal, ReservedRemote,
-}
+import h2_core/internal/stream.{Closed, HalfClosedLocal, HalfClosedRemote, Open}
 import h2_frame
 import helper
 
@@ -68,11 +66,17 @@ pub fn send_headers_with_end_stream_on_half_closed_remote_closes_stream_test() {
 // RFC 9113 Section 5.1 - "reserved (local): The endpoint can send a HEADERS
 // frame. This causes the stream to open in a 'half-closed (remote)' state."
 pub fn send_headers_on_reserved_local_transitions_to_half_closed_remote_test() {
-  let server = helper.connected_connection(Server)
-  let server = helper.set_stream_state(server, 2, ReservedLocal)
+  let #(server, _client, promised_id) =
+    helper.server_with_reserved_local_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 2, [Header(":status", "200", WithIndexing)], False)
-  let assert Ok(HalfClosedRemote) = h2_core.get_stream_state(server, 2)
+    send_headers(
+      server,
+      promised_id,
+      [Header(":status", "200", WithIndexing)],
+      False,
+    )
+  let assert Ok(HalfClosedRemote) =
+    h2_core.get_stream_state(server, promised_id)
 }
 
 // RFC 9113 Section 8.1 - A server MAY send interim (1xx) responses before the
@@ -100,8 +104,7 @@ pub fn send_headers_without_end_stream_does_not_change_state_test() {
 // cannot be used for sending frames other than WINDOW_UPDATE, PRIORITY, and
 // RST_STREAM."
 pub fn send_headers_on_half_closed_local_is_stream_closed_error_test() {
-  let server = helper.connected_connection(Server)
-  let server = helper.set_stream_state(server, 1, HalfClosedLocal)
+  let #(server, _client) = helper.server_with_half_closed_local_stream()
   let assert Error(StreamError(1, StreamClosed)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
 }
@@ -109,8 +112,7 @@ pub fn send_headers_on_half_closed_local_is_stream_closed_error_test() {
 // RFC 9113 Section 5.1 - "An endpoint MUST NOT send frames other than PRIORITY
 // on a closed stream."
 pub fn send_headers_on_closed_stream_is_error_test() {
-  let server = helper.connected_connection(Server)
-  let server = helper.set_stream_state(server, 1, Closed)
+  let #(server, _client) = helper.server_with_closed_stream()
   let assert Error(StreamError(1, StreamClosed)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
 }
@@ -119,10 +121,15 @@ pub fn send_headers_on_closed_stream_is_error_test() {
 // than RST_STREAM, WINDOW_UPDATE, or PRIORITY in this ['reserved (remote)']
 // state."
 pub fn send_headers_on_reserved_remote_is_protocol_error_test() {
-  let server = helper.connected_connection(Server)
-  let server = helper.set_stream_state(server, 2, ReservedRemote)
+  let #(_server, client, promised_id) =
+    helper.client_with_reserved_remote_stream()
   let assert Error(ConnectionError(ProtocolError)) =
-    send_headers(server, 2, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      client,
+      promised_id,
+      [Header(":status", "200", WithIndexing)],
+      False,
+    )
 }
 
 // RFC 9113 Section 5.1 - An idle stream has no existing connection state;

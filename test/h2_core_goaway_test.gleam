@@ -1,6 +1,6 @@
 import gleam/list
 import h2_core.{
-  Client, Connection, ConnectionError, EnhanceYourCalm, GoawayReceived, Header,
+  Client, ConnectionError, EnhanceYourCalm, GoawayReceived, Header,
   InternalError, NoError, ProtocolError, Server, WithIndexing, open_stream,
   receive_data, send_goaway, send_headers,
 }
@@ -34,9 +34,21 @@ pub fn send_goaway_with_error_code_test() {
 }
 
 pub fn send_goaway_uses_last_remote_stream_id_test() {
-  let conn = helper.connected_connection(Server)
-  let conn = Connection(..conn, last_remote_stream_id: 7)
-  let assert Ok(#(_conn, to_send)) = send_goaway(conn, NoError, <<>>)
+  let #(server, client) = helper.connected_pair()
+  // Client opens streams 1, 3, 5, 7 so that server's last_remote_stream_id == 7
+  let assert Ok(#(client, h1, _)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(server, _, _)) = receive_data(server, h1)
+  let assert Ok(#(client, h3, _)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(server, _, _)) = receive_data(server, h3)
+  let assert Ok(#(client, h5, _)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(server, _, _)) = receive_data(server, h5)
+  let assert Ok(#(_client, h7, _)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(server, _, _)) = receive_data(server, h7)
+  let assert Ok(#(_conn, to_send)) = send_goaway(server, NoError, <<>>)
   let expected =
     h2_frame.encode_goaway(
       last_stream_id: 7,

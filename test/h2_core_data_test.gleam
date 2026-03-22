@@ -1,4 +1,3 @@
-import gleam/dict
 import gleam/option.{None, Some}
 import h2_core.{
   type Connection, Client, ConnectionError, DataReceived, FlowControlError,
@@ -7,10 +6,7 @@ import h2_core.{
   get_connection_recv_window_size, get_connection_send_window_size, open_stream,
   receive_data, send_headers,
 }
-import h2_core/internal/stream.{
-  Closed, HalfClosedLocal, HalfClosedRemote, Open, ReservedLocal, ReservedRemote,
-  Stream,
-}
+import h2_core/internal/stream.{Closed, HalfClosedLocal, HalfClosedRemote}
 import h2_frame
 import helper
 
@@ -20,6 +16,98 @@ fn server_with_open_stream() -> #(Connection, Connection) {
 
 fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
   helper.server_with_half_closed_remote_stream()
+}
+
+/// Adjust stream 1's send_window_size to `target` by having the peer
+/// send SETTINGS [InitialWindowSize(target)].
+/// Only works for non-negative targets (0..2^31-1).
+fn set_stream_send_window(server: Connection, target: Int) -> Connection {
+  let assert Ok(settings_frame) =
+    h2_frame.encode_settings(ack: False, settings: [
+      h2_frame.InitialWindowSize(target),
+    ])
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, settings_frame)
+  server
+}
+
+/// Adjust stream 1's recv_window_size to `target` by sending local
+/// SETTINGS [InitialWindowSize(target)] and receiving the ACK.
+fn set_stream_recv_window(server: Connection, target: Int) -> Connection {
+  let assert Ok(#(server, _to_send)) =
+    h2_core.send_settings(server, [h2_core.InitialWindowSize(target)])
+  let assert Ok(settings_ack) =
+    h2_frame.encode_settings(ack: True, settings: [])
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, settings_ack)
+  server
+}
+
+/// Send `amount` bytes of zero-filled data from the server on stream 1,
+/// in chunks respecting the default max frame size (16384).
+/// Both connection and stream send windows are decremented by `amount`.
+fn consume_send_window(server: Connection, amount: Int) -> Connection {
+  case amount {
+    0 -> server
+    n if n <= 16_384 -> {
+      let data = <<0:size(n)-unit(8)>>
+      let assert Ok(#(server, _to_send)) =
+        h2_core.send_data(server, 1, data, False, None)
+      server
+    }
+    n -> {
+      let data = <<0:size(16_384)-unit(8)>>
+      let assert Ok(#(server, _to_send)) =
+        h2_core.send_data(server, 1, data, False, None)
+      consume_send_window(server, n - 16_384)
+    }
+  }
+}
+
+/// Consume `amount` bytes from the server's connection recv window by
+/// having the peer send DATA frames on stream 1, in chunks respecting
+/// the default max frame size (16384).
+/// Both connection and stream recv windows are decremented by `amount`.
+fn consume_recv_window(server: Connection, amount: Int) -> Connection {
+  case amount {
+    0 -> server
+    n if n <= 16_384 -> {
+      let assert Ok(data_frame) =
+        h2_frame.encode_data(
+          stream_id: 1,
+          end_stream: False,
+          data: <<0:size(n)-unit(8)>>,
+          padding: None,
+        )
+      let assert Ok(#(server, _events, _to_send)) =
+        receive_data(server, data_frame)
+      server
+    }
+    n -> {
+      let assert Ok(data_frame) =
+        h2_frame.encode_data(
+          stream_id: 1,
+          end_stream: False,
+          data: <<0:size(16_384)-unit(8)>>,
+          padding: None,
+        )
+      let assert Ok(#(server, _events, _to_send)) =
+        receive_data(server, data_frame)
+      consume_recv_window(server, n - 16_384)
+    }
+  }
+}
+
+/// Restore stream 1's send_window_size by having the peer send a
+/// WINDOW_UPDATE frame on stream 1.
+fn restore_stream_send_window(server: Connection, increment: Int) -> Connection {
+  let assert Ok(wu) =
+    h2_frame.encode_window_update(
+      stream_id: 1,
+      window_size_increment: increment,
+    )
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, wu)
+  server
 }
 
 // =============================================================================
@@ -169,11 +257,11 @@ pub fn receive_data_on_idle_stream_is_protocol_error_test() {
 // than RST_STREAM, PRIORITY, or WINDOW_UPDATE on a stream in this state MUST
 // be treated as a connection error (Section 5.4.1) of type PROTOCOL_ERROR."
 pub fn receive_data_on_reserved_local_is_protocol_error_test() {
-  let #(server, _client) = server_with_open_stream()
-  let server = helper.set_stream_state(server, 2, ReservedLocal)
+  let #(server, _client, promised_id) =
+    helper.server_with_reserved_local_stream()
   let assert Ok(data_frame) =
     h2_frame.encode_data(
-      stream_id: 2,
+      stream_id: promised_id,
       end_stream: False,
       data: <<"bad":utf8>>,
       padding: None,
@@ -186,17 +274,17 @@ pub fn receive_data_on_reserved_local_is_protocol_error_test() {
 // than HEADERS, RST_STREAM, or PRIORITY on a stream in this state MUST be
 // treated as a connection error (Section 5.4.1) of type PROTOCOL_ERROR."
 pub fn receive_data_on_reserved_remote_is_protocol_error_test() {
-  let #(server, _client) = server_with_open_stream()
-  let server = helper.set_stream_state(server, 2, ReservedRemote)
+  let #(_server, client, promised_id) =
+    helper.client_with_reserved_remote_stream()
   let assert Ok(data_frame) =
     h2_frame.encode_data(
-      stream_id: 2,
+      stream_id: promised_id,
       end_stream: False,
       data: <<"bad":utf8>>,
       padding: None,
     )
   let assert Error(ConnectionError(ProtocolError)) =
-    receive_data(server, data_frame)
+    receive_data(client, data_frame)
 }
 
 // RFC 9113 Section 6.1 - Empty DATA frame is valid.
@@ -294,16 +382,8 @@ pub fn receive_data_decrements_connection_recv_window_test() {
 // (Section 5.4.1). This is necessary even if the frame is in error."
 pub fn receive_data_exceeding_stream_window_is_flow_control_error_test() {
   let #(server, _client) = server_with_open_stream()
-  // Set stream recv_window_size to 5 bytes
-  let server =
-    h2_core.Connection(
-      ..server,
-      streams: dict.insert(
-        server.streams,
-        1,
-        Stream(..helper.new_stream(Open), recv_window_size: 5),
-      ),
-    )
+  // Set stream recv_window_size to 5 bytes via local SETTINGS change
+  let server = set_stream_recv_window(server, 5)
   let assert Ok(data_frame) =
     h2_frame.encode_data(
       stream_id: 1,
@@ -337,8 +417,12 @@ pub fn receive_data_exceeding_stream_window_is_flow_control_error_test() {
 // connection error of type FLOW_CONTROL_ERROR.
 pub fn receive_data_exceeding_connection_window_is_flow_control_error_test() {
   let #(server, _client) = server_with_open_stream()
-  // Set connection recv_window_size to 5 bytes
-  let server = h2_core.Connection(..server, recv_window_size: 5)
+  // Consume 65530 bytes of the connection recv window by receiving DATA,
+  // then restore the stream recv window so only the connection window is small.
+  let server = consume_recv_window(server, 65_530)
+  let assert Ok(#(server, _to_send)) =
+    h2_core.send_window_update(server, 1, 65_530)
+  // Now: connection recv_window = 5, stream recv_window = 65535
   let assert Ok(data_frame) =
     h2_frame.encode_data(
       stream_id: 1,
@@ -390,16 +474,8 @@ pub fn send_data_exceeding_stream_window_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
-  // Set stream send_window_size to 5
-  let server =
-    h2_core.Connection(
-      ..server,
-      streams: dict.insert(
-        server.streams,
-        1,
-        Stream(..helper.new_stream(Open), send_window_size: 5),
-      ),
-    )
+  // Set stream send_window_size to 5 via peer SETTINGS
+  let server = set_stream_send_window(server, 5)
   let assert Error(ConnectionError(FlowControlError)) =
     h2_core.send_data(server, 1, <<"too much data":utf8>>, False, None)
 }
@@ -408,8 +484,11 @@ pub fn send_data_exceeding_connection_window_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
-  // Set connection send_window_size to 5
-  let server = h2_core.Connection(..server, send_window_size: 5)
+  // Consume connection send window down to 5 by sending data,
+  // then restore stream window via peer WINDOW_UPDATE
+  let server = consume_send_window(server, 65_530)
+  let server = restore_stream_send_window(server, 65_530)
+  // Now: connection send_window = 5, stream send_window = 65535
   let assert Error(ConnectionError(FlowControlError)) =
     h2_core.send_data(server, 1, <<"too much data":utf8>>, False, None)
 }
@@ -445,7 +524,8 @@ pub fn send_data_on_half_closed_local_is_error_test() {
 // than PRIORITY on a closed stream."
 pub fn send_data_on_closed_stream_is_error_test() {
   let #(server, _client) = server_with_open_stream()
-  let server = helper.set_stream_state(server, 1, Closed)
+  let assert Ok(#(server, _to_send)) =
+    h2_core.send_rst_stream(server, 1, NoError)
   let assert Error(StreamError(1, StreamClosed)) =
     h2_core.send_data(server, 1, <<"bad":utf8>>, False, None)
 }
@@ -453,20 +533,20 @@ pub fn send_data_on_closed_stream_is_error_test() {
 // RFC 9113 Section 5.1 (reserved local) - "An endpoint MUST NOT send any
 // type of frame other than HEADERS, RST_STREAM, or PRIORITY in this state."
 pub fn send_data_on_reserved_local_stream_is_error_test() {
-  let #(server, _client) = server_with_open_stream()
-  let server = helper.set_stream_state(server, 2, ReservedLocal)
+  let #(server, _client, promised_id) =
+    helper.server_with_reserved_local_stream()
   let assert Error(ConnectionError(ProtocolError)) =
-    h2_core.send_data(server, 2, <<"bad":utf8>>, False, None)
+    h2_core.send_data(server, promised_id, <<"bad":utf8>>, False, None)
 }
 
 // RFC 9113 Section 5.1 (reserved remote) - "An endpoint MUST NOT send any
 // type of frame other than RST_STREAM, WINDOW_UPDATE, or PRIORITY in this
 // state."
 pub fn send_data_on_reserved_remote_stream_is_error_test() {
-  let #(server, _client) = server_with_open_stream()
-  let server = helper.set_stream_state(server, 2, ReservedRemote)
+  let #(_server, client, promised_id) =
+    helper.client_with_reserved_remote_stream()
   let assert Error(ConnectionError(ProtocolError)) =
-    h2_core.send_data(server, 2, <<"bad":utf8>>, False, None)
+    h2_core.send_data(client, promised_id, <<"bad":utf8>>, False, None)
 }
 
 // RFC 9113 Section 5.2.1 - "A sender that sends a FLOW_CONTROLLED frame
@@ -539,17 +619,13 @@ pub fn send_data_with_negative_window_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
-  // Simulate a negative stream window (as if SETTINGS_INITIAL_WINDOW_SIZE
-  // was reduced after data was already in flight)
-  let server =
-    h2_core.Connection(
-      ..server,
-      streams: dict.insert(
-        server.streams,
-        1,
-        Stream(..helper.new_stream(Open), send_window_size: -100),
-      ),
-    )
+  // Create a negative stream window: send 100 bytes to consume window,
+  // then peer reduces INITIAL_WINDOW_SIZE to 0, pushing the window negative.
+  // stream_sw = 65535 - 100 = 65435, then delta = 0 - 65535 = -65535
+  // final stream_sw = 65435 - 65535 = -100
+  let server = consume_send_window(server, 100)
+  let server = set_stream_send_window(server, 0)
+  let assert Ok(-100) = h2_core.get_stream_send_window_size(server, 1)
   let assert Error(ConnectionError(FlowControlError)) =
     h2_core.send_data(server, 1, <<"hello":utf8>>, False, None)
 }
@@ -651,16 +727,8 @@ pub fn send_padded_data_exceeding_stream_window_is_flow_control_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
-  // Set stream send_window_size to 10 bytes
-  let server =
-    h2_core.Connection(
-      ..server,
-      streams: dict.insert(
-        server.streams,
-        1,
-        Stream(..helper.new_stream(Open), send_window_size: 10),
-      ),
-    )
+  // Set stream send_window_size to 10 bytes via peer SETTINGS
+  let server = set_stream_send_window(server, 10)
   // 3 bytes data fits in the window alone, but with padding:
   // payload = 1 (pad_length) + 3 (data) + 10 (padding) = 14 > 10
   let assert Error(ConnectionError(FlowControlError)) =
@@ -676,16 +744,8 @@ pub fn send_padded_data_pad_length_field_counts_toward_flow_control_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
-  // Set stream send_window_size to exactly 13 bytes
-  let server =
-    h2_core.Connection(
-      ..server,
-      streams: dict.insert(
-        server.streams,
-        1,
-        Stream(..helper.new_stream(Open), send_window_size: 13),
-      ),
-    )
+  // Set stream send_window_size to exactly 13 bytes via peer SETTINGS
+  let server = set_stream_send_window(server, 13)
   // 3 bytes data + 10 bytes padding = 13, which fits the window.
   // But the full payload is 1 (pad_length) + 3 (data) + 10 (padding) = 14 > 13.
   let assert Error(ConnectionError(FlowControlError)) =
@@ -700,8 +760,11 @@ pub fn send_padded_data_exceeding_connection_window_is_flow_control_error_test()
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
-  // Set connection send_window_size to 10 bytes
-  let server = h2_core.Connection(..server, send_window_size: 10)
+  // Consume connection send window down to 10 by sending data,
+  // then restore stream window via peer WINDOW_UPDATE
+  let server = consume_send_window(server, 65_525)
+  let server = restore_stream_send_window(server, 65_525)
+  // Now: connection send_window = 10, stream send_window = 65535
   // 3 bytes data fits in the window alone, but with padding:
   // payload = 1 (pad_length) + 3 (data) + 10 (padding) = 14 > 10
   let assert Error(ConnectionError(FlowControlError)) =
@@ -715,17 +778,10 @@ pub fn send_data_exactly_at_window_boundary_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
-  // Set both windows to exactly 5 bytes
-  let server =
-    h2_core.Connection(
-      ..server,
-      send_window_size: 5,
-      streams: dict.insert(
-        server.streams,
-        1,
-        Stream(..helper.new_stream(Open), send_window_size: 5),
-      ),
-    )
+  // Consume 65530 bytes to bring both windows down to 5
+  let server = consume_send_window(server, 65_530)
+  let assert Ok(5) = h2_core.get_stream_send_window_size(server, 1)
+  assert get_connection_send_window_size(server) == 5
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<"hello":utf8>>, False, None)
   let assert Ok(0) = h2_core.get_stream_send_window_size(server, 1)
@@ -742,17 +798,10 @@ pub fn send_empty_data_with_end_stream_when_window_exhausted_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
-  // Set both windows to 0
-  let server =
-    h2_core.Connection(
-      ..server,
-      send_window_size: 0,
-      streams: dict.insert(
-        server.streams,
-        1,
-        Stream(..helper.new_stream(Open), send_window_size: 0),
-      ),
-    )
+  // Consume all 65535 bytes to bring both windows down to 0
+  let server = consume_send_window(server, 65_535)
+  let assert Ok(0) = h2_core.get_stream_send_window_size(server, 1)
+  assert get_connection_send_window_size(server) == 0
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<>>, True, None)
   let assert Ok(HalfClosedLocal) = h2_core.get_stream_state(server, 1)
@@ -766,13 +815,10 @@ pub fn send_data_connection_window_smaller_than_stream_window_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
-  // Stream window is large, but connection window is only 5 bytes
-  let server =
-    h2_core.Connection(
-      ..server,
-      send_window_size: 5,
-      streams: dict.insert(server.streams, 1, helper.new_stream(Open)),
-    )
+  // Consume connection send window down to 5, then restore stream window
+  let server = consume_send_window(server, 65_530)
+  let server = restore_stream_send_window(server, 65_530)
+  // Now: connection send_window = 5, stream send_window = 65535
   // 13 bytes > 5 byte connection window
   let assert Error(ConnectionError(FlowControlError)) =
     h2_core.send_data(server, 1, <<"too much data":utf8>>, False, None)
@@ -785,24 +831,18 @@ pub fn send_data_connection_window_smaller_than_stream_window_is_error_test() {
 // Returns the minimum of stream and connection send window
 pub fn get_send_window_size_returns_stream_window_when_smaller_test() {
   let #(server, _client) = server_with_open_stream()
-  // Set stream window smaller than connection window
-  let server =
-    h2_core.Connection(
-      ..server,
-      streams: dict.insert(
-        server.streams,
-        1,
-        Stream(..helper.new_stream(Open), send_window_size: 100),
-      ),
-    )
+  // Set stream window smaller than connection window via peer SETTINGS
+  let server = set_stream_send_window(server, 100)
   let assert Ok(window) = h2_core.get_send_window_size(server, 1)
   assert window == 100
 }
 
 pub fn get_send_window_size_returns_connection_window_when_smaller_test() {
   let #(server, _client) = server_with_open_stream()
-  // Set connection window smaller than stream window
-  let server = h2_core.Connection(..server, send_window_size: 50)
+  // Consume connection send window down to 50, then restore stream window
+  let server = consume_send_window(server, 65_485)
+  let server = restore_stream_send_window(server, 65_485)
+  // Now: connection send_window = 50, stream send_window = 65535
   let assert Ok(window) = h2_core.get_send_window_size(server, 1)
   assert window == 50
 }
@@ -820,16 +860,12 @@ pub fn get_send_window_size_unknown_stream_is_error_test() {
 
 pub fn get_send_window_size_negative_window_returns_zero_test() {
   let #(server, _client) = server_with_open_stream()
-  // Simulate a negative send window (from SETTINGS reduction after data sent)
-  let server =
-    h2_core.Connection(
-      ..server,
-      streams: dict.insert(
-        server.streams,
-        1,
-        Stream(..helper.new_stream(Open), send_window_size: -1000),
-      ),
-    )
+  // Create a negative send window: send 1000 bytes to consume window,
+  // then peer reduces INITIAL_WINDOW_SIZE to 0, pushing the window negative.
+  // stream_sw = 65535 - 1000 = 64535, then delta = 0 - 65535 = -65535
+  // final stream_sw = 64535 - 65535 = -1000
+  let server = consume_send_window(server, 1000)
+  let server = set_stream_send_window(server, 0)
   let assert Ok(window) = h2_core.get_send_window_size(server, 1)
   assert window == 0
 }
@@ -847,16 +883,9 @@ pub fn get_send_window_size_negative_window_returns_zero_test() {
 // the connection flow-control window MUST still be decremented.
 pub fn receive_data_exceeding_stream_window_still_decrements_connection_window_test() {
   let #(server, _client) = server_with_open_stream()
-  // Set stream recv_window_size to 5 bytes, leaving connection window at default
-  let server =
-    h2_core.Connection(
-      ..server,
-      streams: dict.insert(
-        server.streams,
-        1,
-        Stream(..helper.new_stream(Open), recv_window_size: 5),
-      ),
-    )
+  // Set stream recv_window_size to 5 bytes via local SETTINGS change,
+  // leaving connection window at default
+  let server = set_stream_recv_window(server, 5)
   let data = <<"too much data":utf8>>
   let data_size = 13
   let assert Ok(data_frame) =
@@ -1029,16 +1058,8 @@ pub fn receive_padded_data_decrements_connection_recv_window_test() {
 // byte pushes it over.
 pub fn receive_padded_data_pad_length_field_counts_toward_flow_control_test() {
   let #(server, _client) = server_with_open_stream()
-  // Set stream recv_window_size to exactly 13 bytes
-  let server =
-    h2_core.Connection(
-      ..server,
-      streams: dict.insert(
-        server.streams,
-        1,
-        Stream(..helper.new_stream(Open), recv_window_size: 13),
-      ),
-    )
+  // Set stream recv_window_size to exactly 13 bytes via local SETTINGS change
+  let server = set_stream_recv_window(server, 13)
   // 3 bytes data + 10 bytes padding = 13, which fits the window.
   // But the full payload is 1 (pad_length) + 3 (data) + 10 (padding) = 14 > 13.
   let assert Ok(data_frame) =

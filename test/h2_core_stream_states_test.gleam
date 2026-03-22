@@ -1,4 +1,3 @@
-import gleam/dict
 import gleam/option.{None}
 import h2_core.{
   type Connection, Cancel, Header, NoError, ProtocolError, StreamReset,
@@ -24,32 +23,16 @@ fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
 
 // Helper: create a client that received a PUSH_PROMISE, putting promised
 // stream 2 in reserved (remote) state
-fn client_with_reserved_remote_stream() -> Connection {
-  let #(_server, client) = server_with_open_stream()
-  let assert Ok(pp) =
-    h2_frame.encode_push_promise(
-      stream_id: 1,
-      end_headers: True,
-      promised_stream_id: 2,
-      field_block_fragment: <<0x82, 0x87, 0x84>>,
-      padding: None,
-    )
-  let assert Ok(#(client, _events, _to_send)) = receive_data(client, pp)
-  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, 2)
-  client
+fn client_with_reserved_remote_stream() -> #(Connection, Int) {
+  let #(_server, client, promised_id) =
+    helper.client_with_reserved_remote_stream()
+  #(client, promised_id)
 }
 
-// Helper: create a server where stream 2 is in reserved (local) state.
-// Since send_push_promise is not yet implemented, we manually insert the
-// stream into the server's streams dict.
-fn server_with_reserved_local_stream() -> Connection {
-  let #(server, _client) = server_with_open_stream()
-  let server =
-    h2_core.Connection(
-      ..server,
-      streams: dict.insert(server.streams, 2, helper.new_stream(ReservedLocal)),
-    )
-  server
+fn server_with_reserved_local_stream() -> #(Connection, Int) {
+  let #(server, _client, promised_id) =
+    helper.server_with_reserved_local_stream()
+  #(server, promised_id)
 }
 
 // Helper: create a server with a closed stream 1
@@ -72,12 +55,12 @@ fn server_with_closed_stream() -> #(Connection, Connection) {
 //
 // Test: sending DATA on a reserved (local) stream should be an error.
 pub fn send_data_on_reserved_local_stream_is_error_test() {
-  let server = server_with_reserved_local_stream()
-  let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, 2)
+  let #(server, promised_id) = server_with_reserved_local_stream()
+  let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, promised_id)
 
   // Attempt to send DATA on reserved (local) stream 2 — should fail
   let assert Error(_) =
-    h2_core.send_data(server, 2, <<"illegal":utf8>>, False, None)
+    h2_core.send_data(server, promised_id, <<"illegal":utf8>>, False, None)
 }
 
 // =============================================================================
@@ -95,12 +78,12 @@ pub fn send_data_on_reserved_local_stream_is_error_test() {
 //
 // Test: sending DATA on a reserved (remote) stream should be an error.
 pub fn send_data_on_reserved_remote_stream_is_error_test() {
-  let client = client_with_reserved_remote_stream()
-  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, 2)
+  let #(client, promised_id) = client_with_reserved_remote_stream()
+  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, promised_id)
 
   // Attempt to send DATA on reserved (remote) stream 2 — should fail
   let assert Error(_) =
-    h2_core.send_data(client, 2, <<"illegal":utf8>>, False, None)
+    h2_core.send_data(client, promised_id, <<"illegal":utf8>>, False, None)
 }
 
 // RFC 9113 Section 5.1 (reserved remote):
@@ -110,11 +93,14 @@ pub fn send_data_on_reserved_remote_stream_is_error_test() {
 //
 // WINDOW_UPDATE is not in the allowed list for reserved (remote).
 pub fn receive_window_update_on_reserved_remote_is_protocol_error_test() {
-  let client = client_with_reserved_remote_stream()
-  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, 2)
+  let #(client, promised_id) = client_with_reserved_remote_stream()
+  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, promised_id)
 
   let assert Ok(wu) =
-    h2_frame.encode_window_update(stream_id: 2, window_size_increment: 1024)
+    h2_frame.encode_window_update(
+      stream_id: promised_id,
+      window_size_increment: 1024,
+    )
   let assert Error(h2_core.ConnectionError(ProtocolError)) =
     receive_data(client, wu)
 }
@@ -130,15 +116,15 @@ pub fn receive_window_update_on_reserved_remote_is_protocol_error_test() {
 //
 // HEADERS is not in the allowed list for reserved (local).
 pub fn receive_headers_on_reserved_local_is_protocol_error_test() {
-  let server = server_with_reserved_local_stream()
-  let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, 2)
+  let #(server, promised_id) = server_with_reserved_local_stream()
+  let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, promised_id)
 
-  // Manually craft a HEADERS frame on stream 2 with valid HPACK
-  // Length=3, Type=0x01, Flags=0x04 (END_HEADERS), Stream ID=2
+  // Manually craft a HEADERS frame on the promised stream with valid HPACK
+  // Length=3, Type=0x01, Flags=0x04 (END_HEADERS)
   // HPACK: 0x82 = :method GET, 0x87 = :scheme https, 0x84 = :path /
   let bad_headers = <<
-    3:size(24), 0x01:size(8), 0x04:size(8), 0:size(1), 2:size(31), 0x82, 0x87,
-    0x84,
+    3:size(24), 0x01:size(8), 0x04:size(8), 0:size(1), promised_id:size(31),
+    0x82, 0x87, 0x84,
   >>
   let assert Error(h2_core.ConnectionError(ProtocolError)) =
     receive_data(server, bad_headers)
@@ -155,13 +141,13 @@ pub fn receive_headers_on_reserved_local_is_protocol_error_test() {
 // This is the normal push response flow: after receiving PUSH_PROMISE,
 // the server sends HEADERS on the promised stream to deliver the response.
 pub fn receive_headers_on_reserved_remote_transitions_to_half_closed_local_test() {
-  let client = client_with_reserved_remote_stream()
-  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, 2)
+  let #(client, promised_id) = client_with_reserved_remote_stream()
+  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, promised_id)
 
   // Server sends HEADERS on promised stream 2
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
-      stream_id: 2,
+      stream_id: promised_id,
       end_stream: False,
       end_headers: True,
       priority: None,
@@ -170,22 +156,25 @@ pub fn receive_headers_on_reserved_remote_transitions_to_half_closed_local_test(
     )
   let assert Ok(#(client, _events, _to_send)) =
     receive_data(client, headers_frame)
-  let assert Ok(HalfClosedLocal) = h2_core.get_stream_state(client, 2)
+  let assert Ok(HalfClosedLocal) = h2_core.get_stream_state(client, promised_id)
 }
 
 // RFC 9113 Section 5.1 (reserved remote):
 // "Either endpoint can send a RST_STREAM frame to cause the stream
 // to become 'closed'. This releases the stream reservation."
 pub fn receive_rst_stream_on_reserved_remote_transitions_to_closed_test() {
-  let client = client_with_reserved_remote_stream()
-  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, 2)
+  let #(client, promised_id) = client_with_reserved_remote_stream()
+  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, promised_id)
 
   // Server sends RST_STREAM on promised stream 2
   let assert Ok(rst) =
-    h2_frame.encode_rst_stream(stream_id: 2, error_code: h2_frame.Cancel)
+    h2_frame.encode_rst_stream(
+      stream_id: promised_id,
+      error_code: h2_frame.Cancel,
+    )
   let assert Ok(#(client, events, _to_send)) = receive_data(client, rst)
-  assert events == [StreamReset(stream_id: 2, error_code: Cancel)]
-  let assert Ok(Closed) = h2_core.get_stream_state(client, 2)
+  assert events == [StreamReset(stream_id: promised_id, error_code: Cancel)]
+  let assert Ok(Closed) = h2_core.get_stream_state(client, promised_id)
 }
 
 // =============================================================================
@@ -198,15 +187,18 @@ pub fn receive_rst_stream_on_reserved_remote_transitions_to_closed_test() {
 //
 // The client rejects a push by sending RST_STREAM on the reserved stream.
 pub fn receive_rst_stream_on_reserved_local_transitions_to_closed_test() {
-  let server = server_with_reserved_local_stream()
-  let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, 2)
+  let #(server, promised_id) = server_with_reserved_local_stream()
+  let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, promised_id)
 
-  // Client sends RST_STREAM on promised stream 2 to reject the push
+  // Client sends RST_STREAM on promised stream to reject the push
   let assert Ok(rst) =
-    h2_frame.encode_rst_stream(stream_id: 2, error_code: h2_frame.Cancel)
+    h2_frame.encode_rst_stream(
+      stream_id: promised_id,
+      error_code: h2_frame.Cancel,
+    )
   let assert Ok(#(server, events, _to_send)) = receive_data(server, rst)
-  assert events == [StreamReset(stream_id: 2, error_code: Cancel)]
-  let assert Ok(Closed) = h2_core.get_stream_state(server, 2)
+  assert events == [StreamReset(stream_id: promised_id, error_code: Cancel)]
+  let assert Ok(Closed) = h2_core.get_stream_state(server, promised_id)
 }
 
 // =============================================================================

@@ -4,9 +4,7 @@ import h2_core.{
   PushPromiseReceived, Server, StreamReset, WithIndexing, open_stream,
   receive_data, send_headers, send_rst_stream,
 }
-import h2_core/internal/stream.{
-  Closed, HalfClosedRemote, ReservedLocal, ReservedRemote,
-}
+import h2_core/internal/stream.{Closed, ReservedLocal, ReservedRemote}
 import h2_frame
 import helper
 
@@ -199,9 +197,11 @@ pub fn receive_push_promise_with_zero_promised_id_is_protocol_error_test() {
 }
 
 pub fn receive_push_promise_with_already_used_id_is_protocol_error_test() {
-  let #(_server, client) = server_with_open_stream()
-  // Simulate that stream 2 was already promised by setting last_remote_stream_id
-  let client = h2_core.Connection(..client, last_remote_stream_id: 2)
+  let #(server, client) = server_with_open_stream()
+  // Server sends a push promise so that client's last_remote_stream_id == 2
+  let assert Ok(#(_server, pp_bytes, _promised_id)) =
+    h2_core.send_push_promise(server, 1, helper.request_headers())
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, pp_bytes)
   // Push promises stream 2 — already used (2 <= 2)
   let assert Ok(pp) =
     h2_frame.encode_push_promise(
@@ -218,9 +218,14 @@ pub fn receive_push_promise_with_already_used_id_is_protocol_error_test() {
 // numerically greater than all streams that the initiating endpoint has
 // opened or reserved."
 pub fn receive_push_promise_with_decreasing_id_is_protocol_error_test() {
-  let #(_server, client) = server_with_open_stream()
-  // Simulate that stream 4 was already promised
-  let client = h2_core.Connection(..client, last_remote_stream_id: 4)
+  let #(server, client) = server_with_open_stream()
+  // Server sends two push promises so that client's last_remote_stream_id == 4
+  let assert Ok(#(server, pp1_bytes, _promised_id)) =
+    h2_core.send_push_promise(server, 1, helper.request_headers())
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, pp1_bytes)
+  let assert Ok(#(_server, pp2_bytes, _promised_id)) =
+    h2_core.send_push_promise(server, 1, helper.request_headers())
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, pp2_bytes)
   // Push promises stream 2 — lower than 4, violates ordering
   let assert Ok(pp) =
     h2_frame.encode_push_promise(
@@ -617,10 +622,13 @@ pub fn receive_push_promise_after_client_sent_rst_stream_is_not_connection_error
 // =============================================================================
 
 pub fn receive_push_promise_on_half_closed_remote_is_protocol_error_test() {
-  let #(_server, client) = server_with_open_stream()
-  // Simulate stream 1 being half-closed (remote) on client
-  // (server sent END_STREAM to client)
-  let client = helper.set_stream_state(client, 1, HalfClosedRemote)
+  let #(server, client) = server_with_open_stream()
+  // Get client's stream 1 to half-closed (remote) by having server send
+  // response headers with END_STREAM, then client receives them.
+  let assert Ok(#(_server, response_bytes)) =
+    send_headers(server, 1, helper.response_headers(), True)
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, response_bytes)
   let assert Ok(pp) =
     h2_frame.encode_push_promise(
       stream_id: 1,
@@ -641,7 +649,9 @@ pub fn receive_push_promise_on_half_closed_remote_is_protocol_error_test() {
 
 pub fn send_push_promise_on_closed_stream_is_error_test() {
   let #(server, _client) = server_with_open_stream()
-  let server = helper.set_stream_state(server, 1, Closed)
+  // Close stream 1 by sending RST_STREAM
+  let assert Ok(#(server, _to_send)) =
+    send_rst_stream(server, 1, h2_core.NoError)
   let assert Error(_) =
     h2_core.send_push_promise(server, 1, [
       Header(":method", "GET", WithIndexing),

@@ -326,8 +326,9 @@ pub fn receive_headers_on_half_closed_local_stream_is_valid_test() {
 
   let server = helper.connected_connection(Server)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
-  // Simulate server having sent END_STREAM on stream 1 (half-closed local)
-  let server = helper.set_stream_state(server, 1, HalfClosedLocal)
+  // Server sends response headers with END_STREAM on stream 1 (half-closed local)
+  let assert Ok(#(server, _to_send)) =
+    h2_core.send_headers(server, 1, helper.response_headers(), True)
   let assert Ok(HalfClosedLocal) = get_stream_state(server, 1)
 
   // HEADERS on half-closed(local) should succeed
@@ -369,8 +370,9 @@ pub fn receive_headers_end_stream_on_half_closed_local_transitions_to_closed_tes
 
   let server = helper.connected_connection(Server)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
-  // Simulate server having sent END_STREAM on stream 1 (half-closed local)
-  let server = helper.set_stream_state(server, 1, HalfClosedLocal)
+  // Server sends response headers with END_STREAM on stream 1 (half-closed local)
+  let assert Ok(#(server, _to_send)) =
+    h2_core.send_headers(server, 1, helper.response_headers(), True)
 
   let assert Ok(#(server, events, _to_send)) = receive_data(server, encoded2)
   let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: True)] =

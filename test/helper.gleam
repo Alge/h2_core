@@ -1,11 +1,8 @@
-import gleam/dict
 import gleam/list
-import gleam/option
 import h2_core.{
-  type Connection, type Header, Client, Connection, Header, Server, WithIndexing,
+  type Connection, type Header, Client, Header, Server, WithIndexing,
   open_stream, receive_data,
 }
-import h2_core/internal/stream.{type Stream, type StreamState, Stream}
 import h2_frame
 
 pub fn request_headers() -> List(Header) {
@@ -70,28 +67,49 @@ pub fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
   #(server, client)
 }
 
-// TODO: Remove these once Connection is opaque (Step 6)
-pub fn new_stream(state: StreamState) -> Stream {
-  Stream(
-    state: state,
-    send_window_size: 65_535,
-    recv_window_size: 65_535,
-    headers_sent: False,
-    final_response_received: False,
-    expected_content_length: option.None,
-    received_content_length: 0,
-  )
+/// Server with stream 1 half-closed(local): server has sent END_STREAM.
+pub fn server_with_half_closed_local_stream() -> #(Connection, Connection) {
+  let #(server, client) = server_with_open_stream()
+  let assert Ok(#(server, _to_send)) =
+    h2_core.send_headers(server, 1, response_headers(), True)
+  #(server, client)
 }
 
-pub fn set_stream_state(
-  conn: Connection,
-  stream_id: Int,
-  state: StreamState,
-) -> Connection {
-  Connection(
-    ..conn,
-    streams: dict.insert(conn.streams, stream_id, new_stream(state)),
-  )
+/// Server with stream 1 closed via RST_STREAM.
+pub fn server_with_closed_stream() -> #(Connection, Connection) {
+  let #(server, client) = server_with_open_stream()
+  let assert Ok(#(server, _to_send)) =
+    h2_core.send_rst_stream(server, 1, h2_core.NoError)
+  #(server, client)
+}
+
+/// Server with a ReservedLocal stream (via PUSH_PROMISE).
+/// Returns #(server, client, promised_stream_id).
+pub fn server_with_reserved_local_stream() -> #(Connection, Connection, Int) {
+  let #(server, client) = server_with_open_stream()
+  let push_headers = [
+    Header(":method", "GET", WithIndexing),
+    Header(":scheme", "https", WithIndexing),
+    Header(":path", "/pushed", WithIndexing),
+  ]
+  let assert Ok(#(server, _to_send, promised_id)) =
+    h2_core.send_push_promise(server, 1, push_headers)
+  #(server, client, promised_id)
+}
+
+/// Client with a ReservedRemote stream (received PUSH_PROMISE from server).
+/// Returns #(server, client, promised_stream_id).
+pub fn client_with_reserved_remote_stream() -> #(Connection, Connection, Int) {
+  let #(server, client) = server_with_open_stream()
+  let push_headers = [
+    Header(":method", "GET", WithIndexing),
+    Header(":scheme", "https", WithIndexing),
+    Header(":path", "/pushed", WithIndexing),
+  ]
+  let assert Ok(#(server, push_bytes, promised_id)) =
+    h2_core.send_push_promise(server, 1, push_headers)
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, push_bytes)
+  #(server, client, promised_id)
 }
 
 /// Patch a single frame's stream ID without changing anything else.
