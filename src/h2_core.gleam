@@ -361,11 +361,21 @@ pub type StreamState {
 }
 
 pub type Stream {
-  Stream(state: StreamState, send_window_size: Int, recv_window_size: Int)
+  Stream(
+    state: StreamState,
+    send_window_size: Int,
+    recv_window_size: Int,
+    headers_sent: Bool,
+  )
 }
 
 fn new_stream() -> Stream {
-  Stream(state: Idle, send_window_size: 65_535, recv_window_size: 65_535)
+  Stream(
+    state: Idle,
+    send_window_size: 65_535,
+    recv_window_size: 65_535,
+    headers_sent: False,
+  )
 }
 
 fn add_stream(conn: Connection, stream: Stream) -> #(Connection, Int) {
@@ -938,9 +948,8 @@ pub fn send_headers(
     Server -> Client
     Client -> Server
   }
-  let is_trailer = end_stream && stream.state == Open
   use <- bool.guard(
-    validate_headers(outbound_role, headers, is_trailer) == Error(Nil),
+    validate_headers(outbound_role, headers, stream.headers_sent) == Error(Nil),
     Error(StreamError(stream_id, h2_frame.ProtocolError)),
   )
 
@@ -961,7 +970,7 @@ pub fn send_headers(
       }
   }
 
-  let stream = Stream(..stream, state: new_state)
+  let stream = Stream(..stream, state: new_state, headers_sent: True)
 
   let conn =
     Connection(..conn, streams: dict.insert(conn.streams, stream_id, stream))

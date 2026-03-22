@@ -1,8 +1,8 @@
 import gleam/dict
 import gleam/option.{None, Some}
 import h2_core.{
-  Client, Connected, ConnectionError, Header, RemoteSettingsChanged, Server,
-  SettingsAcknowledged, Stream, WithIndexing, open_stream, receive_data,
+  Client, Connected, ConnectionError, RemoteSettingsChanged, Server,
+  SettingsAcknowledged, Stream, open_stream, receive_data,
   send_settings,
 }
 import h2_frame
@@ -488,6 +488,7 @@ pub fn receive_settings_initial_window_size_negative_window_tracked_test() {
           state: h2_core.Open,
           send_window_size: 5535,
           recv_window_size: 65_535,
+          headers_sent: False,
         ),
       ),
     )

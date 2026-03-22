@@ -6,7 +6,7 @@ import h2_core.{
   Client, Closed, Connected, Connection, ConnectionError, HalfClosedLocal,
   HalfClosedRemote, Header, HeadersReceived, NeverIndexed, Open, Server,
   StreamReset, WithIndexing, WithoutIndexing, open_stream, receive_data,
-  send_settings,
+  send_headers, send_settings,
 }
 import h2_frame
 import helper
@@ -319,16 +319,16 @@ pub fn receive_headers_end_stream_on_open_stream_transitions_state_test() {
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, encoded1)) =
     open_stream(client, helper.request_headers(), False)
+  // Send trailers on stream 1 (headers_sent is True, so validation treats as trailers)
   let assert Ok(#(_client, _events, encoded2)) =
-    open_stream(client, [Header("x-trailer", "done", WithIndexing)], True)
-  let patched = helper.patch_stream_id(encoded2, 1)
+    send_headers(client, 1, [Header("x-trailer", "done", WithIndexing)], True)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == Open
 
-  let assert Ok(#(server, events, _to_send)) = receive_data(server, patched)
+  let assert Ok(#(server, events, _to_send)) = receive_data(server, encoded2)
   let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: True)] =
     events
   let assert Ok(stream) = dict.get(server.streams, 1)
@@ -341,16 +341,16 @@ pub fn receive_headers_end_stream_on_half_closed_local_transitions_to_closed_tes
   let client = helper.new_connection(Client, Connected)
   let assert Ok(#(client, _events, encoded1)) =
     open_stream(client, helper.request_headers(), False)
+  // Send trailers on stream 1
   let assert Ok(#(_client, _events, encoded2)) =
-    open_stream(client, [Header("x-trailer", "done", WithIndexing)], True)
-  let patched = helper.patch_stream_id(encoded2, 1)
+    send_headers(client, 1, [Header("x-trailer", "done", WithIndexing)], True)
 
   let server = helper.new_connection(Server, Connected)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
   // Simulate server having sent END_STREAM on stream 1 (half-closed local)
   let server = helper.set_stream_state(server, 1, HalfClosedLocal)
 
-  let assert Ok(#(server, events, _to_send)) = receive_data(server, patched)
+  let assert Ok(#(server, events, _to_send)) = receive_data(server, encoded2)
   let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: True)] =
     events
   let assert Ok(stream) = dict.get(server.streams, 1)

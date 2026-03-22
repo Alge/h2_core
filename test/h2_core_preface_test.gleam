@@ -228,7 +228,7 @@ pub fn server_receives_preface_magic_followed_by_headers_test() {
   let assert Ok(#(_client, _events, headers_frame)) =
     h2_core.open_stream(
       client,
-      [h2_core.Header(":method", "GET", h2_core.WithIndexing)],
+      helper.request_headers(),
       False,
     )
   let data = <<client_preface_magic:bits, headers_frame:bits>>

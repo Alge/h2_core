@@ -3,8 +3,8 @@ import gleam/dict
 import gleam/list
 import gleam/option.{None}
 import h2_core.{
-  Client, Connected, ConnectionError, HalfClosedLocal, Header, Open, Server,
-  StreamError, WithIndexing, WithoutIndexing, open_stream, send_headers,
+  Client, Connected, HalfClosedLocal, Header, Open, Server,
+  WithIndexing, open_stream, send_headers,
 }
 import h2_frame
 import helper

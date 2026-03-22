@@ -35,7 +35,7 @@ pub fn set_stream_state(
     streams: dict.insert(
       conn.streams,
       stream_id,
-      Stream(state: state, send_window_size: 65_535, recv_window_size: 65_535),
+      Stream(state: state, send_window_size: 65_535, recv_window_size: 65_535, headers_sent: False),
     ),
   )
 }

@@ -66,6 +66,7 @@ fn server_with_reserved_local_stream() -> Connection {
           state: ReservedLocal,
           send_window_size: 65_535,
           recv_window_size: 65_535,
+          headers_sent: False,
         ),
       ),
     )
