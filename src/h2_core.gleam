@@ -885,7 +885,16 @@ fn handle_decoded_headers(
   let is_existing =
     stream_id <= conn.last_remote_stream_id
     || dict.has_key(conn.streams, stream_id)
-  let is_trailer = end_stream && is_existing
+  let is_trailer =
+    end_stream
+    && is_existing
+    && case conn.role {
+      Server -> True
+      Client ->
+        dict.get(conn.streams, stream_id)
+        |> result.map(fn(s) { s.final_response_received })
+        |> result.unwrap(False)
+    }
 
   use <- bool.guard(
     validate_headers(conn.role, decoded_headers, is_trailer) == Error(Nil),
@@ -955,6 +964,23 @@ fn handle_headers_on_existing_stream(
               }
             }
             |> result.replace_error(ConnectionError(ProtocolError)),
+          )
+
+          // RFC 9113 Section 8.1: informational responses (1xx) with
+          // END_STREAM are malformed
+          use <- bool.guard(
+            conn.role == Client
+              && status_code >= 100
+              && status_code < 200
+              && end_stream,
+            handle_rst_stream(
+              conn:,
+              stream_id:,
+              error_code: ProtocolError,
+              flow_controlled_length: 0,
+              events:,
+              to_send:,
+            ),
           )
 
           // Set final_response_received if this is a non-1xx response

@@ -2,7 +2,7 @@ import gleeunit
 import h2_core.{
   Client, Server, default_settings, new_connection, open_stream, receive_data,
 }
-import h2_core/internal/stream.{Idle, Open}
+import h2_core/internal/stream.{HalfClosedRemote, Open}
 import helper
 
 pub fn main() -> Nil {
@@ -27,11 +27,6 @@ pub fn new_connection_remote_settings_match_defaults_test() {
 // RFC 9113 Section 5.1 - Stream States
 pub fn new_connection_has_no_streams_test() {
   let assert Ok(#(_conn, _)) = new_connection(Client, default_settings())
-}
-
-pub fn stream_initial_state_is_idle_test() {
-  let stream = helper.new_stream(Idle)
-  assert stream.state == Idle
 }
 
 // RFC 9113 Section 5.1.1 - Stream identifiers
@@ -190,4 +185,20 @@ pub fn receive_frame_with_reserved_bit_set_is_accepted_test() {
     receive_data(conn, ping_with_reserved_bit)
   // Should have responded with PING ACK
   assert to_send != <<>>
+}
+
+// Bug: receiving a response with END_STREAM on a client-initiated stream
+// is incorrectly treated as a trailer because is_trailer uses
+// (end_stream && stream_exists). A response with :status should not
+// be validated as a trailer even when END_STREAM is set.
+pub fn client_receives_response_with_end_stream_test() {
+  let #(server, client) = helper.server_with_open_stream()
+  let assert Ok(#(_server, response_bytes)) =
+    h2_core.send_headers(server, 1, helper.response_headers(), True)
+  let assert Ok(#(client, events, _to_send)) =
+    receive_data(client, response_bytes)
+  let assert [
+    h2_core.HeadersReceived(stream_id: 1, headers: _, end_stream: True),
+  ] = events
+  let assert Ok(HalfClosedRemote) = h2_core.get_stream_state(client, 1)
 }
