@@ -1451,6 +1451,28 @@ pub fn get_stream_state(
   }
 }
 
+@internal
+pub fn get_stream_send_window_size(
+  conn conn: Connection,
+  stream_id stream_id: Int,
+) -> Result(Int, Nil) {
+  case dict.get(conn.streams, stream_id) {
+    Ok(stream) -> Ok(stream.send_window_size)
+    Error(Nil) -> Error(Nil)
+  }
+}
+
+@internal
+pub fn get_stream_recv_window_size(
+  conn conn: Connection,
+  stream_id stream_id: Int,
+) -> Result(Int, Nil) {
+  case dict.get(conn.streams, stream_id) {
+    Ok(stream) -> Ok(stream.recv_window_size)
+    Error(Nil) -> Error(Nil)
+  }
+}
+
 pub fn send_settings(
   conn conn: Connection,
   settings settings: List(Setting),

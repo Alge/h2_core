@@ -267,8 +267,7 @@ pub fn receive_data_decrements_stream_recv_window_test() {
       padding: None,
     )
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.recv_window_size == 65_535 - 11
+  let assert Ok(65_524) = h2_core.get_stream_recv_window_size(server, 1)
 }
 
 // RFC 9113 Section 5.2.1 - "A sender that sends a FLOW_CONTROLLED frame
@@ -373,8 +372,7 @@ pub fn send_data_on_open_stream_test() {
     )
   assert to_send == expected
   // send_window_size should be decremented
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.send_window_size == 65_535 - 5
+  let assert Ok(65_530) = h2_core.get_stream_send_window_size(server, 1)
 }
 
 pub fn send_data_with_end_stream_test() {
@@ -479,8 +477,7 @@ pub fn send_data_decrements_stream_send_window_test() {
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<"hello world":utf8>>, False, None)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.send_window_size == 65_535 - 11
+  let assert Ok(65_524) = h2_core.get_stream_send_window_size(server, 1)
 }
 
 // RFC 9113 Section 5.2.1 - "A sender that sends a FLOW_CONTROLLED frame
@@ -595,8 +592,7 @@ pub fn send_padded_data_decrements_stream_send_window_test() {
   // 5 bytes data + 1 byte pad_length + 10 bytes padding = 16 bytes total payload
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<"hello":utf8>>, False, Some(10))
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.send_window_size == 65_535 - 16
+  let assert Ok(65_519) = h2_core.get_stream_send_window_size(server, 1)
 }
 
 // RFC 9113 Section 6.1 - "The entire DATA frame payload is included in flow
@@ -731,8 +727,7 @@ pub fn send_data_exactly_at_window_boundary_test() {
     )
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<"hello":utf8>>, False, None)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.send_window_size == 0
+  let assert Ok(0) = h2_core.get_stream_send_window_size(server, 1)
   assert server.send_window_size == 0
 }
 
@@ -1006,8 +1001,7 @@ pub fn receive_padded_data_decrements_stream_recv_window_test() {
       padding: Some(10),
     )
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.recv_window_size == 65_535 - 16
+  let assert Ok(65_519) = h2_core.get_stream_recv_window_size(server, 1)
 }
 
 // RFC 9113 Section 6.1 - "The entire DATA frame payload is included in flow

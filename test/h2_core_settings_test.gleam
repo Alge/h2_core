@@ -288,8 +288,7 @@ pub fn receive_settings_initial_window_size_adjusts_existing_streams_test() {
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.send_window_size == 65_535
+  let assert Ok(65_535) = h2_core.get_stream_send_window_size(server, 1)
 
   // Peer (client) sends SETTINGS with INITIAL_WINDOW_SIZE=32768
   // Delta = 32768 - 65535 = -32767
@@ -299,8 +298,7 @@ pub fn receive_settings_initial_window_size_adjusts_existing_streams_test() {
     ])
   let assert Ok(#(server, _events, _to_send)) =
     receive_data(server, settings_frame)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.send_window_size == 32_768
+  let assert Ok(32_768) = h2_core.get_stream_send_window_size(server, 1)
 }
 
 // RFC 9113 Section 6.9.2 - "An endpoint MUST treat a change to
@@ -343,9 +341,8 @@ pub fn receive_settings_initial_window_size_overflow_is_flow_control_error_test(
       window_size_increment: 2_147_418_112,
     )
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, wu)
-  let assert Ok(stream) = dict.get(server.streams, 1)
   // Stream send window is now 65_535 + 2_147_418_112 = 2_147_483_647
-  assert stream.send_window_size == 2_147_483_647
+  let assert Ok(2_147_483_647) = h2_core.get_stream_send_window_size(server, 1)
 
   // Now peer sends SETTINGS with INITIAL_WINDOW_SIZE=65536 (delta = +1)
   // This would push the stream window to 2_147_483_648 which exceeds 2^31-1
@@ -418,8 +415,7 @@ pub fn settings_ack_initial_window_size_adjusts_recv_window_test() {
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.recv_window_size == 65_535
+  let assert Ok(65_535) = h2_core.get_stream_recv_window_size(server, 1)
 
   // Server sends SETTINGS with INITIAL_WINDOW_SIZE=32768
   let assert Ok(#(server, _to_send)) =
@@ -430,9 +426,8 @@ pub fn settings_ack_initial_window_size_adjusts_recv_window_test() {
     h2_frame.encode_settings(ack: True, settings: [])
   let assert Ok(#(server, _events, _to_send)) =
     receive_data(server, settings_ack)
-  let assert Ok(stream) = dict.get(server.streams, 1)
   // Delta = 32768 - 65535 = -32767, so recv_window_size = 65535 - 32767 = 32768
-  assert stream.recv_window_size == 32_768
+  let assert Ok(32_768) = h2_core.get_stream_recv_window_size(server, 1)
 }
 
 // RFC 9113 Section 6.9.2 - "A change to SETTINGS_INITIAL_WINDOW_SIZE can
@@ -460,9 +455,8 @@ pub fn receive_settings_initial_window_size_can_go_negative_test() {
     ])
   let assert Ok(#(server, _events, _to_send)) =
     receive_data(server, settings_frame)
-  let assert Ok(stream) = dict.get(server.streams, 1)
   // Window should be negative: 65535 + (-65535) = 0
-  assert stream.send_window_size == 0
+  let assert Ok(0) = h2_core.get_stream_send_window_size(server, 1)
 }
 
 // RFC 9113 Section 6.9.2 - "A change to SETTINGS_INITIAL_WINDOW_SIZE can
@@ -502,8 +496,8 @@ pub fn receive_settings_initial_window_size_negative_window_tracked_test() {
     ])
   let assert Ok(#(server, _events, _to_send)) =
     receive_data(server, settings_frame)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.send_window_size == -60_000
+  let assert Ok(v) = h2_core.get_stream_send_window_size(server, 1)
+  assert v == -60_000
 }
 
 // RFC 9113 Section 6.5 - "A SETTINGS frame with a length other than a

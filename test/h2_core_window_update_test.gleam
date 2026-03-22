@@ -1,4 +1,3 @@
-import gleam/dict
 import h2_core.{
   Client, ConnectionError, FlowControlError, FrameSizeError, Header,
   HeadersReceived, ProtocolError, Server, StreamReset, WithIndexing,
@@ -23,9 +22,8 @@ pub fn new_stream_default_window_sizes_test() {
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.send_window_size == 65_535
-  assert stream.recv_window_size == 65_535
+  let assert Ok(65_535) = h2_core.get_stream_send_window_size(server, 1)
+  let assert Ok(65_535) = h2_core.get_stream_recv_window_size(server, 1)
 }
 
 // --- Sending WINDOW_UPDATE ---
@@ -111,8 +109,7 @@ pub fn send_window_update_stream_does_not_affect_connection_test() {
 
   let assert Ok(#(server, _to_send)) = send_window_update(server, 1, 10_000)
   assert server.recv_window_size == 65_535
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.recv_window_size == 75_535
+  let assert Ok(75_535) = h2_core.get_stream_recv_window_size(server, 1)
 }
 
 // RFC 9113 Section 6.9 - Multiple stream-level WINDOW_UPDATEs accumulate.
@@ -125,8 +122,7 @@ pub fn send_window_update_stream_recv_window_accumulates_test() {
 
   let assert Ok(#(server, _to_send)) = send_window_update(server, 1, 1000)
   let assert Ok(#(server, _to_send)) = send_window_update(server, 1, 2000)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.recv_window_size == 68_535
+  let assert Ok(68_535) = h2_core.get_stream_recv_window_size(server, 1)
 }
 
 // RFC 9113 Section 6.9.1 - Stream recv window overflow is
@@ -258,8 +254,7 @@ pub fn receive_window_update_stream_level_test() {
   let assert Ok(#(server, events, to_send)) = receive_data(server, wu)
   assert events == []
   assert to_send == <<>>
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.send_window_size == 66_535
+  let assert Ok(66_535) = h2_core.get_stream_send_window_size(server, 1)
 }
 
 // RFC 9113 Section 6.9 - Stream and connection flow control windows
@@ -276,8 +271,7 @@ pub fn receive_window_update_stream_does_not_affect_connection_window_test() {
     h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, wu)
   assert server.send_window_size == 65_535
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.send_window_size == 66_535
+  let assert Ok(66_535) = h2_core.get_stream_send_window_size(server, 1)
 }
 
 // RFC 9113 Section 6.9 - Multiple stream-level WINDOW_UPDATEs
@@ -295,8 +289,7 @@ pub fn receive_window_update_stream_accumulates_test() {
   let assert Ok(wu2) =
     h2_frame.encode_window_update(stream_id: 1, window_size_increment: 500)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, wu2)
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.send_window_size == 67_035
+  let assert Ok(67_035) = h2_core.get_stream_send_window_size(server, 1)
 }
 
 // RFC 9113 Section 6.9.1 - Stream window overflow is a stream error
@@ -347,8 +340,7 @@ pub fn receive_window_update_on_open_stream_test() {
   let assert Ok(#(server, events, to_send)) = receive_data(server, wu)
   assert events == []
   assert to_send == <<>>
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.send_window_size == 66_535
+  let assert Ok(66_535) = h2_core.get_stream_send_window_size(server, 1)
 }
 
 // RFC 9113 Section 5.1 - WINDOW_UPDATE on a "half-closed (local)"
@@ -367,8 +359,7 @@ pub fn receive_window_update_on_half_closed_local_stream_test() {
   let assert Ok(#(server, events, to_send)) = receive_data(server, wu)
   assert events == []
   assert to_send == <<>>
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.send_window_size == 66_535
+  let assert Ok(66_535) = h2_core.get_stream_send_window_size(server, 1)
 }
 
 // RFC 9113 Section 5.1 - WINDOW_UPDATE is explicitly allowed on
@@ -389,8 +380,7 @@ pub fn receive_window_update_on_half_closed_remote_stream_test() {
   let assert Ok(#(server, events, to_send)) = receive_data(server, wu)
   assert events == []
   assert to_send == <<>>
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.send_window_size == 66_535
+  let assert Ok(66_535) = h2_core.get_stream_send_window_size(server, 1)
 }
 
 // RFC 9113 Section 5.1 - WINDOW_UPDATE on a closed stream. The RFC

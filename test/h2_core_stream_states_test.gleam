@@ -256,8 +256,7 @@ pub fn receive_window_update_on_half_closed_remote_is_accepted_test() {
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, wu)
 
   // Verify the stream's send_window_size was updated
-  let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.send_window_size == 65_535 + 1024
+  let assert Ok(66_559) = h2_core.get_stream_send_window_size(server, 1)
 }
 
 // RFC 9113 Section 5.1 (half-closed remote):
