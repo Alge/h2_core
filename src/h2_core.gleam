@@ -2184,8 +2184,6 @@ fn parse_loop(
             h2_frame.Unknown(_, _, _, _) -> {
               parse_loop(conn, events, to_send)
             }
-
-            _ -> todo
           }
         }
         Error(h2_frame.StreamError(stream_id, error_code)) -> {
