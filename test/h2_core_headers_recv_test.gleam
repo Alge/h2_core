@@ -161,8 +161,9 @@ pub fn receive_headers_no_response_test() {
 // RFC 9113 Section 8.3.1 - A request with no pseudo-headers at all is
 // malformed — it's missing :method, :scheme, :path.
 pub fn receive_headers_empty_block_is_malformed_test() {
-  let client = helper.new_connection(Client, Connected)
-  let assert Ok(#(_client, _events, encoded)) = open_stream(client, [], False)
+  // Manually craft HEADERS with empty field block to bypass outbound validation
+  // Length=0, Type=0x01, Flags=0x04 (END_HEADERS), Stream ID=1
+  let encoded = <<0:size(24), 0x01:size(8), 0x04:size(8), 0:size(1), 1:size(31)>>
 
   let server = helper.new_connection(Server, Connected)
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
