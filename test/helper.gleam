@@ -31,6 +31,7 @@ pub fn new_stream(state: StreamState) -> h2_core.Stream {
     send_window_size: 65_535,
     recv_window_size: 65_535,
     headers_sent: False,
+    final_response_received: False,
   )
 }
 

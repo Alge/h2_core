@@ -367,6 +367,7 @@ pub type Stream {
     send_window_size: Int,
     recv_window_size: Int,
     headers_sent: Bool,
+    final_response_received: Bool,
   )
 }
 
@@ -376,6 +377,7 @@ fn new_stream() -> Stream {
     send_window_size: 65_535,
     recv_window_size: 65_535,
     headers_sent: False,
+    final_response_received: False,
   )
 }
 
@@ -409,6 +411,23 @@ pub type Indexing {
 
 pub type Header {
   Header(name: String, value: String, indexing: Indexing)
+}
+
+fn extract_status_code(headers: List(Header)) -> Result(Int, Nil) {
+  case headers {
+    [] -> Error(Nil)
+    [header, ..rest] -> {
+      case header.name {
+        ":status" -> {
+          case int.parse(header.value) {
+            Ok(status_code) -> Ok(status_code)
+            Error(_) -> Error(Nil)
+          }
+        }
+        _ -> extract_status_code(rest)
+      }
+    }
+  }
 }
 
 fn verify_mandatory_pseudoheaders(
