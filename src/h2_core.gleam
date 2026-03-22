@@ -368,6 +368,8 @@ pub type Stream {
     recv_window_size: Int,
     headers_sent: Bool,
     final_response_received: Bool,
+    expected_content_length: option.Option(Int),
+    received_content_length: Int,
   )
 }
 
@@ -378,6 +380,8 @@ fn new_stream() -> Stream {
     recv_window_size: 65_535,
     headers_sent: False,
     final_response_received: False,
+    expected_content_length: option.None,
+    received_content_length: 0,
   )
 }
 
@@ -425,6 +429,25 @@ fn extract_status_code(headers: List(Header)) -> Result(Int, Nil) {
           }
         }
         _ -> extract_status_code(rest)
+      }
+    }
+  }
+}
+
+fn extract_content_length(
+  headers: List(Header),
+) -> Result(option.Option(Int), Nil) {
+  case headers {
+    [] -> Ok(option.None)
+    [header, ..rest] -> {
+      case header.name {
+        "content-length" -> {
+          case int.parse(header.value) {
+            Ok(content_length) -> Ok(option.Some(content_length))
+            Error(_) -> Error(Nil)
+          }
+        }
+        _ -> extract_content_length(rest)
       }
     }
   }
@@ -984,9 +1007,40 @@ fn handle_headers_on_new_stream(
     ),
   )
 
+  // Make sure content length is valid if present
+  let content_length_result = extract_content_length(decoded_headers)
+
+  use <- bool.guard(
+    content_length_result == Error(Nil),
+    handle_rst_stream(
+      conn:,
+      stream_id:,
+      error_code: h2_frame.ProtocolError,
+      flow_controlled_length: 0,
+      events:,
+      to_send:,
+    ),
+  )
+
+  // This can't actually error due to our guard before
+  use content_length <- result.try(
+    content_length_result
+    |> result.replace_error(StreamError(stream_id, h2_frame.ProtocolError)),
+  )
+
   let stream = case end_stream {
-    False -> Stream(..new_stream(), state: Open)
-    True -> Stream(..new_stream(), state: HalfClosedRemote)
+    False ->
+      Stream(
+        ..new_stream(),
+        state: Open,
+        expected_content_length: content_length,
+      )
+    True ->
+      Stream(
+        ..new_stream(),
+        state: HalfClosedRemote,
+        expected_content_length: content_length,
+      )
   }
 
   let conn =
@@ -1970,10 +2024,51 @@ fn parse_loop(
                       ..stream,
                       state: new_stream_state,
                       recv_window_size: new_stream_recv_window,
+                      received_content_length: stream.received_content_length
+                        + bit_array.byte_size(data),
                     ),
                   ),
                   recv_window_size: new_conn_recv_window,
                 )
+
+              // Make sure we didn't receive more data than the expected content length
+              use <- bool.guard(
+                {
+                  case stream.expected_content_length {
+                    option.Some(expected_length) ->
+                      stream.received_content_length + bit_array.byte_size(data)
+                      > expected_length
+                    option.None -> False
+                  }
+                },
+                handle_rst_stream(
+                  conn: conn,
+                  stream_id: stream_id,
+                  error_code: h2_frame.ProtocolError,
+                  flow_controlled_length: payload_length,
+                  events: events,
+                  to_send: to_send,
+                ),
+              )
+
+              // If this is the end of the stream, make sure we received the promised amount of data
+              use <- bool.guard(
+                end_stream
+                  && case stream.expected_content_length {
+                  option.Some(expected) ->
+                    stream.received_content_length + bit_array.byte_size(data)
+                    < expected
+                  option.None -> False
+                },
+                handle_rst_stream(
+                  conn: conn,
+                  stream_id: stream_id,
+                  error_code: h2_frame.ProtocolError,
+                  flow_controlled_length: payload_length,
+                  events: events,
+                  to_send: to_send,
+                ),
+              )
 
               // Receiving data frames on a already HalfClosedRemote stream
               // triggers a RST_STREAM

@@ -1,5 +1,6 @@
 import gleam/dict
 import gleam/list
+import gleam/option
 import h2_core.{
   type Connection, type ConnectionState, type Header, type StreamState, Client,
   Connected, Connection, Header, Server, Stream, WithIndexing, open_stream,
@@ -32,6 +33,8 @@ pub fn new_stream(state: StreamState) -> h2_core.Stream {
     recv_window_size: 65_535,
     headers_sent: False,
     final_response_received: False,
+    expected_content_length: option.None,
+    received_content_length: 0,
   )
 }
 

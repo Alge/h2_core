@@ -2,7 +2,8 @@ import gleam/dict
 import gleam/option.{None, Some}
 import h2_core.{
   type Connection, Client, Closed, Connected, ConnectionError, DataReceived,
-  HalfClosedRemote, Header, Open, ReservedLocal, ReservedRemote, Server, Stream,
+  HalfClosedRemote, Header, HeadersReceived, Open, ReservedLocal, ReservedRemote,
+  Server, Stream,
   StreamError, StreamReset, WithIndexing, open_stream, receive_data,
   send_headers,
 }
@@ -1232,6 +1233,8 @@ pub fn receive_data_exceeding_content_length_is_malformed_test() {
   let assert Ok(#(_client, _events, headers)) =
     open_stream(client, [
       Header(":method", "POST", WithIndexing),
+      Header(":scheme", "https", WithIndexing),
+      Header(":path", "/", WithIndexing),
       Header("content-length", "5", WithIndexing),
     ], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
@@ -1245,11 +1248,15 @@ pub fn receive_data_exceeding_content_length_is_malformed_test() {
       padding: None,
     )
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
+  // Data is discarded so a WINDOW_UPDATE is also sent to reclaim the
+  // connection flow-control window.
   let assert Ok(#(_server, events, to_send)) = receive_data(server, data_frame)
   assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
-  assert to_send == expected_rst
+  let assert Ok(expected_wu) =
+    h2_frame.encode_window_update(stream_id: 0, window_size_increment: 10)
+  assert to_send == <<expected_rst:bits, expected_wu:bits>>
 }
 
 // RFC 9113 Section 8.1.1 - Receiving less DATA than declared in
@@ -1261,6 +1268,8 @@ pub fn receive_data_less_than_content_length_with_end_stream_is_malformed_test()
   let assert Ok(#(_client, _events, headers)) =
     open_stream(client, [
       Header(":method", "POST", WithIndexing),
+      Header(":scheme", "https", WithIndexing),
+      Header(":path", "/", WithIndexing),
       Header("content-length", "10", WithIndexing),
     ], False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
@@ -1274,7 +1283,107 @@ pub fn receive_data_less_than_content_length_with_end_stream_is_malformed_test()
       padding: None,
     )
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
+  // Data is discarded so a WINDOW_UPDATE is also sent to reclaim the
+  // connection flow-control window.
   let assert Ok(#(_server, events, to_send)) = receive_data(server, data_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  let assert Ok(expected_wu) =
+    h2_frame.encode_window_update(stream_id: 0, window_size_increment: 5)
+  assert to_send == <<expected_rst:bits, expected_wu:bits>>
+}
+
+// RFC 9113 Section 8.1.1 - Content-length matching exactly should succeed.
+pub fn receive_data_matching_content_length_succeeds_test() {
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
+  let assert Ok(#(_client, _events, headers)) =
+    open_stream(client, [
+      Header(":method", "POST", WithIndexing),
+      Header(":scheme", "https", WithIndexing),
+      Header(":path", "/", WithIndexing),
+      Header("content-length", "5", WithIndexing),
+    ], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  let assert Ok(data_frame) =
+    h2_frame.encode_data(
+      stream_id: 1,
+      end_stream: True,
+      data: <<"hello":utf8>>,
+      padding: None,
+    )
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, data_frame)
+  let assert [DataReceived(stream_id: 1, data: <<"hello":utf8>>, ..)] = events
+}
+
+// RFC 9113 Section 8.1.1 - Multiple DATA frames totaling the correct
+// content-length should succeed.
+pub fn receive_multiple_data_matching_content_length_succeeds_test() {
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
+  let assert Ok(#(_client, _events, headers)) =
+    open_stream(client, [
+      Header(":method", "POST", WithIndexing),
+      Header(":scheme", "https", WithIndexing),
+      Header(":path", "/", WithIndexing),
+      Header("content-length", "10", WithIndexing),
+    ], False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  // First DATA: 5 bytes
+  let assert Ok(frame1) =
+    h2_frame.encode_data(
+      stream_id: 1,
+      end_stream: False,
+      data: <<"hello":utf8>>,
+      padding: None,
+    )
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, frame1)
+
+  // Second DATA: 5 bytes with END_STREAM — total 10 matches content-length
+  let assert Ok(frame2) =
+    h2_frame.encode_data(
+      stream_id: 1,
+      end_stream: True,
+      data: <<"world":utf8>>,
+      padding: None,
+    )
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, frame2)
+  let assert [DataReceived(stream_id: 1, data: <<"world":utf8>>, ..)] = events
+}
+
+// RFC 9113 Section 8.1.1 - Content-length of 0 with no DATA and
+// END_STREAM on HEADERS should succeed.
+pub fn receive_content_length_zero_no_data_succeeds_test() {
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
+  let assert Ok(#(_client, _events, headers)) =
+    open_stream(client, [
+      Header(":method", "POST", WithIndexing),
+      Header(":scheme", "https", WithIndexing),
+      Header(":path", "/", WithIndexing),
+      Header("content-length", "0", WithIndexing),
+    ], True)
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, headers)
+  let assert [HeadersReceived(stream_id: 1, ..)] = events
+}
+
+// RFC 9113 Section 8.1.1 - A non-numeric content-length value is
+// malformed.
+pub fn receive_headers_invalid_content_length_is_malformed_test() {
+  let server = helper.new_connection(Server, Connected)
+  let client = helper.new_connection(Client, Connected)
+  let assert Ok(#(_client, _events, headers)) =
+    open_stream(client, [
+      Header(":method", "POST", WithIndexing),
+      Header(":scheme", "https", WithIndexing),
+      Header(":path", "/", WithIndexing),
+      Header("content-length", "abc", WithIndexing),
+    ], False)
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
+  let assert Ok(#(_server, events, to_send)) = receive_data(server, headers)
   assert events == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
