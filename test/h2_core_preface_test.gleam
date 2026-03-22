@@ -179,8 +179,7 @@ pub fn server_transitions_to_awaiting_settings_after_magic_test() {
 pub fn server_receives_invalid_preface_bytes_test() {
   let conn = helper.new_connection(Server, AwaitingPreface)
   let garbage = <<"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n":utf8>>
-  let assert Error(ConnectionError(ProtocolError)) =
-    receive_data(conn, garbage)
+  let assert Error(ConnectionError(ProtocolError)) = receive_data(conn, garbage)
 }
 
 // A server receiving partially correct magic followed by wrong bytes
@@ -206,8 +205,7 @@ pub fn server_receives_preface_magic_followed_by_non_settings_test() {
   let assert Ok(ping_frame) =
     h2_frame.encode_ping(ack: False, data: <<1, 2, 3, 4, 5, 6, 7, 8>>)
   let data = <<client_preface_magic:bits, ping_frame:bits>>
-  let assert Error(ConnectionError(ProtocolError)) =
-    receive_data(conn, data)
+  let assert Error(ConnectionError(ProtocolError)) = receive_data(conn, data)
 }
 
 // Client preface magic followed by a SETTINGS ACK (not a non-ack SETTINGS)
@@ -218,8 +216,7 @@ pub fn server_receives_preface_magic_followed_by_settings_ack_test() {
   let assert Ok(settings_ack) =
     h2_frame.encode_settings(ack: True, settings: [])
   let data = <<client_preface_magic:bits, settings_ack:bits>>
-  let assert Error(ConnectionError(ProtocolError)) =
-    receive_data(conn, data)
+  let assert Error(ConnectionError(ProtocolError)) = receive_data(conn, data)
 }
 
 // Client preface magic followed by HEADERS is PROTOCOL_ERROR.
@@ -229,8 +226,7 @@ pub fn server_receives_preface_magic_followed_by_headers_test() {
   let assert Ok(#(_client, headers_frame)) =
     h2_core.open_stream(client, helper.request_headers(), False)
   let data = <<client_preface_magic:bits, headers_frame:bits>>
-  let assert Error(ConnectionError(ProtocolError)) =
-    receive_data(conn, data)
+  let assert Error(ConnectionError(ProtocolError)) = receive_data(conn, data)
 }
 
 // =============================================================================

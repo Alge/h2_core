@@ -4,10 +4,10 @@ import gleam/list
 import gleam/option
 import h2_core.{
   Client, Closed, CompressionError, Connected, Connection, ConnectionError,
-  HalfClosedLocal, HalfClosedRemote, Header, HeadersReceived, MaxConcurrentStreams,
-  NeverIndexed, Open, ProtocolError, RefusedStream, Server, StreamClosed,
-  StreamReset, WithIndexing, WithoutIndexing, open_stream, receive_data,
-  send_headers, send_settings,
+  HalfClosedLocal, HalfClosedRemote, Header, HeadersReceived,
+  MaxConcurrentStreams, NeverIndexed, Open, ProtocolError, RefusedStream, Server,
+  StreamClosed, StreamReset, WithIndexing, WithoutIndexing, open_stream,
+  receive_data, send_headers, send_settings,
 }
 import h2_frame
 import helper
@@ -172,8 +172,7 @@ pub fn receive_headers_empty_block_is_malformed_test() {
   let server = helper.new_connection(Server, Connected)
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_server, events, to_send)) = receive_data(server, encoded)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -531,8 +530,7 @@ pub fn receive_headers_on_half_closed_remote_is_stream_error_test() {
   // Patch frame 2 to target stream 1 (half-closed remote)
   let patched = helper.patch_stream_id(encoded2, 1)
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, patched)
-  let assert [StreamReset(stream_id: 1, error_code: StreamClosed)] =
-    events
+  let assert [StreamReset(stream_id: 1, error_code: StreamClosed)] = events
 }
 
 // RFC 9113 Section 5.4.2 - Stream error sends RST_STREAM
@@ -695,8 +693,7 @@ pub fn receive_headers_exceeding_max_concurrent_streams_test() {
   let assert Ok(#(_server, events, to_send)) = receive_data(server, encoded3)
 
   // Should get a RST_STREAM with REFUSED_STREAM
-  let assert [StreamReset(stream_id: 3, error_code: RefusedStream)] =
-    events
+  let assert [StreamReset(stream_id: 3, error_code: RefusedStream)] = events
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(h2_frame.RstStream(3, h2_frame.RefusedStream)) =
     h2_frame.decode_frame(frame_data)
@@ -795,8 +792,7 @@ pub fn receive_headers_pseudo_after_regular_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -824,8 +820,7 @@ pub fn receive_headers_duplicate_pseudo_header_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -860,8 +855,7 @@ pub fn receive_trailers_with_pseudo_header_is_malformed_test() {
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, trailer_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -891,8 +885,7 @@ pub fn receive_headers_with_connection_header_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -916,8 +909,7 @@ pub fn receive_headers_with_transfer_encoding_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -951,8 +943,7 @@ pub fn receive_informational_response_with_end_stream_is_malformed_test() {
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_client, events, to_send)) =
     receive_data(client, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -981,8 +972,7 @@ pub fn receive_request_missing_method_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1005,8 +995,7 @@ pub fn receive_request_missing_scheme_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1029,8 +1018,7 @@ pub fn receive_request_missing_path_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1063,8 +1051,7 @@ pub fn receive_response_missing_status_is_malformed_test() {
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_client, events, to_send)) =
     receive_data(client, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1100,8 +1087,7 @@ pub fn receive_headers_with_unrecognized_pseudo_header_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1128,8 +1114,7 @@ pub fn receive_headers_with_te_non_trailers_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1194,8 +1179,7 @@ pub fn receive_informational_response_after_final_is_malformed_test() {
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_client, events, to_send)) =
     receive_data(client, informational_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1268,8 +1252,7 @@ pub fn receive_request_with_empty_path_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1302,8 +1285,7 @@ pub fn receive_connect_request_with_path_is_malformed_test() {
   // sends RST_STREAM and continues processing.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1357,8 +1339,7 @@ pub fn receive_headers_uppercase_field_name_is_malformed_test() {
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1386,8 +1367,7 @@ pub fn receive_headers_colon_in_field_name_is_malformed_test() {
     )
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1413,8 +1393,7 @@ pub fn receive_headers_field_value_with_nul_is_malformed_test() {
     )
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1437,8 +1416,7 @@ pub fn receive_headers_field_value_with_lf_is_malformed_test() {
     )
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1461,8 +1439,7 @@ pub fn receive_headers_field_value_with_cr_is_malformed_test() {
     )
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1486,8 +1463,7 @@ pub fn receive_headers_field_value_leading_space_is_malformed_test() {
     )
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1509,8 +1485,7 @@ pub fn receive_headers_field_value_trailing_space_is_malformed_test() {
     )
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1532,8 +1507,7 @@ pub fn receive_headers_field_value_leading_tab_is_malformed_test() {
     )
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -1555,8 +1529,7 @@ pub fn receive_headers_field_value_trailing_tab_is_malformed_test() {
     )
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst

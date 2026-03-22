@@ -56,8 +56,7 @@ fn server_with_reserved_local_stream() -> Connection {
 fn server_with_closed_stream() -> #(Connection, Connection) {
   let #(server, client) = server_with_half_closed_remote_stream()
   // Server sends RST_STREAM to fully close the stream
-  let assert Ok(#(server, _to_send)) =
-    send_rst_stream(server, 1, NoError)
+  let assert Ok(#(server, _to_send)) = send_rst_stream(server, 1, NoError)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == Closed
   #(server, client)

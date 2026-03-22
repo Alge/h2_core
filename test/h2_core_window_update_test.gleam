@@ -181,8 +181,7 @@ pub fn receive_window_update_zero_increment_connection_test() {
     0:size(1),
     0:size(31),
   >>
-  let assert Error(ConnectionError(ProtocolError)) =
-    receive_data(conn, bad_wu)
+  let assert Error(ConnectionError(ProtocolError)) = receive_data(conn, bad_wu)
 }
 
 // RFC 9113 Section 6.9 - Increment of 0 on a stream is stream error PROTOCOL_ERROR
@@ -199,8 +198,7 @@ pub fn receive_window_update_zero_increment_stream_test() {
     0:size(31),
   >>
   let assert Ok(#(_conn, events, to_send)) = receive_data(conn, bad_wu)
-  let assert [StreamReset(stream_id: 1, error_code: ProtocolError)] =
-    events
+  let assert [StreamReset(stream_id: 1, error_code: ProtocolError)] = events
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(h2_frame.RstStream(1, h2_frame.ProtocolError)) =
     h2_frame.decode_frame(frame_data)
@@ -221,8 +219,7 @@ pub fn receive_window_update_wrong_length_test() {
     2,
     3,
   >>
-  let assert Error(ConnectionError(FrameSizeError)) =
-    receive_data(conn, bad_wu)
+  let assert Error(ConnectionError(FrameSizeError)) = receive_data(conn, bad_wu)
 }
 
 // RFC 9113 Section 6.9.1 - Flow control window MUST NOT exceed 2^31-1
@@ -235,8 +232,7 @@ pub fn receive_window_update_overflow_connection_test() {
       stream_id: 0,
       window_size_increment: increment,
     )
-  let assert Error(ConnectionError(FlowControlError)) =
-    receive_data(conn, wu)
+  let assert Error(ConnectionError(FlowControlError)) = receive_data(conn, wu)
 }
 
 // WINDOW_UPDATE does not send any response frame
@@ -319,8 +315,7 @@ pub fn receive_window_update_stream_overflow_test() {
       window_size_increment: 2_147_483_647,
     )
   let assert Ok(#(_server, events, to_send)) = receive_data(server, wu)
-  let assert [StreamReset(stream_id: 1, error_code: FlowControlError)] =
-    events
+  let assert [StreamReset(stream_id: 1, error_code: FlowControlError)] = events
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(h2_frame.RstStream(1, h2_frame.FlowControlError)) =
     h2_frame.decode_frame(frame_data)
@@ -335,8 +330,7 @@ pub fn receive_window_update_idle_stream_is_protocol_error_test() {
   let conn = helper.new_connection(Server, Connected)
   let assert Ok(wu) =
     h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)
-  let assert Error(ConnectionError(ProtocolError)) =
-    receive_data(conn, wu)
+  let assert Error(ConnectionError(ProtocolError)) = receive_data(conn, wu)
 }
 
 // RFC 9113 Section 5.1 - WINDOW_UPDATE on an "open" stream is valid.
@@ -440,8 +434,7 @@ pub fn receive_window_update_connection_survives_stream_overflow_test() {
       window_size_increment: 2_147_483_647,
     )
   let assert Ok(#(server, events, _to_send)) = receive_data(server, wu)
-  let assert [StreamReset(stream_id: 1, error_code: FlowControlError)] =
-    events
+  let assert [StreamReset(stream_id: 1, error_code: FlowControlError)] = events
 
   // Connection should still work — open stream 3
   let assert Ok(#(_client, headers3)) =

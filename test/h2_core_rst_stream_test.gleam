@@ -23,8 +23,7 @@ pub fn send_rst_stream_with_different_error_codes_test() {
   let conn = helper.new_connection(Server, Connected)
   let assert Ok(#(conn, _to_send)) =
     open_stream(conn, helper.response_headers(), False)
-  let assert Ok(#(_conn, to_send)) =
-    send_rst_stream(conn, 2, InternalError)
+  let assert Ok(#(_conn, to_send)) = send_rst_stream(conn, 2, InternalError)
   let assert Ok(expected) =
     h2_frame.encode_rst_stream(stream_id: 2, error_code: h2_frame.InternalError)
   assert to_send == expected
@@ -112,8 +111,7 @@ pub fn receive_rst_stream_on_stream_zero_is_protocol_error_test() {
     0:size(31),
     0:size(32),
   >>
-  let assert Error(ConnectionError(ProtocolError)) =
-    receive_data(conn, bad_rst)
+  let assert Error(ConnectionError(ProtocolError)) = receive_data(conn, bad_rst)
 }
 
 // RFC 9113 Section 6.4 - RST_STREAM on idle stream is PROTOCOL_ERROR
@@ -122,8 +120,7 @@ pub fn receive_rst_stream_on_idle_stream_is_protocol_error_test() {
   // Stream 1 has never been opened, so it's idle
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
-  let assert Error(ConnectionError(ProtocolError)) =
-    receive_data(conn, rst)
+  let assert Error(ConnectionError(ProtocolError)) = receive_data(conn, rst)
 }
 
 // RFC 9113 Section 6.4 - Wrong frame size is FRAME_SIZE_ERROR

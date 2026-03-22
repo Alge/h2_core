@@ -4,8 +4,8 @@ import h2_core.{
   type Connection, Client, Closed, Connected, ConnectionError, DataReceived,
   FlowControlError, FrameSizeError, HalfClosedRemote, Header, HeadersReceived,
   NoError, Open, ProtocolError, ReservedLocal, ReservedRemote, Server, Stream,
-  StreamClosed, StreamError, StreamReset, WithIndexing, open_stream, receive_data,
-  send_headers,
+  StreamClosed, StreamError, StreamReset, WithIndexing, open_stream,
+  receive_data, send_headers,
 }
 import h2_frame
 import helper
@@ -144,8 +144,7 @@ pub fn receive_data_on_half_closed_remote_is_stream_closed_error_test() {
   let assert Ok(expected_wu) =
     h2_frame.encode_window_update(stream_id: 0, window_size_increment: 7)
   assert to_send == <<expected_rst:bits, expected_wu:bits>>
-  assert events
-    == [StreamReset(stream_id: 1, error_code: StreamClosed)]
+  assert events == [StreamReset(stream_id: 1, error_code: StreamClosed)]
 }
 
 // RFC 9113 Section 5.1 - "Receiving any frame other than HEADERS or PRIORITY
@@ -326,8 +325,7 @@ pub fn receive_data_exceeding_stream_window_is_flow_control_error_test() {
   let assert Ok(expected_wu) =
     h2_frame.encode_window_update(stream_id: 0, window_size_increment: 13)
   assert to_send == <<expected_rst:bits, expected_wu:bits>>
-  assert events
-    == [StreamReset(stream_id: 1, error_code: FlowControlError)]
+  assert events == [StreamReset(stream_id: 1, error_code: FlowControlError)]
 }
 
 // RFC 9113 Section 6.9 - "A change to SETTINGS_INITIAL_WINDOW_SIZE can cause
@@ -1073,8 +1071,7 @@ pub fn receive_padded_data_pad_length_field_counts_toward_flow_control_test() {
   let assert Ok(expected_wu) =
     h2_frame.encode_window_update(stream_id: 0, window_size_increment: 14)
   assert to_send == <<expected_rst:bits, expected_wu:bits>>
-  assert events
-    == [StreamReset(stream_id: 1, error_code: FlowControlError)]
+  assert events == [StreamReset(stream_id: 1, error_code: FlowControlError)]
 }
 
 // =============================================================================
@@ -1251,8 +1248,7 @@ pub fn receive_data_exceeding_content_length_is_malformed_test() {
   // Data is discarded so a WINDOW_UPDATE is also sent to reclaim the
   // connection flow-control window.
   let assert Ok(#(_server, events, to_send)) = receive_data(server, data_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   let assert Ok(expected_wu) =
@@ -1291,8 +1287,7 @@ pub fn receive_data_less_than_content_length_with_end_stream_is_malformed_test()
   // Data is discarded so a WINDOW_UPDATE is also sent to reclaim the
   // connection flow-control window.
   let assert Ok(#(_server, events, to_send)) = receive_data(server, data_frame)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   let assert Ok(expected_wu) =
@@ -1406,8 +1401,7 @@ pub fn receive_headers_invalid_content_length_is_malformed_test() {
     )
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_server, events, to_send)) = receive_data(server, headers)
-  assert events
-    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst

@@ -342,8 +342,7 @@ pub fn receive_unexpected_continuation_is_protocol_error_test() {
       end_headers: True,
       field_block_fragment: <<>>,
     )
-  let assert Error(ConnectionError(ProtocolError)) =
-    receive_data(server, cont)
+  let assert Error(ConnectionError(ProtocolError)) = receive_data(server, cont)
 }
 
 // Pending header block persists across separate receive_data calls
@@ -659,8 +658,7 @@ pub fn receive_continuation_rejected_preserves_hpack_state_test() {
 
   // Receive patched block 2 — rejected, but HPACK must still be decoded
   let assert Ok(#(server, events, _to_send)) = receive_data(server, patched2)
-  let assert [StreamReset(stream_id: 1, error_code: StreamClosed)] =
-    events
+  let assert [StreamReset(stream_id: 1, error_code: StreamClosed)] = events
 
   // Block 3 on stream 5 proves HPACK state survived
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, encoded3)
