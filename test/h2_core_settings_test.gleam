@@ -2,7 +2,8 @@ import gleam/dict
 import gleam/option.{None, Some}
 import h2_core.{
   Client, CompressionError, Connected, ConnectionError, FlowControlError,
-  FrameSizeError, ProtocolError, RemoteSettingsChanged, Server,
+  FrameSizeError, HeaderTableSize, InitialWindowSize, MaxConcurrentStreams,
+  MaxFrameSize, ProtocolError, RemoteSettingsChanged, Server,
   SettingsAcknowledged, Stream, open_stream, receive_data, send_settings,
 }
 import h2_frame
@@ -11,17 +12,19 @@ import helper
 // RFC 9113 Section 6.5 - Sending SETTINGS
 pub fn send_settings_returns_encoded_frame_test() {
   let conn = helper.new_connection(Client, Connected)
-  let settings = [h2_frame.MaxConcurrentStreams(100)]
-  let assert Ok(#(_conn, to_send)) = send_settings(conn, settings)
+  let assert Ok(#(_conn, to_send)) =
+    send_settings(conn, [MaxConcurrentStreams(100)])
   let assert Ok(expected) =
-    h2_frame.encode_settings(ack: False, settings: settings)
+    h2_frame.encode_settings(ack: False, settings: [
+      h2_frame.MaxConcurrentStreams(100),
+    ])
   assert to_send == expected
 }
 
 // RFC 9113 Section 6.5.3 - Sent settings are pending until acked
 pub fn send_settings_adds_to_pending_test() {
   let conn = helper.new_connection(Client, Connected)
-  let settings = [h2_frame.MaxConcurrentStreams(100)]
+  let settings = [MaxConcurrentStreams(100)]
   let assert Ok(#(conn, _to_send)) = send_settings(conn, settings)
   assert conn.pending_settings == [settings]
 }
@@ -30,29 +33,33 @@ pub fn send_settings_adds_to_pending_test() {
 pub fn send_settings_does_not_change_local_settings_test() {
   let conn = helper.new_connection(Client, Connected)
   let original_settings = conn.local_settings
-  let settings = [h2_frame.MaxConcurrentStreams(100)]
-  let assert Ok(#(conn, _to_send)) = send_settings(conn, settings)
+  let assert Ok(#(conn, _to_send)) =
+    send_settings(conn, [MaxConcurrentStreams(100)])
   assert conn.local_settings == original_settings
 }
 
 pub fn send_settings_multiple_values_test() {
   let conn = helper.new_connection(Client, Connected)
   let settings = [
-    h2_frame.MaxConcurrentStreams(100),
-    h2_frame.InitialWindowSize(32_768),
-    h2_frame.MaxFrameSize(32_768),
+    MaxConcurrentStreams(100),
+    InitialWindowSize(32_768),
+    MaxFrameSize(32_768),
   ]
   let assert Ok(#(_conn, to_send)) = send_settings(conn, settings)
   let assert Ok(expected) =
-    h2_frame.encode_settings(ack: False, settings: settings)
+    h2_frame.encode_settings(ack: False, settings: [
+      h2_frame.MaxConcurrentStreams(100),
+      h2_frame.InitialWindowSize(32_768),
+      h2_frame.MaxFrameSize(32_768),
+    ])
   assert to_send == expected
 }
 
 // Sending two SETTINGS frames queues both in pending
 pub fn send_settings_twice_queues_both_test() {
   let conn = helper.new_connection(Client, Connected)
-  let first = [h2_frame.MaxConcurrentStreams(100)]
-  let second = [h2_frame.InitialWindowSize(32_768)]
+  let first = [MaxConcurrentStreams(100)]
+  let second = [InitialWindowSize(32_768)]
   let assert Ok(#(conn, _to_send)) = send_settings(conn, first)
   let assert Ok(#(conn, _to_send)) = send_settings(conn, second)
   assert conn.pending_settings == [first, second]
@@ -113,7 +120,7 @@ pub fn receive_settings_does_not_change_local_settings_test() {
 // RFC 9113 Section 6.5.3 - Receiving SETTINGS ack applies local pending settings
 pub fn receive_settings_ack_applies_pending_test() {
   let conn = helper.new_connection(Client, Connected)
-  let settings = [h2_frame.MaxConcurrentStreams(200)]
+  let settings = [MaxConcurrentStreams(200)]
   let assert Ok(#(conn, _to_send)) = send_settings(conn, settings)
   assert conn.local_settings.max_concurrent_streams == None
   let assert Ok(settings_ack) =
@@ -125,8 +132,8 @@ pub fn receive_settings_ack_applies_pending_test() {
 
 pub fn receive_settings_ack_removes_from_pending_test() {
   let conn = helper.new_connection(Client, Connected)
-  let first = [h2_frame.MaxConcurrentStreams(100)]
-  let second = [h2_frame.InitialWindowSize(32_768)]
+  let first = [MaxConcurrentStreams(100)]
+  let second = [InitialWindowSize(32_768)]
   let assert Ok(#(conn, _to_send)) = send_settings(conn, first)
   let assert Ok(#(conn, _to_send)) = send_settings(conn, second)
   let assert Ok(settings_ack) =
@@ -378,7 +385,7 @@ pub fn receive_settings_ack_with_nonzero_length_is_frame_size_error_test() {
   let conn = helper.new_connection(Client, Connected)
   // First send a SETTINGS so there's something pending to ack
   let assert Ok(#(conn, _to_send)) =
-    send_settings(conn, [h2_frame.MaxConcurrentStreams(100)])
+    send_settings(conn, [MaxConcurrentStreams(100)])
 
   // Manually craft a SETTINGS ACK with a non-empty payload
   // Length=6, Type=0x04, Flags=0x01 (ACK), Stream ID=0
@@ -415,7 +422,7 @@ pub fn settings_ack_initial_window_size_adjusts_recv_window_test() {
 
   // Server sends SETTINGS with INITIAL_WINDOW_SIZE=32768
   let assert Ok(#(server, _to_send)) =
-    send_settings(server, [h2_frame.InitialWindowSize(32_768)])
+    send_settings(server, [InitialWindowSize(32_768)])
 
   // Server receives ACK for its settings
   let assert Ok(settings_ack) =
@@ -570,7 +577,7 @@ pub fn receive_headers_without_required_size_update_is_compression_error_test() 
 
   // Client sends SETTINGS reducing header table size to 0
   let assert Ok(#(client, settings_frame)) =
-    send_settings(client, [h2_frame.HeaderTableSize(0)])
+    send_settings(client, [HeaderTableSize(0)])
   // Server receives and processes settings
   let assert Ok(#(_server, _events, _to_send)) =
     receive_data(server, settings_frame)

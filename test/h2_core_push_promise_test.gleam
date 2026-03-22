@@ -71,7 +71,7 @@ pub fn receive_push_promise_when_push_disabled_is_protocol_error_test() {
 
   // Client disables push
   let assert Ok(#(client, settings_frame)) =
-    h2_core.send_settings(client, [h2_frame.EnablePush(0)])
+    h2_core.send_settings(client, [h2_core.EnablePush(0)])
 
   // Server acknowledges (client receives the ack)
   let assert Ok(settings_ack) =

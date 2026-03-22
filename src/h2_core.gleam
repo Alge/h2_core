@@ -62,15 +62,15 @@ fn validate_settings(settings: Settings) -> Result(Nil, H2Error) {
 fn to_settings_list(
   settings settings: Settings,
   role role: Role,
-) -> List(h2_frame.Setting) {
+) -> List(Setting) {
   let settings_list = [
-    h2_frame.HeaderTableSize(settings.header_table_size),
-    h2_frame.InitialWindowSize(settings.initial_window_size),
-    h2_frame.MaxFrameSize(settings.max_frame_size),
+    HeaderTableSize(settings.header_table_size),
+    InitialWindowSize(settings.initial_window_size),
+    MaxFrameSize(settings.max_frame_size),
   ]
   let settings_list = case role {
     Client -> [
-      h2_frame.EnablePush(case settings.enable_push {
+      EnablePush(case settings.enable_push {
         True -> 1
         False -> 0
       }),
@@ -81,14 +81,14 @@ fn to_settings_list(
 
   let settings_list = case settings.max_concurrent_streams {
     option.Some(value) -> {
-      [h2_frame.MaxConcurrentStreams(value), ..settings_list]
+      [MaxConcurrentStreams(value), ..settings_list]
     }
     option.None -> settings_list
   }
 
   let settings_list = case settings.max_header_list_size {
     option.Some(value) -> {
-      [h2_frame.MaxHeaderListSize(value), ..settings_list]
+      [MaxHeaderListSize(value), ..settings_list]
     }
     option.None -> settings_list
   }
@@ -140,16 +140,32 @@ fn apply_recv_new_window_size(
   Ok(Connection(..conn, streams: dict.from_list(streams)))
 }
 
+fn from_frame_setting(setting: h2_frame.Setting) -> Result(Setting, Nil) {
+  case setting {
+    h2_frame.HeaderTableSize(v) -> Ok(HeaderTableSize(v))
+    h2_frame.EnablePush(v) -> Ok(EnablePush(v))
+    h2_frame.MaxConcurrentStreams(v) -> Ok(MaxConcurrentStreams(v))
+    h2_frame.InitialWindowSize(v) -> Ok(InitialWindowSize(v))
+    h2_frame.MaxFrameSize(v) -> Ok(MaxFrameSize(v))
+    h2_frame.MaxHeaderListSize(v) -> Ok(MaxHeaderListSize(v))
+    h2_frame.UnknownSetting(_, _) -> Error(Nil)
+  }
+}
+
+fn from_frame_settings(settings: List(h2_frame.Setting)) -> List(Setting) {
+  list.filter_map(settings, from_frame_setting)
+}
+
 fn apply_settings(
   role: Role,
   settings: Settings,
-  new: List(h2_frame.Setting),
+  new: List(Setting),
 ) -> Result(Settings, H2Error) {
   case new {
     [] -> Ok(settings)
-    [h2_frame.HeaderTableSize(value), ..rest] ->
+    [HeaderTableSize(value), ..rest] ->
       apply_settings(role, Settings(..settings, header_table_size: value), rest)
-    [h2_frame.EnablePush(value), ..rest] -> {
+    [EnablePush(value), ..rest] -> {
       case value {
         0 ->
           apply_settings(role, Settings(..settings, enable_push: False), rest)
@@ -168,13 +184,13 @@ fn apply_settings(
         _ -> Error(ConnectionError(ProtocolError))
       }
     }
-    [h2_frame.MaxConcurrentStreams(value), ..rest] ->
+    [MaxConcurrentStreams(value), ..rest] ->
       apply_settings(
         role,
         Settings(..settings, max_concurrent_streams: option.Some(value)),
         rest,
       )
-    [h2_frame.InitialWindowSize(value), ..rest] -> {
+    [InitialWindowSize(value), ..rest] -> {
       use <- bool.guard(
         value > 2_147_483_647,
         Error(ConnectionError(FlowControlError)),
@@ -185,7 +201,7 @@ fn apply_settings(
         rest,
       )
     }
-    [h2_frame.MaxFrameSize(value), ..rest] -> {
+    [MaxFrameSize(value), ..rest] -> {
       use <- bool.guard(
         value < 16_384,
         Error(ConnectionError(ProtocolError)),
@@ -196,16 +212,12 @@ fn apply_settings(
       )
       apply_settings(role, Settings(..settings, max_frame_size: value), rest)
     }
-    [h2_frame.MaxHeaderListSize(value), ..rest] ->
+    [MaxHeaderListSize(value), ..rest] ->
       apply_settings(
         role,
         Settings(..settings, max_header_list_size: option.Some(value)),
         rest,
       )
-
-    // Ignore unknown settings
-    [h2_frame.UnknownSetting(_, _), ..rest] ->
-      apply_settings(role, settings, rest)
   }
 }
 
@@ -270,7 +282,7 @@ pub type Connection {
     state: ConnectionState,
     role: Role,
     local_settings: Settings,
-    pending_settings: List(List(h2_frame.Setting)),
+    pending_settings: List(List(Setting)),
     remote_settings: Settings,
     streams: dict.Dict(Int, Stream),
     last_remote_stream_id: Int,
@@ -637,6 +649,30 @@ fn from_alpacki_header(header: alpacki.HeaderField) -> Header {
     alpacki.NeverIndexed -> NeverIndexed
   }
   Header(name: header.name, value: header.value, indexing: indexing)
+}
+
+pub type Setting {
+  HeaderTableSize(Int)
+  EnablePush(Int)
+  MaxConcurrentStreams(Int)
+  InitialWindowSize(Int)
+  MaxFrameSize(Int)
+  MaxHeaderListSize(Int)
+}
+
+fn to_frame_setting(setting: Setting) -> h2_frame.Setting {
+  case setting {
+    HeaderTableSize(v) -> h2_frame.HeaderTableSize(v)
+    EnablePush(v) -> h2_frame.EnablePush(v)
+    MaxConcurrentStreams(v) -> h2_frame.MaxConcurrentStreams(v)
+    InitialWindowSize(v) -> h2_frame.InitialWindowSize(v)
+    MaxFrameSize(v) -> h2_frame.MaxFrameSize(v)
+    MaxHeaderListSize(v) -> h2_frame.MaxHeaderListSize(v)
+  }
+}
+
+fn to_frame_settings(settings: List(Setting)) -> List(h2_frame.Setting) {
+  list.map(settings, to_frame_setting)
 }
 
 pub type ErrorCode {
@@ -1423,14 +1459,14 @@ pub fn get_send_window_size(
 
 pub fn send_settings(
   conn conn: Connection,
-  settings settings: List(h2_frame.Setting),
+  settings settings: List(Setting),
 ) -> Result(#(Connection, BitArray), H2Error) {
   let conn =
     Connection(
       ..conn,
       pending_settings: list.append(conn.pending_settings, [settings]),
     )
-  case h2_frame.encode_settings(ack: False, settings: settings) {
+  case h2_frame.encode_settings(ack: False, settings: to_frame_settings(settings)) {
     Ok(encoded) -> {
       Ok(#(conn, encoded))
     }
@@ -1787,9 +1823,9 @@ fn parse_loop(
             }
 
             // Settings
-            h2_frame.Settings(ack: False, settings: settings) -> {
+            h2_frame.Settings(ack: False, settings: frame_settings) -> {
               // Apply these settings to the remote settings
-
+              let settings = from_frame_settings(frame_settings)
               case apply_settings(conn.role, conn.remote_settings, settings) {
                 Ok(new_settings) -> {
                   let old_settings = conn.remote_settings

@@ -4,9 +4,10 @@ import gleam/list
 import gleam/option
 import h2_core.{
   Client, Closed, CompressionError, Connected, Connection, ConnectionError,
-  HalfClosedLocal, HalfClosedRemote, Header, HeadersReceived, NeverIndexed, Open,
-  ProtocolError, RefusedStream, Server, StreamClosed, StreamReset, WithIndexing,
-  WithoutIndexing, open_stream, receive_data, send_headers, send_settings,
+  HalfClosedLocal, HalfClosedRemote, Header, HeadersReceived, MaxConcurrentStreams,
+  NeverIndexed, Open, ProtocolError, RefusedStream, Server, StreamClosed,
+  StreamReset, WithIndexing, WithoutIndexing, open_stream, receive_data,
+  send_headers, send_settings,
 }
 import h2_frame
 import helper
@@ -668,7 +669,7 @@ pub fn receive_headers_exceeding_max_concurrent_streams_test() {
 
   // Server advertises MAX_CONCURRENT_STREAMS=1
   let assert Ok(#(server, _to_send)) =
-    send_settings(server, [h2_frame.MaxConcurrentStreams(1)])
+    send_settings(server, [MaxConcurrentStreams(1)])
   // Simulate the client having received and acked our settings
   // by directly setting local_settings (the ack path is tested elsewhere)
   let server =
