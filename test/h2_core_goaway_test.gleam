@@ -1,6 +1,7 @@
 import gleam/list
 import h2_core.{
-  Client, Connected, Connection, ConnectionError, GoawayReceived, Header, Server,
+  Client, Connected, Connection, ConnectionError, EnhanceYourCalm,
+  GoawayReceived, Header, InternalError, NoError, ProtocolError, Server,
   WithIndexing, open_stream, receive_data, send_goaway, send_headers,
 }
 import h2_frame
@@ -10,7 +11,7 @@ import helper
 
 pub fn send_goaway_returns_encoded_frame_test() {
   let conn = helper.new_connection(Client, Connected)
-  let assert Ok(#(_conn, to_send)) = send_goaway(conn, h2_frame.NoError, <<>>)
+  let assert Ok(#(_conn, to_send)) = send_goaway(conn, NoError, <<>>)
   let expected =
     h2_frame.encode_goaway(
       last_stream_id: 0,
@@ -23,7 +24,7 @@ pub fn send_goaway_returns_encoded_frame_test() {
 pub fn send_goaway_with_error_code_test() {
   let conn = helper.new_connection(Server, Connected)
   let assert Ok(#(_conn, to_send)) =
-    send_goaway(conn, h2_frame.ProtocolError, <<>>)
+    send_goaway(conn, ProtocolError, <<>>)
   let expected =
     h2_frame.encode_goaway(
       last_stream_id: 0,
@@ -36,7 +37,7 @@ pub fn send_goaway_with_error_code_test() {
 pub fn send_goaway_uses_last_remote_stream_id_test() {
   let conn = helper.new_connection(Server, Connected)
   let conn = Connection(..conn, last_remote_stream_id: 7)
-  let assert Ok(#(_conn, to_send)) = send_goaway(conn, h2_frame.NoError, <<>>)
+  let assert Ok(#(_conn, to_send)) = send_goaway(conn, NoError, <<>>)
   let expected =
     h2_frame.encode_goaway(
       last_stream_id: 7,
@@ -50,7 +51,7 @@ pub fn send_goaway_with_debug_data_test() {
   let conn = helper.new_connection(Client, Connected)
   let debug = <<"something went wrong":utf8>>
   let assert Ok(#(_conn, to_send)) =
-    send_goaway(conn, h2_frame.InternalError, debug)
+    send_goaway(conn, InternalError, debug)
   let expected =
     h2_frame.encode_goaway(
       last_stream_id: 0,
@@ -71,7 +72,7 @@ pub fn receive_goaway_emits_event_test() {
       debug_data: <<>>,
     )
   let assert Ok(#(_conn, events, to_send)) = receive_data(conn, goaway)
-  assert events == [GoawayReceived(0, h2_frame.NoError, <<>>)]
+  assert events == [GoawayReceived(0, NoError, <<>>)]
   assert to_send == <<>>
 }
 
@@ -84,7 +85,7 @@ pub fn receive_goaway_with_error_code_test() {
       debug_data: <<>>,
     )
   let assert Ok(#(_conn, events, _to_send)) = receive_data(conn, goaway)
-  assert events == [GoawayReceived(5, h2_frame.InternalError, <<>>)]
+  assert events == [GoawayReceived(5, InternalError, <<>>)]
 }
 
 pub fn receive_goaway_with_debug_data_test() {
@@ -97,7 +98,7 @@ pub fn receive_goaway_with_debug_data_test() {
       debug_data: debug,
     )
   let assert Ok(#(_conn, events, _to_send)) = receive_data(conn, goaway)
-  assert events == [GoawayReceived(3, h2_frame.EnhanceYourCalm, debug)]
+  assert events == [GoawayReceived(3, EnhanceYourCalm, debug)]
 }
 
 pub fn receive_goaway_no_response_sent_test() {
@@ -128,7 +129,7 @@ pub fn receive_goaway_nonzero_stream_is_protocol_error_test() {
     0:size(31),
     0:size(32),
   >>
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, bad_goaway)
 }
 
@@ -142,7 +143,7 @@ pub fn receive_goaway_last_stream_id_zero_test() {
       debug_data: <<>>,
     )
   let assert Ok(#(_conn, events, _to_send)) = receive_data(conn, goaway)
-  assert events == [GoawayReceived(0, h2_frame.NoError, <<>>)]
+  assert events == [GoawayReceived(0, NoError, <<>>)]
 }
 
 // Receiving GOAWAY should not clear the receive buffer of remaining data
@@ -159,7 +160,7 @@ pub fn receive_goaway_does_not_affect_buffer_test() {
   let trailing = <<0, 0, 0, 0x06, 0>>
   let data = <<goaway:bits, trailing:bits>>
   let assert Ok(#(conn, events, _to_send)) = receive_data(conn, data)
-  assert events == [GoawayReceived(0, h2_frame.NoError, <<>>)]
+  assert events == [GoawayReceived(0, NoError, <<>>)]
   assert conn.recv_buffer == trailing
 }
 
@@ -208,7 +209,7 @@ pub fn receive_headers_after_goaway_maintains_hpack_state_test() {
 
   // Server sends GOAWAY with last_stream_id=1
   let assert Ok(#(server, _to_send)) =
-    send_goaway(server, h2_frame.NoError, <<>>)
+    send_goaway(server, NoError, <<>>)
 
   // Server receives stream 3 (above last_stream_id in the GOAWAY we sent,
   // silently discarded but HPACK-decoded to maintain compression state)
@@ -272,7 +273,7 @@ pub fn receive_goaway_prevents_push_promise_test() {
 
   // Server sends GOAWAY
   let assert Ok(#(server, _to_send)) =
-    send_goaway(server, h2_frame.NoError, <<>>)
+    send_goaway(server, NoError, <<>>)
 
   // Server tries to push — must be rejected (no new streams)
   let assert Error(_) =
@@ -295,7 +296,7 @@ pub fn send_goaway_must_not_increase_last_stream_id_test() {
 
   // First GOAWAY — last_stream_id will be 3 (last_remote_stream_id)
   let assert Ok(#(server, _to_send)) =
-    send_goaway(server, h2_frame.NoError, <<>>)
+    send_goaway(server, NoError, <<>>)
 
   // Manually lower last_remote_stream_id to simulate wanting to send
   // a second GOAWAY with a higher value — the library should prevent this.
@@ -304,7 +305,7 @@ pub fn send_goaway_must_not_increase_last_stream_id_test() {
   // shouldn't accept new streams. Instead, let's verify the second
   // GOAWAY has the same or lower last_stream_id.
   let assert Ok(#(_server, goaway2)) =
-    send_goaway(server, h2_frame.NoError, <<>>)
+    send_goaway(server, NoError, <<>>)
 
   // Decode the GOAWAY to verify last_stream_id didn't increase
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(goaway2, 16_384)
@@ -331,7 +332,7 @@ pub fn send_goaway_ignores_streams_above_last_stream_id_test() {
 
   // Server sends GOAWAY with last_stream_id=1
   let assert Ok(#(server, _to_send)) =
-    send_goaway(server, h2_frame.NoError, <<>>)
+    send_goaway(server, NoError, <<>>)
 
   // Client opens stream 3 (doesn't know about GOAWAY yet)
   let assert Ok(#(client, headers3)) =

@@ -2,9 +2,10 @@ import gleam/bit_array
 import gleam/dict
 import gleam/list
 import h2_core.{
-  Client, Closed, Connected, Connection, ConnectionError, HalfClosedLocal,
-  HalfClosedRemote, Header, HeadersReceived, Open, Server, Settings, StreamReset,
-  WithIndexing, open_stream, receive_data,
+  Client, Closed, CompressionError, Connected, Connection, ConnectionError,
+  HalfClosedLocal, HalfClosedRemote, Header, HeadersReceived, Open,
+  ProtocolError, Server, Settings, StreamClosed, StreamReset, WithIndexing,
+  open_stream, receive_data,
 }
 import h2_frame
 import helper
@@ -242,7 +243,7 @@ pub fn receive_non_continuation_during_header_block_is_protocol_error_test() {
   let bad_data = <<headers_only:bits, ping:bits>>
 
   let server = helper.new_connection(Server, Connected)
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(server, bad_data)
 }
 
@@ -265,7 +266,7 @@ pub fn receive_settings_during_header_block_is_protocol_error_test() {
   let bad_data = <<headers_only:bits, settings:bits>>
 
   let server = helper.new_connection(Server, Connected)
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(server, bad_data)
 }
 
@@ -300,7 +301,7 @@ pub fn receive_extension_frame_during_header_block_is_protocol_error_test() {
   let bad_data = <<headers_only:bits, unknown_frame:bits>>
 
   let server = helper.new_connection(Server, Connected)
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(server, bad_data)
 }
 
@@ -328,7 +329,7 @@ pub fn receive_continuation_wrong_stream_is_protocol_error_test() {
   let bad_data = <<headers_only:bits, wrong_cont:bits>>
 
   let server = helper.new_connection(Server, Connected)
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(server, bad_data)
 }
 
@@ -341,7 +342,7 @@ pub fn receive_unexpected_continuation_is_protocol_error_test() {
       end_headers: True,
       field_block_fragment: <<>>,
     )
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(server, cont)
 }
 
@@ -494,7 +495,7 @@ pub fn receive_continuation_invalid_hpack_is_compression_error_test() {
   let bad_data = <<headers_only:bits, bad_cont:bits>>
 
   let server = helper.new_connection(Server, Connected)
-  let assert Error(ConnectionError(h2_frame.CompressionError)) =
+  let assert Error(ConnectionError(CompressionError)) =
     receive_data(server, bad_data)
 }
 
@@ -509,7 +510,7 @@ pub fn receive_continuation_on_stream_zero_is_protocol_error_test() {
     0:size(1),
     0:size(31),
   >>
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(server, bad_cont)
 }
 
@@ -658,7 +659,7 @@ pub fn receive_continuation_rejected_preserves_hpack_state_test() {
 
   // Receive patched block 2 — rejected, but HPACK must still be decoded
   let assert Ok(#(server, events, _to_send)) = receive_data(server, patched2)
-  let assert [StreamReset(stream_id: 1, error_code: h2_frame.StreamClosed)] =
+  let assert [StreamReset(stream_id: 1, error_code: StreamClosed)] =
     events
 
   // Block 3 on stream 5 proves HPACK state survived

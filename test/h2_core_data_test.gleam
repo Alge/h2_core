@@ -2,9 +2,10 @@ import gleam/dict
 import gleam/option.{None, Some}
 import h2_core.{
   type Connection, Client, Closed, Connected, ConnectionError, DataReceived,
-  HalfClosedRemote, Header, HeadersReceived, Open, ReservedLocal, ReservedRemote,
-  Server, Stream, StreamError, StreamReset, WithIndexing, open_stream,
-  receive_data, send_headers,
+  FlowControlError, FrameSizeError, HalfClosedRemote, Header, HeadersReceived,
+  NoError, Open, ProtocolError, ReservedLocal, ReservedRemote, Server, Stream,
+  StreamClosed, StreamError, StreamReset, WithIndexing, open_stream, receive_data,
+  send_headers,
 }
 import h2_frame
 import helper
@@ -37,7 +38,7 @@ pub fn receive_data_on_stream_zero_is_protocol_error_test() {
     0:size(31),
     "hello":utf8,
   >>
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(server, bad_data)
 }
 
@@ -144,7 +145,7 @@ pub fn receive_data_on_half_closed_remote_is_stream_closed_error_test() {
     h2_frame.encode_window_update(stream_id: 0, window_size_increment: 7)
   assert to_send == <<expected_rst:bits, expected_wu:bits>>
   assert events
-    == [StreamReset(stream_id: 1, error_code: h2_frame.StreamClosed)]
+    == [StreamReset(stream_id: 1, error_code: StreamClosed)]
 }
 
 // RFC 9113 Section 5.1 - "Receiving any frame other than HEADERS or PRIORITY
@@ -160,7 +161,7 @@ pub fn receive_data_on_idle_stream_is_protocol_error_test() {
       data: <<"bad":utf8>>,
       padding: None,
     )
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(server, data_frame)
 }
 
@@ -177,7 +178,7 @@ pub fn receive_data_on_reserved_local_is_protocol_error_test() {
       data: <<"bad":utf8>>,
       padding: None,
     )
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(server, data_frame)
 }
 
@@ -194,7 +195,7 @@ pub fn receive_data_on_reserved_remote_is_protocol_error_test() {
       data: <<"bad":utf8>>,
       padding: None,
     )
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(server, data_frame)
 }
 
@@ -326,7 +327,7 @@ pub fn receive_data_exceeding_stream_window_is_flow_control_error_test() {
     h2_frame.encode_window_update(stream_id: 0, window_size_increment: 13)
   assert to_send == <<expected_rst:bits, expected_wu:bits>>
   assert events
-    == [StreamReset(stream_id: 1, error_code: h2_frame.FlowControlError)]
+    == [StreamReset(stream_id: 1, error_code: FlowControlError)]
 }
 
 // RFC 9113 Section 6.9 - "A change to SETTINGS_INITIAL_WINDOW_SIZE can cause
@@ -348,7 +349,7 @@ pub fn receive_data_exceeding_connection_window_is_flow_control_error_test() {
       data: <<"too much data":utf8>>,
       padding: None,
     )
-  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+  let assert Error(ConnectionError(FlowControlError)) =
     receive_data(server, data_frame)
 }
 
@@ -404,7 +405,7 @@ pub fn send_data_exceeding_stream_window_is_error_test() {
         Stream(..helper.new_stream(Open), send_window_size: 5),
       ),
     )
-  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+  let assert Error(ConnectionError(FlowControlError)) =
     h2_core.send_data(server, 1, <<"too much data":utf8>>, False, None)
 }
 
@@ -414,14 +415,14 @@ pub fn send_data_exceeding_connection_window_is_error_test() {
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   // Set connection send_window_size to 5
   let server = h2_core.Connection(..server, send_window_size: 5)
-  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+  let assert Error(ConnectionError(FlowControlError)) =
     h2_core.send_data(server, 1, <<"too much data":utf8>>, False, None)
 }
 
 // send_data on stream 0 should error
 pub fn send_data_on_stream_zero_is_error_test() {
   let #(server, _client) = server_with_open_stream()
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     h2_core.send_data(server, 0, <<"bad":utf8>>, False, None)
 }
 
@@ -442,7 +443,7 @@ pub fn send_data_on_half_closed_local_is_error_test() {
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == h2_core.HalfClosedLocal
-  let assert Error(StreamError(1, h2_frame.StreamClosed)) =
+  let assert Error(StreamError(1, StreamClosed)) =
     h2_core.send_data(server, 1, <<"bad":utf8>>, False, None)
 }
 
@@ -451,7 +452,7 @@ pub fn send_data_on_half_closed_local_is_error_test() {
 pub fn send_data_on_closed_stream_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let server = helper.set_stream_state(server, 1, Closed)
-  let assert Error(StreamError(1, h2_frame.StreamClosed)) =
+  let assert Error(StreamError(1, StreamClosed)) =
     h2_core.send_data(server, 1, <<"bad":utf8>>, False, None)
 }
 
@@ -460,7 +461,7 @@ pub fn send_data_on_closed_stream_is_error_test() {
 pub fn send_data_on_reserved_local_stream_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let server = helper.set_stream_state(server, 2, ReservedLocal)
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     h2_core.send_data(server, 2, <<"bad":utf8>>, False, None)
 }
 
@@ -470,7 +471,7 @@ pub fn send_data_on_reserved_local_stream_is_error_test() {
 pub fn send_data_on_reserved_remote_stream_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let server = helper.set_stream_state(server, 2, ReservedRemote)
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     h2_core.send_data(server, 2, <<"bad":utf8>>, False, None)
 }
 
@@ -558,7 +559,7 @@ pub fn send_data_with_negative_window_is_error_test() {
         Stream(..helper.new_stream(Open), send_window_size: -100),
       ),
     )
-  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+  let assert Error(ConnectionError(FlowControlError)) =
     h2_core.send_data(server, 1, <<"hello":utf8>>, False, None)
 }
 
@@ -629,7 +630,7 @@ pub fn send_data_exceeding_max_frame_size_is_error_test() {
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
   // Default max frame size is 16384. Send 16385 bytes — one over the limit.
   let big_data = <<0:size(16_385)-unit(8)>>
-  let assert Error(ConnectionError(h2_frame.FrameSizeError)) =
+  let assert Error(ConnectionError(FrameSizeError)) =
     h2_core.send_data(server, 1, big_data, False, None)
 }
 
@@ -648,7 +649,7 @@ pub fn send_padded_data_exceeding_max_frame_size_is_error_test() {
   // Send 16380 bytes of data with 10 bytes of padding:
   // payload = 1 (pad_length) + 16380 (data) + 10 (padding) = 16391 > 16384
   let big_data = <<0:size(16_380)-unit(8)>>
-  let assert Error(ConnectionError(h2_frame.FrameSizeError)) =
+  let assert Error(ConnectionError(FrameSizeError)) =
     h2_core.send_data(server, 1, big_data, False, Some(10))
 }
 
@@ -672,7 +673,7 @@ pub fn send_padded_data_exceeding_stream_window_is_flow_control_error_test() {
     )
   // 3 bytes data fits in the window alone, but with padding:
   // payload = 1 (pad_length) + 3 (data) + 10 (padding) = 14 > 10
-  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+  let assert Error(ConnectionError(FlowControlError)) =
     h2_core.send_data(server, 1, <<"hey":utf8>>, False, Some(10))
 }
 
@@ -697,7 +698,7 @@ pub fn send_padded_data_pad_length_field_counts_toward_flow_control_test() {
     )
   // 3 bytes data + 10 bytes padding = 13, which fits the window.
   // But the full payload is 1 (pad_length) + 3 (data) + 10 (padding) = 14 > 13.
-  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+  let assert Error(ConnectionError(FlowControlError)) =
     h2_core.send_data(server, 1, <<"hey":utf8>>, False, Some(10))
 }
 
@@ -713,7 +714,7 @@ pub fn send_padded_data_exceeding_connection_window_is_flow_control_error_test()
   let server = h2_core.Connection(..server, send_window_size: 10)
   // 3 bytes data fits in the window alone, but with padding:
   // payload = 1 (pad_length) + 3 (data) + 10 (padding) = 14 > 10
-  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+  let assert Error(ConnectionError(FlowControlError)) =
     h2_core.send_data(server, 1, <<"hey":utf8>>, False, Some(10))
 }
 
@@ -785,7 +786,7 @@ pub fn send_data_connection_window_smaller_than_stream_window_is_error_test() {
       streams: dict.insert(server.streams, 1, helper.new_stream(Open)),
     )
   // 13 bytes > 5 byte connection window
-  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+  let assert Error(ConnectionError(FlowControlError)) =
     h2_core.send_data(server, 1, <<"too much data":utf8>>, False, None)
 }
 
@@ -1073,7 +1074,7 @@ pub fn receive_padded_data_pad_length_field_counts_toward_flow_control_test() {
     h2_frame.encode_window_update(stream_id: 0, window_size_increment: 14)
   assert to_send == <<expected_rst:bits, expected_wu:bits>>
   assert events
-    == [StreamReset(stream_id: 1, error_code: h2_frame.FlowControlError)]
+    == [StreamReset(stream_id: 1, error_code: FlowControlError)]
 }
 
 // =============================================================================
@@ -1111,7 +1112,7 @@ pub fn receive_data_on_closed_stream_is_handled_gracefully_test() {
 
   // Send RST_STREAM to fully close
   let assert Ok(#(server, _to_send)) =
-    h2_core.send_rst_stream(server, 1, h2_frame.NoError)
+    h2_core.send_rst_stream(server, 1, NoError)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == h2_core.Closed
 
@@ -1181,7 +1182,7 @@ pub fn receive_data_invalid_padding_length_is_protocol_error_test() {
     1:size(31),
     1:size(8),
   >>
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(server, bad_padded)
 }
 
@@ -1207,7 +1208,7 @@ pub fn receive_data_exceeding_max_frame_size_is_frame_size_error_test() {
     1:size(31),
     oversized_payload:bits,
   >>
-  let assert Error(ConnectionError(h2_frame.FrameSizeError)) =
+  let assert Error(ConnectionError(FrameSizeError)) =
     receive_data(server, oversized_frame)
 }
 
@@ -1251,7 +1252,7 @@ pub fn receive_data_exceeding_content_length_is_malformed_test() {
   // connection flow-control window.
   let assert Ok(#(_server, events, to_send)) = receive_data(server, data_frame)
   assert events
-    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   let assert Ok(expected_wu) =
@@ -1291,7 +1292,7 @@ pub fn receive_data_less_than_content_length_with_end_stream_is_malformed_test()
   // connection flow-control window.
   let assert Ok(#(_server, events, to_send)) = receive_data(server, data_frame)
   assert events
-    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   let assert Ok(expected_wu) =
@@ -1406,7 +1407,7 @@ pub fn receive_headers_invalid_content_length_is_malformed_test() {
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_server, events, to_send)) = receive_data(server, headers)
   assert events
-    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst

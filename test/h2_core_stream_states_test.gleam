@@ -1,9 +1,9 @@
 import gleam/dict
 import gleam/option.{None}
 import h2_core.{
-  type Connection, Closed, HalfClosedRemote, Header, ReservedLocal,
-  ReservedRemote, StreamReset, WithIndexing, receive_data, send_headers,
-  send_rst_stream,
+  type Connection, Cancel, Closed, HalfClosedRemote, Header, NoError,
+  ProtocolError, ReservedLocal, ReservedRemote, StreamReset, WithIndexing,
+  receive_data, send_headers, send_rst_stream,
 }
 import h2_frame
 import helper
@@ -57,7 +57,7 @@ fn server_with_closed_stream() -> #(Connection, Connection) {
   let #(server, client) = server_with_half_closed_remote_stream()
   // Server sends RST_STREAM to fully close the stream
   let assert Ok(#(server, _to_send)) =
-    send_rst_stream(server, 1, h2_frame.NoError)
+    send_rst_stream(server, 1, NoError)
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == Closed
   #(server, client)
@@ -119,7 +119,7 @@ pub fn receive_window_update_on_reserved_remote_is_protocol_error_test() {
 
   let assert Ok(wu) =
     h2_frame.encode_window_update(stream_id: 2, window_size_increment: 1024)
-  let assert Error(h2_core.ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(h2_core.ConnectionError(ProtocolError)) =
     receive_data(client, wu)
 }
 
@@ -145,7 +145,7 @@ pub fn receive_headers_on_reserved_local_is_protocol_error_test() {
     3:size(24), 0x01:size(8), 0x04:size(8), 0:size(1), 2:size(31), 0x82, 0x87,
     0x84,
   >>
-  let assert Error(h2_core.ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(h2_core.ConnectionError(ProtocolError)) =
     receive_data(server, bad_headers)
 }
 
@@ -192,7 +192,7 @@ pub fn receive_rst_stream_on_reserved_remote_transitions_to_closed_test() {
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 2, error_code: h2_frame.Cancel)
   let assert Ok(#(client, events, _to_send)) = receive_data(client, rst)
-  assert events == [StreamReset(stream_id: 2, error_code: h2_frame.Cancel)]
+  assert events == [StreamReset(stream_id: 2, error_code: Cancel)]
   let assert Ok(stream) = dict.get(client.streams, 2)
   assert stream.state == Closed
 }
@@ -215,7 +215,7 @@ pub fn receive_rst_stream_on_reserved_local_transitions_to_closed_test() {
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 2, error_code: h2_frame.Cancel)
   let assert Ok(#(server, events, _to_send)) = receive_data(server, rst)
-  assert events == [StreamReset(stream_id: 2, error_code: h2_frame.Cancel)]
+  assert events == [StreamReset(stream_id: 2, error_code: Cancel)]
   let assert Ok(stream) = dict.get(server.streams, 2)
   assert stream.state == Closed
 }
@@ -243,7 +243,7 @@ pub fn receive_rst_stream_on_half_closed_local_transitions_to_closed_test() {
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
   let assert Ok(#(server, events, _to_send)) = receive_data(server, rst)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.Cancel)]
+  assert events == [StreamReset(stream_id: 1, error_code: Cancel)]
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == Closed
 }
@@ -291,7 +291,7 @@ pub fn receive_rst_stream_on_half_closed_remote_is_accepted_test() {
   let assert Ok(#(server, events, _to_send)) = receive_data(server, rst)
 
   // Should emit a StreamReset event and transition to Closed
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.Cancel)]
+  assert events == [StreamReset(stream_id: 1, error_code: Cancel)]
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == Closed
 }
@@ -348,7 +348,7 @@ pub fn send_rst_stream_on_closed_stream_is_error_test() {
   let assert Ok(stream) = dict.get(server.streams, 1)
   assert stream.state == Closed
 
-  let assert Error(_) = send_rst_stream(server, 1, h2_frame.Cancel)
+  let assert Error(_) = send_rst_stream(server, 1, Cancel)
 }
 
 // RFC 9113 Section 5.1 (closed):

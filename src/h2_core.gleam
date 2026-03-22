@@ -8,7 +8,7 @@ import gleam/list
 import gleam/option
 import gleam/result
 import gleam/string
-import h2_frame.{type ErrorCode}
+import h2_frame
 
 pub type Role {
   Client
@@ -30,29 +30,29 @@ fn validate_settings(settings: Settings) -> Result(Nil, H2Error) {
   use <- bool.guard(
     settings.initial_window_size < 0
       || settings.initial_window_size > 2_147_483_647,
-    Error(ConnectionError(h2_frame.FlowControlError)),
+    Error(ConnectionError(FlowControlError)),
   )
   use <- bool.guard(
     settings.max_frame_size < 16_384 || settings.max_frame_size > 16_777_215,
-    Error(ConnectionError(h2_frame.ProtocolError)),
+    Error(ConnectionError(ProtocolError)),
   )
 
   use <- bool.guard(
     settings.header_table_size < 0,
-    Error(ConnectionError(h2_frame.ProtocolError)),
+    Error(ConnectionError(ProtocolError)),
   )
 
   use <- bool.guard(
     settings.max_concurrent_streams
       |> option.map(fn(v) { v < 0 })
       |> option.unwrap(False),
-    Error(ConnectionError(h2_frame.ProtocolError)),
+    Error(ConnectionError(ProtocolError)),
   )
   use <- bool.guard(
     settings.max_header_list_size
       |> option.map(fn(v) { v < 0 })
       |> option.unwrap(False),
-    Error(ConnectionError(h2_frame.ProtocolError)),
+    Error(ConnectionError(ProtocolError)),
   )
   Ok(Nil)
 }
@@ -110,7 +110,7 @@ fn apply_send_new_window_size(
         Stream(..stream, send_window_size: stream.send_window_size + delta)
       use <- bool.guard(
         stream.send_window_size > 2_147_483_647,
-        Error(ConnectionError(h2_frame.FlowControlError)),
+        Error(ConnectionError(FlowControlError)),
       )
       Ok(#(stream_id, stream))
     }),
@@ -132,7 +132,7 @@ fn apply_recv_new_window_size(
         Stream(..stream, recv_window_size: stream.recv_window_size + delta)
       use <- bool.guard(
         stream.recv_window_size > 2_147_483_647,
-        Error(ConnectionError(h2_frame.FlowControlError)),
+        Error(ConnectionError(FlowControlError)),
       )
       Ok(#(stream_id, stream))
     }),
@@ -162,10 +162,10 @@ fn apply_settings(
                 rest,
               )
             // Client should never receive enable_push == 1
-            Client -> Error(ConnectionError(h2_frame.ProtocolError))
+            Client -> Error(ConnectionError(ProtocolError))
           }
         }
-        _ -> Error(ConnectionError(h2_frame.ProtocolError))
+        _ -> Error(ConnectionError(ProtocolError))
       }
     }
     [h2_frame.MaxConcurrentStreams(value), ..rest] ->
@@ -177,7 +177,7 @@ fn apply_settings(
     [h2_frame.InitialWindowSize(value), ..rest] -> {
       use <- bool.guard(
         value > 2_147_483_647,
-        Error(ConnectionError(h2_frame.FlowControlError)),
+        Error(ConnectionError(FlowControlError)),
       )
       apply_settings(
         role,
@@ -188,11 +188,11 @@ fn apply_settings(
     [h2_frame.MaxFrameSize(value), ..rest] -> {
       use <- bool.guard(
         value < 16_384,
-        Error(ConnectionError(h2_frame.ProtocolError)),
+        Error(ConnectionError(ProtocolError)),
       )
       use <- bool.guard(
         value > 16_777_215,
-        Error(ConnectionError(h2_frame.ProtocolError)),
+        Error(ConnectionError(ProtocolError)),
       )
       apply_settings(role, Settings(..settings, max_frame_size: value), rest)
     }
@@ -639,18 +639,76 @@ fn from_alpacki_header(header: alpacki.HeaderField) -> Header {
   Header(name: header.name, value: header.value, indexing: indexing)
 }
 
+pub type ErrorCode {
+  NoError
+  ProtocolError
+  InternalError
+  FlowControlError
+  SettingsTimeout
+  StreamClosed
+  FrameSizeError
+  RefusedStream
+  Cancel
+  CompressionError
+  ConnectError
+  EnhanceYourCalm
+  InadequateSecurity
+  Http11Required
+  UnknownErrorCode(Int)
+}
+
+fn from_frame_error_code(code: h2_frame.ErrorCode) -> ErrorCode {
+  case code {
+    h2_frame.NoError -> NoError
+    h2_frame.ProtocolError -> ProtocolError
+    h2_frame.InternalError -> InternalError
+    h2_frame.FlowControlError -> FlowControlError
+    h2_frame.SettingsTimeout -> SettingsTimeout
+    h2_frame.StreamClosed -> StreamClosed
+    h2_frame.FrameSizeError -> FrameSizeError
+    h2_frame.RefusedStream -> RefusedStream
+    h2_frame.Cancel -> Cancel
+    h2_frame.CompressionError -> CompressionError
+    h2_frame.ConnectError -> ConnectError
+    h2_frame.EnhanceYourCalm -> EnhanceYourCalm
+    h2_frame.InadequateSecurity -> InadequateSecurity
+    h2_frame.Http11Required -> Http11Required
+    h2_frame.UnknownErrorCode(code) -> UnknownErrorCode(code)
+  }
+}
+
+fn to_frame_error_code(code: ErrorCode) -> h2_frame.ErrorCode {
+  case code {
+    NoError -> h2_frame.NoError
+    ProtocolError -> h2_frame.ProtocolError
+    InternalError -> h2_frame.InternalError
+    FlowControlError -> h2_frame.FlowControlError
+    SettingsTimeout -> h2_frame.SettingsTimeout
+    StreamClosed -> h2_frame.StreamClosed
+    FrameSizeError -> h2_frame.FrameSizeError
+    RefusedStream -> h2_frame.RefusedStream
+    Cancel -> h2_frame.Cancel
+    CompressionError -> h2_frame.CompressionError
+    ConnectError -> h2_frame.ConnectError
+    EnhanceYourCalm -> h2_frame.EnhanceYourCalm
+    InadequateSecurity -> h2_frame.InadequateSecurity
+    Http11Required -> h2_frame.Http11Required
+    UnknownErrorCode(code) -> h2_frame.UnknownErrorCode(code)
+  }
+}
+
 pub type H2Error {
-  ConnectionError(error_code: h2_frame.ErrorCode)
-  StreamError(stream_id: Int, error_code: h2_frame.ErrorCode)
+  ConnectionError(error_code: ErrorCode)
+  StreamError(stream_id: Int, error_code: ErrorCode)
 }
 
 fn map_frame_error(error: h2_frame.FrameError) -> H2Error {
   case error {
-    h2_frame.ConnectionError(code) -> ConnectionError(code)
-    h2_frame.StreamError(id, code) -> StreamError(id, code)
-    h2_frame.InvalidPadding -> ConnectionError(h2_frame.ProtocolError)
-    h2_frame.NeedMoreData -> ConnectionError(h2_frame.InternalError)
-    h2_frame.MalformedFrame -> ConnectionError(h2_frame.InternalError)
+    h2_frame.ConnectionError(code) -> ConnectionError(from_frame_error_code(code))
+    h2_frame.StreamError(id, code) -> StreamError(id, from_frame_error_code(code))
+    h2_frame.InvalidPadding -> ConnectionError(ProtocolError)
+    h2_frame.NeedMoreData -> ConnectionError(InternalError)
+    h2_frame.MalformedFrame -> ConnectionError(InternalError)
   }
 }
 
@@ -716,7 +774,7 @@ pub fn decode_headers(
 ) -> Result(#(Connection, List(Header)), H2Error) {
   use #(decoded_headers, new_table) <- result.try(
     alpacki.decode_header_block(encoded_headers, conn.hpack_decoder.table)
-    |> result.replace_error(ConnectionError(h2_frame.CompressionError)),
+    |> result.replace_error(ConnectionError(CompressionError)),
   )
 
   let decoded_headers = list.map(decoded_headers, from_alpacki_header)
@@ -758,7 +816,7 @@ fn handle_decoded_push_promise(
     handle_rst_stream(
       conn:,
       stream_id:,
-      error_code: h2_frame.ProtocolError,
+      error_code: ProtocolError,
       flow_controlled_length: 0,
       events:,
       to_send:,
@@ -806,7 +864,7 @@ fn handle_decoded_headers(
     handle_rst_stream(
       conn:,
       stream_id:,
-      error_code: h2_frame.ProtocolError,
+      error_code: ProtocolError,
       flow_controlled_length: 0,
       events:,
       to_send:,
@@ -854,7 +912,7 @@ fn handle_headers_on_existing_stream(
             handle_rst_stream(
               conn:,
               stream_id:,
-              error_code: h2_frame.ProtocolError,
+              error_code: ProtocolError,
               flow_controlled_length: 0,
               events:,
               to_send:,
@@ -868,7 +926,7 @@ fn handle_headers_on_existing_stream(
                 Server -> Ok(0)
               }
             }
-            |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
+            |> result.replace_error(ConnectionError(ProtocolError)),
           )
 
           // Set final_response_received if this is a non-1xx response
@@ -917,7 +975,7 @@ fn handle_headers_on_existing_stream(
           handle_rst_stream(
             conn:,
             stream_id:,
-            error_code: h2_frame.StreamClosed,
+            error_code: StreamClosed,
             flow_controlled_length: 0,
             events:,
             to_send:,
@@ -956,10 +1014,10 @@ fn handle_headers_on_existing_stream(
           ))
         }
 
-        Idle | ReservedLocal -> Error(ConnectionError(h2_frame.ProtocolError))
+        Idle | ReservedLocal -> Error(ConnectionError(ProtocolError))
       }
     }
-    Error(Nil) -> Error(ConnectionError(h2_frame.ProtocolError))
+    Error(Nil) -> Error(ConnectionError(ProtocolError))
   }
 }
 
@@ -977,7 +1035,7 @@ fn handle_headers_on_new_stream(
       Server -> stream_id % 2 == 0
       Client -> stream_id % 2 != 0
     },
-    Error(ConnectionError(h2_frame.ProtocolError)),
+    Error(ConnectionError(ProtocolError)),
   )
 
   // Check MAX_CONCURRENT_STREAMS
@@ -989,7 +1047,7 @@ fn handle_headers_on_new_stream(
     handle_rst_stream(
       conn:,
       stream_id:,
-      error_code: h2_frame.RefusedStream,
+      error_code: RefusedStream,
       flow_controlled_length: 0,
       events:,
       to_send:,
@@ -1007,7 +1065,7 @@ fn handle_headers_on_new_stream(
     handle_rst_stream(
       conn:,
       stream_id:,
-      error_code: h2_frame.ProtocolError,
+      error_code: ProtocolError,
       flow_controlled_length: 0,
       events:,
       to_send:,
@@ -1017,7 +1075,7 @@ fn handle_headers_on_new_stream(
   // This can't actually error due to our guard before
   use content_length <- result.try(
     content_length_result
-    |> result.replace_error(StreamError(stream_id, h2_frame.ProtocolError)),
+    |> result.replace_error(StreamError(stream_id, ProtocolError)),
   )
 
   let stream = case end_stream {
@@ -1064,7 +1122,7 @@ pub fn open_stream(
   // Not allowed to open streams while in Draining state (we have received a GOAWAY)
   use <- bool.guard(
     conn.state == Draining,
-    Error(ConnectionError(h2_frame.ProtocolError)),
+    Error(ConnectionError(ProtocolError)),
   )
 
   let stream = new_stream()
@@ -1083,25 +1141,25 @@ pub fn send_headers(
   // headers cannot be sent on the connection level, it must be on a stream
   use <- bool.guard(
     stream_id == 0,
-    Error(ConnectionError(h2_frame.ProtocolError)),
+    Error(ConnectionError(ProtocolError)),
   )
 
   // headers must be sent on a existing stream
   use stream <- result.try(
     dict.get(conn.streams, stream_id)
-    |> result.replace_error(StreamError(stream_id, h2_frame.StreamClosed)),
+    |> result.replace_error(StreamError(stream_id, StreamClosed)),
   )
 
   // headers cannot be sent on a ReservedRemote stream, those are initiated by the other party!
   use <- bool.guard(
     stream.state == ReservedRemote,
-    Error(ConnectionError(h2_frame.ProtocolError)),
+    Error(ConnectionError(ProtocolError)),
   )
 
   // Headers must not be sent on a stream we have initiated closing of or a closed stream
   use <- bool.guard(
     stream.state == HalfClosedLocal || stream.state == Closed,
-    Error(StreamError(stream_id, h2_frame.StreamClosed)),
+    Error(StreamError(stream_id, StreamClosed)),
   )
 
   // Validate outbound headers — clients send requests (validate with
@@ -1113,7 +1171,7 @@ pub fn send_headers(
   }
   use <- bool.guard(
     validate_headers(outbound_role, headers, stream.headers_sent) == Error(Nil),
-    Error(StreamError(stream_id, h2_frame.ProtocolError)),
+    Error(StreamError(stream_id, ProtocolError)),
   )
 
   use #(conn, encoded_headers) <- result.try(encode_headers(conn, headers))
@@ -1182,35 +1240,35 @@ pub fn send_push_promise(
   // Not allowed to open streams while in Draining state (we have received a GOAWAY)
   use <- bool.guard(
     conn.state == Draining,
-    Error(ConnectionError(h2_frame.ProtocolError)),
+    Error(ConnectionError(ProtocolError)),
   )
 
   // Must only be sent by server
   use <- bool.guard(
     conn.role == Client,
-    Error(ConnectionError(h2_frame.ProtocolError)),
+    Error(ConnectionError(ProtocolError)),
   )
 
   // Must not be sent on stream 0 (the connection level)
   use <- bool.guard(
     stream_id == 0,
-    Error(ConnectionError(h2_frame.ProtocolError)),
+    Error(ConnectionError(ProtocolError)),
   )
 
   // Stream must exist
   use stream <- result.try(
     dict.get(conn.streams, stream_id)
-    |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
+    |> result.replace_error(ConnectionError(ProtocolError)),
   )
 
   use <- bool.guard(
     stream.state != Open && stream.state != HalfClosedRemote,
-    Error(ConnectionError(h2_frame.ProtocolError)),
+    Error(ConnectionError(ProtocolError)),
   )
 
   use <- bool.guard(
     !conn.remote_settings.enable_push,
-    Error(ConnectionError(h2_frame.ProtocolError)),
+    Error(ConnectionError(ProtocolError)),
   )
 
   let #(conn, promised_stream_id) =
@@ -1268,30 +1326,30 @@ pub fn send_data(
 ) -> Result(#(Connection, BitArray), H2Error) {
   use <- bool.guard(
     stream_id == 0,
-    Error(ConnectionError(h2_frame.ProtocolError)),
+    Error(ConnectionError(ProtocolError)),
   )
 
   use stream <- result.try(case dict.get(conn.streams, stream_id) {
     Ok(stream) -> {
       use <- bool.guard(
         stream.state == HalfClosedLocal || stream.state == Closed,
-        Error(StreamError(stream_id, h2_frame.StreamClosed)),
+        Error(StreamError(stream_id, StreamClosed)),
       )
       use <- bool.guard(
         stream.state == ReservedLocal || stream.state == ReservedRemote,
-        Error(ConnectionError(h2_frame.ProtocolError)),
+        Error(ConnectionError(ProtocolError)),
       )
       Ok(stream)
     }
     Error(Nil) ->
-      Error(StreamError(stream_id: stream_id, error_code: h2_frame.StreamClosed))
+      Error(StreamError(stream_id: stream_id, error_code: StreamClosed))
   })
 
   use max_allowed_window_size <- result.try(
     get_send_window_size(conn: conn, stream_id: stream_id)
     |> result.replace_error(StreamError(
       stream_id: stream_id,
-      error_code: h2_frame.StreamClosed,
+      error_code: StreamClosed,
     )),
   )
 
@@ -1306,12 +1364,12 @@ pub fn send_data(
 
   use <- bool.guard(
     payload_length > conn.remote_settings.max_frame_size,
-    Error(ConnectionError(h2_frame.FrameSizeError)),
+    Error(ConnectionError(FrameSizeError)),
   )
 
   use <- bool.guard(
     payload_length > max_allowed_window_size,
-    Error(ConnectionError(h2_frame.FlowControlError)),
+    Error(ConnectionError(FlowControlError)),
   )
 
   use encoded_frame <- result.try(
@@ -1394,13 +1452,13 @@ pub fn send_ping(
 
 pub fn send_goaway(
   conn conn: Connection,
-  error_code error_code: h2_frame.ErrorCode,
+  error_code error_code: ErrorCode,
   debug_data debug_data: BitArray,
 ) -> Result(#(Connection, BitArray), H2Error) {
   let encoded_frame =
     h2_frame.encode_goaway(
       last_stream_id: conn.last_remote_stream_id,
-      error_code: error_code,
+      error_code: to_frame_error_code(error_code),
       debug_data: debug_data,
     )
   Ok(#(Connection(..conn, state: Draining), encoded_frame))
@@ -1423,7 +1481,7 @@ pub fn send_window_update(
         )
       use <- bool.guard(
         conn.recv_window_size > 2_147_483_647,
-        Error(ConnectionError(h2_frame.FlowControlError)),
+        Error(ConnectionError(FlowControlError)),
       )
 
       Ok(conn)
@@ -1440,11 +1498,11 @@ pub fn send_window_update(
 
           use <- bool.guard(
             stream.state == Closed,
-            Error(ConnectionError(h2_frame.ProtocolError)),
+            Error(ConnectionError(ProtocolError)),
           )
           use <- bool.guard(
             stream.recv_window_size > 2_147_483_647,
-            Error(ConnectionError(h2_frame.FlowControlError)),
+            Error(ConnectionError(FlowControlError)),
           )
           Ok(
             Connection(
@@ -1454,7 +1512,7 @@ pub fn send_window_update(
           )
         }
         // Stream doesn't exist
-        Error(_) -> Error(ConnectionError(h2_frame.ProtocolError))
+        Error(_) -> Error(ConnectionError(ProtocolError))
       }
     }
   })
@@ -1473,23 +1531,23 @@ pub fn send_window_update(
 pub fn send_rst_stream(
   conn conn: Connection,
   stream_id stream_id: Int,
-  error_code error_code: h2_frame.ErrorCode,
+  error_code error_code: ErrorCode,
 ) -> Result(#(Connection, BitArray), H2Error) {
   // Must be sent on a existing stream
   use stream <- result.try(
     dict.get(conn.streams, stream_id)
-    |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
+    |> result.replace_error(ConnectionError(ProtocolError)),
   )
 
   // Must not be sent on a idle stream
   use <- bool.guard(
     stream.state == Idle,
-    Error(ConnectionError(h2_frame.ProtocolError)),
+    Error(ConnectionError(ProtocolError)),
   )
 
   use <- bool.guard(
     stream.state == Closed,
-    Error(ConnectionError(h2_frame.ProtocolError)),
+    Error(ConnectionError(ProtocolError)),
   )
 
   // Close the stream
@@ -1499,7 +1557,7 @@ pub fn send_rst_stream(
     Connection(..conn, streams: dict.insert(conn.streams, stream_id, stream))
 
   case
-    h2_frame.encode_rst_stream(stream_id: stream_id, error_code: error_code)
+    h2_frame.encode_rst_stream(stream_id: stream_id, error_code: to_frame_error_code(error_code))
   {
     Ok(encoded_frame) -> Ok(#(conn, encoded_frame))
     Error(error) -> Error(map_frame_error(error))
@@ -1509,13 +1567,13 @@ pub fn send_rst_stream(
 fn handle_rst_stream(
   conn conn: Connection,
   stream_id stream_id: Int,
-  error_code error_code: h2_frame.ErrorCode,
+  error_code error_code: ErrorCode,
   flow_controlled_length flow_controlled_length: Int,
   events events: List(Event),
   to_send to_send: BitArray,
 ) -> Result(#(Connection, List(Event), BitArray), H2Error) {
   use encoded_rst_stream_frame <- result.try(
-    h2_frame.encode_rst_stream(stream_id: stream_id, error_code: error_code)
+    h2_frame.encode_rst_stream(stream_id: stream_id, error_code: to_frame_error_code(error_code))
     |> result.map_error(map_frame_error),
   )
 
@@ -1567,7 +1625,7 @@ fn parse_loop(
               h2_frame.Settings(ack: False, ..) -> False
               _ -> True
             },
-            Error(ConnectionError(h2_frame.ProtocolError)),
+            Error(ConnectionError(ProtocolError)),
           )
 
           case frame {
@@ -1582,7 +1640,7 @@ fn parse_loop(
                 ) -> {
                   case conn.pending_header_blocks {
                     option.None ->
-                      Error(ConnectionError(h2_frame.ProtocolError))
+                      Error(ConnectionError(ProtocolError))
 
                     option.Some(PendingHeaders(
                       pending_stream_id,
@@ -1591,7 +1649,7 @@ fn parse_loop(
                     )) -> {
                       use <- bool.guard(
                         pending_stream_id != stream_id,
-                        Error(ConnectionError(h2_frame.ProtocolError)),
+                        Error(ConnectionError(ProtocolError)),
                       )
 
                       let combined = <<
@@ -1648,7 +1706,7 @@ fn parse_loop(
                     )) -> {
                       use <- bool.guard(
                         pending_stream_id != stream_id,
-                        Error(ConnectionError(h2_frame.ProtocolError)),
+                        Error(ConnectionError(ProtocolError)),
                       )
 
                       let combined = <<
@@ -1701,14 +1759,14 @@ fn parse_loop(
                     }
                   }
                 }
-                _ -> Error(ConnectionError(h2_frame.ProtocolError))
+                _ -> Error(ConnectionError(ProtocolError))
               }
             }
 
             // Handle CONTINUATION if pending_header_blocks is None
             // This is always an error
             h2_frame.Continuation(_, _, _) ->
-              Error(ConnectionError(h2_frame.ProtocolError))
+              Error(ConnectionError(ProtocolError))
 
             // Pings
             h2_frame.Ping(ack: False, data: data) -> {
@@ -1798,7 +1856,7 @@ fn parse_loop(
                   }
                 }
                 [] -> {
-                  Error(ConnectionError(h2_frame.ProtocolError))
+                  Error(ConnectionError(ProtocolError))
                 }
               }
             }
@@ -1810,7 +1868,7 @@ fn parse_loop(
                 [
                   GoawayReceived(
                     last_stream_id: last_stream_id,
-                    error_code: error_code,
+                    error_code: from_frame_error_code(error_code),
                     debug_data: debug_data,
                   ),
                   ..events
@@ -1831,7 +1889,7 @@ fn parse_loop(
                     )
                   use <- bool.guard(
                     conn.send_window_size > 2_147_483_647,
-                    Error(ConnectionError(h2_frame.FlowControlError)),
+                    Error(ConnectionError(FlowControlError)),
                   )
                   parse_loop(conn, events, to_send)
                 }
@@ -1848,7 +1906,7 @@ fn parse_loop(
 
                       use <- bool.guard(
                         stream.state == ReservedRemote,
-                        Error(ConnectionError(h2_frame.ProtocolError)),
+                        Error(ConnectionError(ProtocolError)),
                       )
 
                       use <- bool.guard(
@@ -1858,7 +1916,7 @@ fn parse_loop(
                           case
                             h2_frame.encode_rst_stream(
                               stream_id: stream_id,
-                              error_code: h2_frame.FlowControlError,
+                              error_code: to_frame_error_code(FlowControlError),
                             )
                           {
                             Ok(encoded_frame) -> {
@@ -1867,7 +1925,7 @@ fn parse_loop(
                                 [
                                   StreamReset(
                                     stream_id: stream_id,
-                                    error_code: h2_frame.FlowControlError,
+                                    error_code: FlowControlError,
                                   ),
                                   ..events
                                 ],
@@ -1887,7 +1945,7 @@ fn parse_loop(
 
                       parse_loop(conn, events, to_send)
                     }
-                    Error(_) -> Error(ConnectionError(h2_frame.ProtocolError))
+                    Error(_) -> Error(ConnectionError(ProtocolError))
                   }
                 }
               }
@@ -1897,7 +1955,7 @@ fn parse_loop(
             h2_frame.RstStream(stream_id, error_code) -> {
               use stream <- result.try(
                 dict.get(conn.streams, stream_id)
-                |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
+                |> result.replace_error(ConnectionError(ProtocolError)),
               )
 
               use <- bool.guard(
@@ -1916,7 +1974,7 @@ fn parse_loop(
               parse_loop(
                 conn,
                 [
-                  StreamReset(stream_id: stream_id, error_code: error_code),
+                  StreamReset(stream_id: stream_id, error_code: from_frame_error_code(error_code)),
                   ..events
                 ],
                 to_send,
@@ -1972,11 +2030,11 @@ fn parse_loop(
                   use <- bool.guard(
                     stream.state == ReservedLocal
                       || stream.state == ReservedRemote,
-                    Error(ConnectionError(h2_frame.ProtocolError)),
+                    Error(ConnectionError(ProtocolError)),
                   )
                   Ok(stream)
                 }
-                Error(Nil) -> Error(ConnectionError(h2_frame.ProtocolError))
+                Error(Nil) -> Error(ConnectionError(ProtocolError))
               })
 
               let new_stream_state = case end_stream {
@@ -2000,7 +2058,7 @@ fn parse_loop(
               // Make sure that the data does not exceed the connection recv window
               use <- bool.guard(
                 new_conn_recv_window < 0,
-                Error(ConnectionError(h2_frame.FlowControlError)),
+                Error(ConnectionError(FlowControlError)),
               )
 
               let new_stream_recv_window =
@@ -2035,7 +2093,7 @@ fn parse_loop(
                 handle_rst_stream(
                   conn: conn,
                   stream_id: stream_id,
-                  error_code: h2_frame.ProtocolError,
+                  error_code: ProtocolError,
                   flow_controlled_length: payload_length,
                   events: events,
                   to_send: to_send,
@@ -2054,7 +2112,7 @@ fn parse_loop(
                 handle_rst_stream(
                   conn: conn,
                   stream_id: stream_id,
-                  error_code: h2_frame.ProtocolError,
+                  error_code: ProtocolError,
                   flow_controlled_length: payload_length,
                   events: events,
                   to_send: to_send,
@@ -2068,7 +2126,7 @@ fn parse_loop(
                 handle_rst_stream(
                   conn: conn,
                   stream_id: stream_id,
-                  error_code: h2_frame.StreamClosed,
+                  error_code: StreamClosed,
                   flow_controlled_length: payload_length,
                   events: events,
                   to_send: to_send,
@@ -2080,7 +2138,7 @@ fn parse_loop(
                 handle_rst_stream(
                   conn: conn,
                   stream_id: stream_id,
-                  error_code: h2_frame.FlowControlError,
+                  error_code: FlowControlError,
                   flow_controlled_length: payload_length,
                   events: events,
                   to_send: to_send,
@@ -2111,37 +2169,37 @@ fn parse_loop(
               // Can only be received by clients
               use <- bool.guard(
                 conn.role == Server,
-                Error(ConnectionError(h2_frame.ProtocolError)),
+                Error(ConnectionError(ProtocolError)),
               )
 
               // Parent stream must exist
               use stream <- result.try(
                 dict.get(conn.streams, stream_id)
-                |> result.replace_error(ConnectionError(h2_frame.ProtocolError)),
+                |> result.replace_error(ConnectionError(ProtocolError)),
               )
 
               // Stream state must be one of these
               use <- bool.guard(
                 !list.contains([Open, HalfClosedLocal, Closed], stream.state),
-                Error(ConnectionError(h2_frame.ProtocolError)),
+                Error(ConnectionError(ProtocolError)),
               )
 
               // Our setting for enable push must be true
               use <- bool.guard(
                 !conn.local_settings.enable_push,
-                Error(ConnectionError(h2_frame.ProtocolError)),
+                Error(ConnectionError(ProtocolError)),
               )
 
               // Promised stream ID must be even (it comes from a servere)
               use <- bool.guard(
                 promised_stream_id % 2 == 1,
-                Error(ConnectionError(h2_frame.ProtocolError)),
+                Error(ConnectionError(ProtocolError)),
               )
 
               // Promised stream ID must be a new stream
               use <- bool.guard(
                 promised_stream_id <= conn.last_remote_stream_id,
-                Error(ConnectionError(h2_frame.ProtocolError)),
+                Error(ConnectionError(ProtocolError)),
               )
 
               case end_headers {
@@ -2198,21 +2256,21 @@ fn parse_loop(
           parse_loop(
             conn,
             [
-              StreamReset(stream_id: stream_id, error_code: error_code),
+              StreamReset(stream_id: stream_id, error_code: from_frame_error_code(error_code)),
               ..events
             ],
             <<to_send:bits, encoded_frame:bits>>,
           )
         }
         Error(h2_frame.MalformedFrame) ->
-          Error(ConnectionError(h2_frame.ProtocolError))
+          Error(ConnectionError(ProtocolError))
 
         Error(error) -> Error(map_frame_error(error))
       }
     }
 
     Error(h2_frame.ConnectionError(error_code)) ->
-      Error(ConnectionError(error_code: error_code))
+      Error(ConnectionError(error_code: from_frame_error_code(error_code)))
 
     Error(h2_frame.NeedMoreData) -> Ok(#(conn, list.reverse(events), to_send))
 
@@ -2239,9 +2297,9 @@ pub fn receive_data(
             <<expected:bytes-size(size), _:bits>> ->
               case conn.recv_buffer == expected {
                 True -> Ok(#(conn, [], <<>>))
-                False -> Error(ConnectionError(h2_frame.ProtocolError))
+                False -> Error(ConnectionError(ProtocolError))
               }
-            _ -> Error(ConnectionError(h2_frame.ProtocolError))
+            _ -> Error(ConnectionError(ProtocolError))
           }
         }
         False -> {
@@ -2251,7 +2309,7 @@ pub fn receive_data(
                 Connection(..conn, state: AwaitingSettings, recv_buffer: rest)
               parse_loop(conn, [], <<>>)
             }
-            _ -> Error(ConnectionError(h2_frame.ProtocolError))
+            _ -> Error(ConnectionError(ProtocolError))
           }
         }
       }

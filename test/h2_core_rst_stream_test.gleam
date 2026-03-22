@@ -1,7 +1,8 @@
 import gleam/dict
 import h2_core.{
-  Client, Closed, Connected, ConnectionError, Open, Server, StreamReset,
-  open_stream, receive_data, send_rst_stream,
+  Cancel, Client, Closed, Connected, ConnectionError, FrameSizeError,
+  InternalError, Open, ProtocolError, Server, StreamReset, open_stream,
+  receive_data, send_rst_stream,
 }
 import h2_frame
 import helper
@@ -12,7 +13,7 @@ pub fn send_rst_stream_returns_encoded_frame_test() {
   let conn = helper.new_connection(Client, Connected)
   let assert Ok(#(conn, _to_send)) =
     open_stream(conn, helper.request_headers(), False)
-  let assert Ok(#(_conn, to_send)) = send_rst_stream(conn, 1, h2_frame.Cancel)
+  let assert Ok(#(_conn, to_send)) = send_rst_stream(conn, 1, Cancel)
   let assert Ok(expected) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
   assert to_send == expected
@@ -23,7 +24,7 @@ pub fn send_rst_stream_with_different_error_codes_test() {
   let assert Ok(#(conn, _to_send)) =
     open_stream(conn, helper.response_headers(), False)
   let assert Ok(#(_conn, to_send)) =
-    send_rst_stream(conn, 2, h2_frame.InternalError)
+    send_rst_stream(conn, 2, InternalError)
   let assert Ok(expected) =
     h2_frame.encode_rst_stream(stream_id: 2, error_code: h2_frame.InternalError)
   assert to_send == expected
@@ -32,8 +33,8 @@ pub fn send_rst_stream_with_different_error_codes_test() {
 // RFC 9113 Section 6.4 - RST_STREAM on stream 0 is PROTOCOL_ERROR
 pub fn send_rst_stream_on_stream_zero_is_error_test() {
   let conn = helper.new_connection(Client, Connected)
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
-    send_rst_stream(conn, 0, h2_frame.Cancel)
+  let assert Error(ConnectionError(ProtocolError)) =
+    send_rst_stream(conn, 0, Cancel)
 }
 
 // RFC 9113 Section 5.1 - "Either endpoint can send a RST_STREAM frame
@@ -44,7 +45,7 @@ pub fn send_rst_stream_transitions_to_closed_test() {
     open_stream(conn, helper.request_headers(), False)
   let assert Ok(stream) = dict.get(conn.streams, 1)
   assert stream.state == Open
-  let assert Ok(#(conn, _to_send)) = send_rst_stream(conn, 1, h2_frame.Cancel)
+  let assert Ok(#(conn, _to_send)) = send_rst_stream(conn, 1, Cancel)
   let assert Ok(stream) = dict.get(conn.streams, 1)
   assert stream.state == Closed
 }
@@ -53,8 +54,8 @@ pub fn send_rst_stream_transitions_to_closed_test() {
 pub fn send_rst_stream_on_idle_stream_is_error_test() {
   let conn = helper.new_connection(Client, Connected)
   // Stream 1 was never opened, so it's idle
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
-    send_rst_stream(conn, 1, h2_frame.Cancel)
+  let assert Error(ConnectionError(ProtocolError)) =
+    send_rst_stream(conn, 1, Cancel)
 }
 
 // RFC 9113 Section 6.4 - Receiving RST_STREAM
@@ -67,7 +68,7 @@ pub fn receive_rst_stream_emits_event_test() {
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
   let assert Ok(#(_conn, events, to_send)) = receive_data(conn, rst)
-  assert events == [StreamReset(stream_id: 1, error_code: h2_frame.Cancel)]
+  assert events == [StreamReset(stream_id: 1, error_code: Cancel)]
   assert to_send == <<>>
 }
 
@@ -80,7 +81,7 @@ pub fn receive_rst_stream_with_internal_error_test() {
   let assert Ok(#(_conn, events, _to_send)) = receive_data(conn, rst)
   assert events
     == [
-      StreamReset(stream_id: 1, error_code: h2_frame.InternalError),
+      StreamReset(stream_id: 1, error_code: InternalError),
     ]
 }
 
@@ -111,7 +112,7 @@ pub fn receive_rst_stream_on_stream_zero_is_protocol_error_test() {
     0:size(31),
     0:size(32),
   >>
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, bad_rst)
 }
 
@@ -121,7 +122,7 @@ pub fn receive_rst_stream_on_idle_stream_is_protocol_error_test() {
   // Stream 1 has never been opened, so it's idle
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, rst)
 }
 
@@ -140,7 +141,7 @@ pub fn receive_rst_stream_wrong_length_test() {
     2,
     3,
   >>
-  let assert Error(ConnectionError(h2_frame.FrameSizeError)) =
+  let assert Error(ConnectionError(FrameSizeError)) =
     receive_data(conn, bad_rst)
 }
 
@@ -161,8 +162,8 @@ pub fn receive_rst_stream_continues_parse_loop_test() {
   let assert Ok(#(conn, events, _to_send)) = receive_data(conn, combined)
   assert events
     == [
-      StreamReset(stream_id: 1, error_code: h2_frame.Cancel),
-      StreamReset(stream_id: 3, error_code: h2_frame.InternalError),
+      StreamReset(stream_id: 1, error_code: Cancel),
+      StreamReset(stream_id: 3, error_code: InternalError),
     ]
   let assert Ok(s1) = dict.get(conn.streams, 1)
   let assert Ok(s3) = dict.get(conn.streams, 3)

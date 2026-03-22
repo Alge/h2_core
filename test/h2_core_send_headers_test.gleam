@@ -2,8 +2,9 @@ import gleam/bit_array
 import gleam/dict
 import h2_core.{
   type Connection, Closed, Connected, ConnectionError, HalfClosedLocal,
-  HalfClosedRemote, Header, Open, ReservedLocal, ReservedRemote, Server,
-  StreamError, WithIndexing, open_stream, receive_data, send_headers,
+  HalfClosedRemote, Header, Open, ProtocolError, ReservedLocal, ReservedRemote,
+  Server, StreamClosed, StreamError, WithIndexing, open_stream, receive_data,
+  send_headers,
 }
 import h2_frame
 import helper
@@ -106,7 +107,7 @@ pub fn send_headers_without_end_stream_does_not_change_state_test() {
 pub fn send_headers_on_half_closed_local_is_stream_closed_error_test() {
   let server = helper.new_connection(Server, Connected)
   let server = helper.set_stream_state(server, 1, HalfClosedLocal)
-  let assert Error(StreamError(1, h2_frame.StreamClosed)) =
+  let assert Error(StreamError(1, StreamClosed)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
 }
 
@@ -115,7 +116,7 @@ pub fn send_headers_on_half_closed_local_is_stream_closed_error_test() {
 pub fn send_headers_on_closed_stream_is_error_test() {
   let server = helper.new_connection(Server, Connected)
   let server = helper.set_stream_state(server, 1, Closed)
-  let assert Error(StreamError(1, h2_frame.StreamClosed)) =
+  let assert Error(StreamError(1, StreamClosed)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
 }
 
@@ -125,7 +126,7 @@ pub fn send_headers_on_closed_stream_is_error_test() {
 pub fn send_headers_on_reserved_remote_is_protocol_error_test() {
   let server = helper.new_connection(Server, Connected)
   let server = helper.set_stream_state(server, 2, ReservedRemote)
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     send_headers(server, 2, [Header(":status", "200", WithIndexing)], False)
 }
 
@@ -143,7 +144,7 @@ pub fn send_headers_on_idle_stream_is_error_test() {
 // The same applies when sending.
 pub fn send_headers_on_stream_zero_is_protocol_error_test() {
   let server = helper.new_connection(Server, Connected)
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     send_headers(server, 0, [Header(":status", "200", WithIndexing)], False)
 }
 

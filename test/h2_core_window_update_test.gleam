@@ -1,8 +1,9 @@
 import gleam/dict
 import h2_core.{
-  Client, Connected, ConnectionError, HalfClosedLocal, HalfClosedRemote, Header,
-  HeadersReceived, Open, Server, StreamReset, WithIndexing, open_stream,
-  receive_data, send_window_update,
+  Client, Connected, ConnectionError, FlowControlError, FrameSizeError,
+  HalfClosedLocal, HalfClosedRemote, Header, HeadersReceived, Open,
+  ProtocolError, Server, StreamReset, WithIndexing, open_stream, receive_data,
+  send_window_update,
 }
 import h2_frame
 import helper
@@ -96,7 +97,7 @@ pub fn send_window_update_recv_window_accumulates_test() {
 pub fn send_window_update_overflow_recv_window_test() {
   let conn = helper.new_connection(Client, Connected)
   // Default is 65_535. Incrementing by 2^31-1 would exceed max
-  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+  let assert Error(ConnectionError(FlowControlError)) =
     send_window_update(conn, 0, 2_147_483_647)
 }
 
@@ -137,7 +138,7 @@ pub fn send_window_update_stream_overflow_recv_window_test() {
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
-  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+  let assert Error(ConnectionError(FlowControlError)) =
     send_window_update(server, 1, 2_147_483_647)
 }
 
@@ -180,7 +181,7 @@ pub fn receive_window_update_zero_increment_connection_test() {
     0:size(1),
     0:size(31),
   >>
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, bad_wu)
 }
 
@@ -198,7 +199,7 @@ pub fn receive_window_update_zero_increment_stream_test() {
     0:size(31),
   >>
   let assert Ok(#(_conn, events, to_send)) = receive_data(conn, bad_wu)
-  let assert [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)] =
+  let assert [StreamReset(stream_id: 1, error_code: ProtocolError)] =
     events
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(h2_frame.RstStream(1, h2_frame.ProtocolError)) =
@@ -220,7 +221,7 @@ pub fn receive_window_update_wrong_length_test() {
     2,
     3,
   >>
-  let assert Error(ConnectionError(h2_frame.FrameSizeError)) =
+  let assert Error(ConnectionError(FrameSizeError)) =
     receive_data(conn, bad_wu)
 }
 
@@ -234,7 +235,7 @@ pub fn receive_window_update_overflow_connection_test() {
       stream_id: 0,
       window_size_increment: increment,
     )
-  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+  let assert Error(ConnectionError(FlowControlError)) =
     receive_data(conn, wu)
 }
 
@@ -318,7 +319,7 @@ pub fn receive_window_update_stream_overflow_test() {
       window_size_increment: 2_147_483_647,
     )
   let assert Ok(#(_server, events, to_send)) = receive_data(server, wu)
-  let assert [StreamReset(stream_id: 1, error_code: h2_frame.FlowControlError)] =
+  let assert [StreamReset(stream_id: 1, error_code: FlowControlError)] =
     events
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(h2_frame.RstStream(1, h2_frame.FlowControlError)) =
@@ -334,7 +335,7 @@ pub fn receive_window_update_idle_stream_is_protocol_error_test() {
   let conn = helper.new_connection(Server, Connected)
   let assert Ok(wu) =
     h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, wu)
 }
 
@@ -439,7 +440,7 @@ pub fn receive_window_update_connection_survives_stream_overflow_test() {
       window_size_increment: 2_147_483_647,
     )
   let assert Ok(#(server, events, _to_send)) = receive_data(server, wu)
-  let assert [StreamReset(stream_id: 1, error_code: h2_frame.FlowControlError)] =
+  let assert [StreamReset(stream_id: 1, error_code: FlowControlError)] =
     events
 
   // Connection should still work — open stream 3

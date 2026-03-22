@@ -1,7 +1,8 @@
 import gleam/dict
 import gleam/option.{None, Some}
 import h2_core.{
-  Client, Connected, ConnectionError, RemoteSettingsChanged, Server,
+  Client, CompressionError, Connected, ConnectionError, FlowControlError,
+  FrameSizeError, ProtocolError, RemoteSettingsChanged, Server,
   SettingsAcknowledged, Stream, open_stream, receive_data, send_settings,
 }
 import h2_frame
@@ -62,7 +63,7 @@ pub fn receive_settings_ack_with_nothing_pending_test() {
   let conn = helper.new_connection(Client, Connected)
   let assert Ok(settings_ack) =
     h2_frame.encode_settings(ack: True, settings: [])
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, settings_ack)
 }
 
@@ -141,7 +142,7 @@ pub fn receive_settings_enable_push_invalid_value_test() {
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.EnablePush(2),
     ])
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, settings_frame)
 }
 
@@ -153,7 +154,7 @@ pub fn receive_settings_initial_window_size_too_large_test() {
       // 2^31 = 2_147_483_648, one above max
       h2_frame.InitialWindowSize(2_147_483_648),
     ])
-  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+  let assert Error(ConnectionError(FlowControlError)) =
     receive_data(conn, settings_frame)
 }
 
@@ -164,7 +165,7 @@ pub fn receive_settings_max_frame_size_too_small_test() {
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.MaxFrameSize(16_383),
     ])
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, settings_frame)
 }
 
@@ -176,7 +177,7 @@ pub fn receive_settings_max_frame_size_too_large_test() {
       // 2^24 = 16_777_216, one above max
       h2_frame.MaxFrameSize(16_777_216),
     ])
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, settings_frame)
 }
 
@@ -236,7 +237,7 @@ pub fn receive_settings_server_sends_enable_push_1_test() {
     ])
   // For this to work, h2_core needs to know the settings came from a server.
   // Since we're a Client, remote is a server, so ENABLE_PUSH=1 from remote is an error.
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, settings_frame)
 }
 
@@ -344,7 +345,7 @@ pub fn receive_settings_initial_window_size_overflow_is_flow_control_error_test(
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.InitialWindowSize(65_536),
     ])
-  let assert Error(ConnectionError(h2_frame.FlowControlError)) =
+  let assert Error(ConnectionError(FlowControlError)) =
     receive_data(server, overflow_settings)
 }
 
@@ -364,7 +365,7 @@ pub fn receive_settings_nonzero_stream_id_is_protocol_error_test() {
     0:size(1),
     1:size(31),
   >>
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, bad_settings)
 }
 
@@ -391,7 +392,7 @@ pub fn receive_settings_ack_with_nonzero_length_is_frame_size_error_test() {
     0x03:size(16),
     100:size(32),
   >>
-  let assert Error(ConnectionError(h2_frame.FrameSizeError)) =
+  let assert Error(ConnectionError(FrameSizeError)) =
     receive_data(conn, bad_ack)
 }
 
@@ -513,7 +514,7 @@ pub fn receive_settings_non_multiple_of_six_length_is_frame_size_error_test() {
     // 7 bytes of payload (invalid)
     0:size(56),
   >>
-  let assert Error(ConnectionError(h2_frame.FrameSizeError)) =
+  let assert Error(ConnectionError(FrameSizeError)) =
     receive_data(conn, bad_settings)
 }
 
@@ -589,6 +590,6 @@ pub fn receive_headers_without_required_size_update_is_compression_error_test() 
       field_block_fragment: bad_hpack,
       padding: option.None,
     )
-  let assert Error(ConnectionError(h2_frame.CompressionError)) =
+  let assert Error(ConnectionError(CompressionError)) =
     receive_data(client, headers_frame)
 }

@@ -1,4 +1,7 @@
-import h2_core.{Client, Connected, ConnectionError, StreamReset, receive_data}
+import h2_core.{
+  Client, Connected, ConnectionError, FrameSizeError, ProtocolError, StreamReset,
+  receive_data,
+}
 import h2_frame
 import helper
 
@@ -40,7 +43,7 @@ pub fn receive_priority_stream_zero_is_protocol_error_test() {
     0:size(31),
     16:size(8),
   >>
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, bad_priority)
 }
 
@@ -62,7 +65,7 @@ pub fn receive_priority_wrong_length_is_stream_error_test() {
   >>
   let assert Ok(#(_conn, events, to_send)) = receive_data(conn, bad_priority)
   assert events
-    == [StreamReset(stream_id: 1, error_code: h2_frame.FrameSizeError)]
+    == [StreamReset(stream_id: 1, error_code: FrameSizeError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(
       stream_id: 1,

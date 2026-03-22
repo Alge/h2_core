@@ -1,10 +1,10 @@
 import gleam/dict
 import gleam/option.{None}
 import h2_core.{
-  type Connection, Client, Closed, Connected, ConnectionError, HalfClosedRemote,
-  Header, PushPromiseReceived, ReservedLocal, ReservedRemote, Server,
-  StreamReset, WithIndexing, open_stream, receive_data, send_headers,
-  send_rst_stream,
+  type Connection, Cancel, Client, Closed, Connected, ConnectionError,
+  HalfClosedRemote, Header, ProtocolError, PushPromiseReceived, ReservedLocal,
+  ReservedRemote, Server, StreamReset, WithIndexing, open_stream, receive_data,
+  send_headers, send_rst_stream,
 }
 import h2_frame
 import helper
@@ -31,7 +31,7 @@ pub fn receive_push_promise_from_client_is_protocol_error_test() {
       field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(server, pp)
 }
 
@@ -54,7 +54,7 @@ pub fn receive_push_promise_on_stream_zero_is_protocol_error_test() {
     0:size(1),
     2:size(31),
   >>
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(client, bad_pp)
 }
 
@@ -92,7 +92,7 @@ pub fn receive_push_promise_when_push_disabled_is_protocol_error_test() {
       field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(client, pp)
 }
 
@@ -116,7 +116,7 @@ pub fn receive_push_promise_on_idle_stream_is_protocol_error_test() {
       field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(client, pp)
 }
 
@@ -185,7 +185,7 @@ pub fn receive_push_promise_with_odd_promised_id_is_protocol_error_test() {
       field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(client, pp)
 }
 
@@ -199,7 +199,7 @@ pub fn receive_push_promise_with_zero_promised_id_is_protocol_error_test() {
       field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(client, pp)
 }
 
@@ -216,7 +216,7 @@ pub fn receive_push_promise_with_already_used_id_is_protocol_error_test() {
       field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(client, pp)
 }
 
@@ -236,7 +236,7 @@ pub fn receive_push_promise_with_decreasing_id_is_protocol_error_test() {
       field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(client, pp)
 }
 
@@ -308,7 +308,7 @@ pub fn receive_push_promise_without_end_headers_then_wrong_frame_is_protocol_err
     )
   // Followed by PING instead of CONTINUATION
   let assert Ok(ping) = h2_frame.encode_ping(ack: False, data: <<0:64>>)
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(client, <<pp:bits, ping:bits>>)
 }
 
@@ -330,7 +330,7 @@ pub fn receive_push_promise_without_end_headers_then_wrong_stream_is_protocol_er
       end_headers: True,
       field_block_fragment: <<0x82, 0x87, 0x84>>,
     )
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(client, <<pp:bits, cont:bits>>)
 }
 
@@ -562,7 +562,7 @@ pub fn receive_push_promise_invalid_padding_length_is_protocol_error_test() {
     0:size(1),
     2:size(31),
   >>
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(client, bad_pp)
 }
 
@@ -603,7 +603,7 @@ pub fn receive_push_promise_after_client_sent_rst_stream_is_not_connection_error
   let #(_server, client) = server_with_open_stream()
   // Client sends RST_STREAM on stream 1
   let assert Ok(#(client, _to_send)) =
-    send_rst_stream(client, 1, h2_frame.Cancel)
+    send_rst_stream(client, 1, Cancel)
   let assert Ok(stream) = dict.get(client.streams, 1)
   assert stream.state == Closed
 
@@ -643,7 +643,7 @@ pub fn receive_push_promise_on_half_closed_remote_is_protocol_error_test() {
       field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(client, pp)
 }
 
@@ -794,7 +794,7 @@ pub fn receive_push_promise_missing_method_is_malformed_test() {
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_client, events, to_send)) = receive_data(client, pp)
   assert events
-    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
@@ -817,7 +817,7 @@ pub fn receive_push_promise_pseudo_after_regular_is_malformed_test() {
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_client, events, to_send)) = receive_data(client, pp)
   assert events
-    == [StreamReset(stream_id: 1, error_code: h2_frame.ProtocolError)]
+    == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst

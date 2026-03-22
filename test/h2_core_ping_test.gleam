@@ -1,5 +1,6 @@
 import h2_core.{
-  Client, Connected, ConnectionError, PingAcknowledged, receive_data, send_ping,
+  Client, Connected, ConnectionError, FrameSizeError, PingAcknowledged,
+  ProtocolError, receive_data, send_ping,
 }
 import h2_frame
 import helper
@@ -41,7 +42,7 @@ pub fn receive_ping_wrong_length_test() {
     3,
     4,
   >>
-  let assert Error(ConnectionError(h2_frame.FrameSizeError)) =
+  let assert Error(ConnectionError(FrameSizeError)) =
     receive_data(conn, bad_ping)
 }
 
@@ -65,7 +66,7 @@ pub fn receive_ping_nonzero_stream_test() {
     7,
     8,
   >>
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, bad_ping)
 }
 

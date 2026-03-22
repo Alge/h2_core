@@ -2,7 +2,8 @@ import gleam/list
 import gleam/option
 import h2_core.{
   AwaitingPreface, AwaitingSettings, Client, Connected, ConnectionError,
-  RemoteSettingsChanged, Server, default_settings, new_connection, receive_data,
+  ProtocolError, RemoteSettingsChanged, Server, default_settings, new_connection,
+  receive_data,
 }
 import h2_frame
 import helper
@@ -94,7 +95,7 @@ pub fn new_connection_custom_settings_test() {
 // must return an error.
 pub fn new_connection_invalid_settings_returns_error_test() {
   let settings = h2_core.Settings(..default_settings(), max_frame_size: 1000)
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     new_connection(Client, settings)
 }
 
@@ -178,7 +179,7 @@ pub fn server_transitions_to_awaiting_settings_after_magic_test() {
 pub fn server_receives_invalid_preface_bytes_test() {
   let conn = helper.new_connection(Server, AwaitingPreface)
   let garbage = <<"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n":utf8>>
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, garbage)
 }
 
@@ -188,7 +189,7 @@ pub fn server_receives_corrupted_preface_magic_test() {
   let conn = helper.new_connection(Server, AwaitingPreface)
   // First 10 bytes correct, then garbage
   let corrupted = <<"PRI * HTTP/XXXXXXXXXXXXXX":utf8>>
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, corrupted)
 }
 
@@ -205,7 +206,7 @@ pub fn server_receives_preface_magic_followed_by_non_settings_test() {
   let assert Ok(ping_frame) =
     h2_frame.encode_ping(ack: False, data: <<1, 2, 3, 4, 5, 6, 7, 8>>)
   let data = <<client_preface_magic:bits, ping_frame:bits>>
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, data)
 }
 
@@ -217,7 +218,7 @@ pub fn server_receives_preface_magic_followed_by_settings_ack_test() {
   let assert Ok(settings_ack) =
     h2_frame.encode_settings(ack: True, settings: [])
   let data = <<client_preface_magic:bits, settings_ack:bits>>
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, data)
 }
 
@@ -228,7 +229,7 @@ pub fn server_receives_preface_magic_followed_by_headers_test() {
   let assert Ok(#(_client, headers_frame)) =
     h2_core.open_stream(client, helper.request_headers(), False)
   let data = <<client_preface_magic:bits, headers_frame:bits>>
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, data)
 }
 
@@ -359,7 +360,7 @@ pub fn client_receives_non_settings_as_first_frame_test() {
   let conn = helper.new_connection(Client, AwaitingSettings)
   let assert Ok(ping_frame) =
     h2_frame.encode_ping(ack: False, data: <<1, 2, 3, 4, 5, 6, 7, 8>>)
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, ping_frame)
 }
 
@@ -369,7 +370,7 @@ pub fn client_receives_settings_ack_as_first_frame_test() {
   let conn = helper.new_connection(Client, AwaitingSettings)
   let assert Ok(settings_ack) =
     h2_frame.encode_settings(ack: True, settings: [])
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, settings_ack)
 }
 
@@ -382,7 +383,7 @@ pub fn client_receives_goaway_as_first_frame_test() {
       error_code: h2_frame.NoError,
       debug_data: <<>>,
     )
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, goaway_frame)
 }
 
@@ -391,7 +392,7 @@ pub fn client_receives_window_update_as_first_frame_test() {
   let conn = helper.new_connection(Client, AwaitingSettings)
   let assert Ok(wu_frame) =
     h2_frame.encode_window_update(stream_id: 0, window_size_increment: 1024)
-  let assert Error(ConnectionError(h2_frame.ProtocolError)) =
+  let assert Error(ConnectionError(ProtocolError)) =
     receive_data(conn, wu_frame)
 }
 
