@@ -1023,6 +1023,12 @@ pub fn send_push_promise(
   stream_id: Int,
   headers: List(Header),
 ) -> Result(#(Connection, List(StreamEvent), BitArray, Int), H2Error) {
+  // Not allowed to open streams while in Draining state (we have received a GOAWAY)
+  use <- bool.guard(
+    conn.state == Draining,
+    Error(ConnectionError(h2_frame.ProtocolError)),
+  )
+
   // Must only be sent by server
   use <- bool.guard(
     conn.role == Client,
@@ -1242,7 +1248,7 @@ pub fn send_goaway(
       error_code: error_code,
       debug_data: debug_data,
     )
-  Ok(#(conn, [], encoded_frame))
+  Ok(#(Connection(..conn, state: Draining), [], encoded_frame))
 }
 
 pub fn send_window_update(
