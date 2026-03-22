@@ -537,14 +537,10 @@ pub fn receive_settings_header_table_size_reduction_affects_encoder_test() {
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.HeaderTableSize(0),
     ])
-  // Client receives the settings
+  // Client receives the settings — this applies the new table size
+  // and resizes the encoder automatically
   let assert Ok(#(client, _events, _to_send)) =
     receive_data(client, settings_frame)
-  // Client acknowledges — encoder should now resize
-  let assert Ok(settings_ack) =
-    h2_frame.encode_settings(ack: True, settings: [])
-  let assert Ok(#(client, _events, _to_send)) =
-    receive_data(client, settings_ack)
 
   // Client sends headers on a new stream — the encoded block must
   // start with a Dynamic Table Size Update instruction. The server
