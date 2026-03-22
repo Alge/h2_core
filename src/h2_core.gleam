@@ -1065,9 +1065,9 @@ fn handle_headers_on_new_stream(
 }
 
 pub fn open_stream(
-  conn: Connection,
-  headers: List(Header),
-  end_stream: Bool,
+  conn conn: Connection,
+  headers headers: List(Header),
+  end_stream end_stream: Bool,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
   // Not allowed to open streams while in Draining state (we have received a GOAWAY)
   use <- bool.guard(
@@ -1183,9 +1183,9 @@ pub fn send_headers(
 }
 
 pub fn send_push_promise(
-  conn: Connection,
-  stream_id: Int,
-  headers: List(Header),
+  conn conn: Connection,
+  stream_id stream_id: Int,
+  headers headers: List(Header),
 ) -> Result(#(Connection, List(StreamEvent), BitArray, Int), H2Error) {
   // Not allowed to open streams while in Draining state (we have received a GOAWAY)
   use <- bool.guard(
@@ -1373,8 +1373,8 @@ pub fn get_send_window_size(
 }
 
 pub fn send_settings(
-  conn: Connection,
-  settings: List(h2_frame.Setting),
+  conn conn: Connection,
+  settings settings: List(h2_frame.Setting),
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
   let conn =
     Connection(
@@ -1390,8 +1390,8 @@ pub fn send_settings(
 }
 
 pub fn send_ping(
-  conn: Connection,
-  data: BitArray,
+  conn conn: Connection,
+  data data: BitArray,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
   case h2_frame.encode_ping(ack: False, data: data) {
     Ok(encoded) -> {
@@ -1402,9 +1402,9 @@ pub fn send_ping(
 }
 
 pub fn send_goaway(
-  conn: Connection,
-  error_code: h2_frame.ErrorCode,
-  debug_data: BitArray,
+  conn conn: Connection,
+  error_code error_code: h2_frame.ErrorCode,
+  debug_data debug_data: BitArray,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
   let encoded_frame =
     h2_frame.encode_goaway(
@@ -1416,9 +1416,9 @@ pub fn send_goaway(
 }
 
 pub fn send_window_update(
-  conn: Connection,
-  stream_id: Int,
-  window_size_increment: Int,
+  conn conn: Connection,
+  stream_id stream_id: Int,
+  window_size_increment window_size_increment: Int,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
   // Update the connection
 
@@ -1480,9 +1480,9 @@ pub fn send_window_update(
 }
 
 pub fn send_rst_stream(
-  conn: Connection,
-  stream_id: Int,
-  error_code: h2_frame.ErrorCode,
+  conn conn: Connection,
+  stream_id stream_id: Int,
+  error_code error_code: h2_frame.ErrorCode,
 ) -> Result(#(Connection, List(StreamEvent), BitArray), H2Error) {
   // Must be sent on a existing stream
   use stream <- result.try(
@@ -2234,8 +2234,8 @@ fn parse_loop(
 const client_preface_magic = <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8>>
 
 pub fn receive_data(
-  conn: Connection,
-  data: BitArray,
+  conn conn: Connection,
+  data data: BitArray,
 ) -> Result(#(Connection, List(Event), BitArray), H2Error) {
   let conn =
     Connection(..conn, recv_buffer: <<conn.recv_buffer:bits, data:bits>>)
