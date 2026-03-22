@@ -482,6 +482,12 @@ fn validate_headers(
 
 fn validate_header_value(header: Header) -> Result(Nil, Nil) {
   use _ <- result.try(check_header_value_bytes(<<header.value:utf8>>))
+
+  // header values must not start or end with a space character  
+  use <- bool.guard(
+    string.starts_with(header.value, " ") || string.ends_with(header.value, " "),
+    Error(Nil),
+  )
   Ok(Nil)
 }
 
