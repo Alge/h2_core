@@ -315,7 +315,7 @@ pub fn receive_data_exceeding_stream_window_is_flow_control_error_test() {
       streams: dict.insert(
         server.streams,
         1,
-        Stream(state: Open, send_window_size: 65_535, recv_window_size: 5, headers_sent: False),
+        Stream(..helper.new_stream(Open), recv_window_size: 5),
       ),
     )
   let assert Ok(data_frame) =
@@ -414,7 +414,7 @@ pub fn send_data_exceeding_stream_window_is_error_test() {
       streams: dict.insert(
         server.streams,
         1,
-        Stream(state: Open, send_window_size: 5, recv_window_size: 65_535, headers_sent: False),
+        Stream(..helper.new_stream(Open), send_window_size: 5),
       ),
     )
   let assert Error(ConnectionError(h2_frame.FlowControlError)) =
@@ -568,7 +568,7 @@ pub fn send_data_with_negative_window_is_error_test() {
       streams: dict.insert(
         server.streams,
         1,
-        Stream(state: Open, send_window_size: -100, recv_window_size: 65_535, headers_sent: False),
+        Stream(..helper.new_stream(Open), send_window_size: -100),
       ),
     )
   let assert Error(ConnectionError(h2_frame.FlowControlError)) =
@@ -680,7 +680,7 @@ pub fn send_padded_data_exceeding_stream_window_is_flow_control_error_test() {
       streams: dict.insert(
         server.streams,
         1,
-        Stream(state: Open, send_window_size: 10, recv_window_size: 65_535, headers_sent: False),
+        Stream(..helper.new_stream(Open), send_window_size: 10),
       ),
     )
   // 3 bytes data fits in the window alone, but with padding:
@@ -705,7 +705,7 @@ pub fn send_padded_data_pad_length_field_counts_toward_flow_control_test() {
       streams: dict.insert(
         server.streams,
         1,
-        Stream(state: Open, send_window_size: 13, recv_window_size: 65_535, headers_sent: False),
+        Stream(..helper.new_stream(Open), send_window_size: 13),
       ),
     )
   // 3 bytes data + 10 bytes padding = 13, which fits the window.
@@ -745,7 +745,7 @@ pub fn send_data_exactly_at_window_boundary_test() {
       streams: dict.insert(
         server.streams,
         1,
-        Stream(state: Open, send_window_size: 5, recv_window_size: 65_535, headers_sent: False),
+        Stream(..helper.new_stream(Open), send_window_size: 5),
       ),
     )
   let assert Ok(#(server, _events, _to_send)) =
@@ -773,7 +773,7 @@ pub fn send_empty_data_with_end_stream_when_window_exhausted_test() {
       streams: dict.insert(
         server.streams,
         1,
-        Stream(state: Open, send_window_size: 0, recv_window_size: 65_535, headers_sent: False),
+        Stream(..helper.new_stream(Open), send_window_size: 0),
       ),
     )
   let assert Ok(#(server, _events, _to_send)) =
@@ -798,7 +798,7 @@ pub fn send_data_connection_window_smaller_than_stream_window_is_error_test() {
       streams: dict.insert(
         server.streams,
         1,
-        Stream(state: Open, send_window_size: 65_535, recv_window_size: 65_535, headers_sent: False),
+        helper.new_stream(Open),
       ),
     )
   // 13 bytes > 5 byte connection window
@@ -820,7 +820,7 @@ pub fn get_send_window_size_returns_stream_window_when_smaller_test() {
       streams: dict.insert(
         server.streams,
         1,
-        Stream(state: Open, send_window_size: 100, recv_window_size: 65_535, headers_sent: False),
+        Stream(..helper.new_stream(Open), send_window_size: 100),
       ),
     )
   let assert Ok(window) = h2_core.get_send_window_size(server, 1)
@@ -855,7 +855,7 @@ pub fn get_send_window_size_negative_window_returns_zero_test() {
       streams: dict.insert(
         server.streams,
         1,
-        Stream(state: Open, send_window_size: -1000, recv_window_size: 65_535, headers_sent: False),
+        Stream(..helper.new_stream(Open), send_window_size: -1000),
       ),
     )
   let assert Ok(window) = h2_core.get_send_window_size(server, 1)
@@ -882,7 +882,7 @@ pub fn receive_data_exceeding_stream_window_still_decrements_connection_window_t
       streams: dict.insert(
         server.streams,
         1,
-        Stream(state: Open, send_window_size: 65_535, recv_window_size: 5, headers_sent: False),
+        Stream(..helper.new_stream(Open), recv_window_size: 5),
       ),
     )
   let data = <<"too much data":utf8>>
@@ -1066,7 +1066,7 @@ pub fn receive_padded_data_pad_length_field_counts_toward_flow_control_test() {
       streams: dict.insert(
         server.streams,
         1,
-        Stream(state: Open, send_window_size: 65_535, recv_window_size: 13, headers_sent: False),
+        Stream(..helper.new_stream(Open), recv_window_size: 13),
       ),
     )
   // 3 bytes data + 10 bytes padding = 13, which fits the window.

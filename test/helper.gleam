@@ -24,6 +24,15 @@ pub fn new_connection(role: h2_core.Role, state: ConnectionState) -> Connection 
   Connection(..conn, state: state, pending_settings: [])
 }
 
+pub fn new_stream(state: StreamState) -> h2_core.Stream {
+  Stream(
+    state: state,
+    send_window_size: 65_535,
+    recv_window_size: 65_535,
+    headers_sent: False,
+  )
+}
+
 /// Override the state of a stream on a connection.
 pub fn set_stream_state(
   conn: Connection,
@@ -35,7 +44,7 @@ pub fn set_stream_state(
     streams: dict.insert(
       conn.streams,
       stream_id,
-      Stream(state: state, send_window_size: 65_535, recv_window_size: 65_535, headers_sent: False),
+      new_stream(state),
     ),
   )
 }

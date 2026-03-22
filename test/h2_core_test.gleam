@@ -33,7 +33,7 @@ pub fn new_connection_has_no_streams_test() {
 
 pub fn stream_initial_state_is_idle_test() {
   let stream =
-    Stream(state: Idle, send_window_size: 65_535, recv_window_size: 65_535, headers_sent: False)
+    helper.new_stream(Idle)
   assert stream.state == Idle
 }
 

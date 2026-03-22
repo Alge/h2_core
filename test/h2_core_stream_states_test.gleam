@@ -62,12 +62,7 @@ fn server_with_reserved_local_stream() -> Connection {
       streams: dict.insert(
         server.streams,
         2,
-        Stream(
-          state: ReservedLocal,
-          send_window_size: 65_535,
-          recv_window_size: 65_535,
-          headers_sent: False,
-        ),
+        helper.new_stream(ReservedLocal),
       ),
     )
   server

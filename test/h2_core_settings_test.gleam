@@ -484,12 +484,7 @@ pub fn receive_settings_initial_window_size_negative_window_tracked_test() {
       streams: dict.insert(
         server.streams,
         1,
-        Stream(
-          state: h2_core.Open,
-          send_window_size: 5535,
-          recv_window_size: 65_535,
-          headers_sent: False,
-        ),
+        Stream(..helper.new_stream(h2_core.Open), send_window_size: 5535),
       ),
     )
 
