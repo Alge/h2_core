@@ -3,12 +3,12 @@ import gleam/dict
 import gleam/list
 import gleam/option
 import h2_core.{
-  Client, Closed, CompressionError, Connected, Connection, ConnectionError,
-  HalfClosedLocal, HalfClosedRemote, Header, HeadersReceived,
-  MaxConcurrentStreams, NeverIndexed, Open, ProtocolError, RefusedStream, Server,
-  StreamClosed, StreamReset, WithIndexing, WithoutIndexing, open_stream,
-  receive_data, send_headers, send_settings,
+  Client, CompressionError, Connected, Connection, ConnectionError, Header,
+  HeadersReceived, MaxConcurrentStreams, NeverIndexed, ProtocolError,
+  RefusedStream, Server, StreamClosed, StreamReset, WithIndexing,
+  WithoutIndexing, open_stream, receive_data, send_headers, send_settings,
 }
+import h2_core/internal/stream.{Closed, HalfClosedLocal, HalfClosedRemote, Open}
 import h2_frame
 import helper
 

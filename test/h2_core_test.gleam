@@ -1,9 +1,10 @@
 import gleam/dict
 import gleeunit
 import h2_core.{
-  Client, Connected, Idle, Open, Server, default_settings, new_connection,
-  open_stream, receive_data,
+  Client, Connected, Server, default_settings, new_connection, open_stream,
+  receive_data,
 }
+import h2_core/internal/stream.{Idle, Open}
 import helper
 
 pub fn main() -> Nil {

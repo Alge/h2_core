@@ -1,9 +1,11 @@
 import gleam/dict
 import gleam/option.{None}
 import h2_core.{
-  type Connection, Cancel, Closed, HalfClosedRemote, Header, NoError,
-  ProtocolError, ReservedLocal, ReservedRemote, StreamReset, WithIndexing,
-  receive_data, send_headers, send_rst_stream,
+  type Connection, Cancel, Header, NoError, ProtocolError, StreamReset,
+  WithIndexing, receive_data, send_headers, send_rst_stream,
+}
+import h2_core/internal/stream.{
+  Closed, HalfClosedLocal, HalfClosedRemote, ReservedLocal, ReservedRemote,
 }
 import h2_frame
 import helper
@@ -176,7 +178,7 @@ pub fn receive_headers_on_reserved_remote_transitions_to_half_closed_local_test(
   let assert Ok(#(client, _events, _to_send)) =
     receive_data(client, headers_frame)
   let assert Ok(stream) = dict.get(client.streams, 2)
-  assert stream.state == h2_core.HalfClosedLocal
+  assert stream.state == HalfClosedLocal
 }
 
 // RFC 9113 Section 5.1 (reserved remote):
@@ -236,7 +238,7 @@ pub fn receive_rst_stream_on_half_closed_local_transitions_to_closed_test() {
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
   let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == h2_core.HalfClosedLocal
+  assert stream.state == HalfClosedLocal
 
   // Client sends RST_STREAM
   let assert Ok(rst) =

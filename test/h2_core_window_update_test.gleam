@@ -1,10 +1,10 @@
 import gleam/dict
 import h2_core.{
-  Client, Connected, ConnectionError, FlowControlError, FrameSizeError,
-  HalfClosedLocal, HalfClosedRemote, Header, HeadersReceived, Open,
-  ProtocolError, Server, StreamReset, WithIndexing, open_stream, receive_data,
-  send_window_update,
+  Client, Connected, ConnectionError, FlowControlError, FrameSizeError, Header,
+  HeadersReceived, ProtocolError, Server, StreamReset, WithIndexing, open_stream,
+  receive_data, send_window_update,
 }
+import h2_core/internal/stream.{Closed, HalfClosedLocal, HalfClosedRemote, Open}
 import h2_frame
 import helper
 
@@ -407,7 +407,7 @@ pub fn receive_window_update_on_closed_stream_test() {
   let assert Ok(#(_client, headers)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
-  let server = helper.set_stream_state(server, 1, h2_core.Closed)
+  let server = helper.set_stream_state(server, 1, Closed)
 
   let assert Ok(wu) =
     h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)

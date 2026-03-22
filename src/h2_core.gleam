@@ -8,6 +8,10 @@ import gleam/list
 import gleam/option
 import gleam/result
 import gleam/string
+import h2_core/internal/stream.{
+  type Stream, Closed, HalfClosedLocal, HalfClosedRemote, Idle, Open,
+  ReservedLocal, ReservedRemote, Stream, new_stream,
+}
 import h2_frame
 
 pub type Role {
@@ -358,40 +362,6 @@ fn count_inbound_streams(conn: Connection) -> Int {
       _, _ -> count
     }
   })
-}
-
-pub type StreamState {
-  Idle
-  ReservedLocal
-  ReservedRemote
-  Open
-  HalfClosedLocal
-  HalfClosedRemote
-  Closed
-}
-
-pub type Stream {
-  Stream(
-    state: StreamState,
-    send_window_size: Int,
-    recv_window_size: Int,
-    headers_sent: Bool,
-    final_response_received: Bool,
-    expected_content_length: option.Option(Int),
-    received_content_length: Int,
-  )
-}
-
-fn new_stream() -> Stream {
-  Stream(
-    state: Idle,
-    send_window_size: 65_535,
-    recv_window_size: 65_535,
-    headers_sent: False,
-    final_response_received: False,
-    expected_content_length: option.None,
-    received_content_length: 0,
-  )
 }
 
 fn add_stream(conn: Connection, stream: Stream) -> #(Connection, Int) {

@@ -3,9 +3,9 @@ import gleam/dict
 import gleam/list
 import gleam/option.{None}
 import h2_core.{
-  Client, Connected, HalfClosedLocal, Header, Open, Server, WithIndexing,
-  open_stream, send_headers,
+  Client, Connected, Header, Server, WithIndexing, open_stream, send_headers,
 }
+import h2_core/internal/stream.{HalfClosedLocal, Open}
 import h2_frame
 import helper
 

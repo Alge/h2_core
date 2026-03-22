@@ -1,10 +1,12 @@
 import gleam/dict
 import gleam/option.{None}
 import h2_core.{
-  type Connection, Cancel, Client, Closed, Connected, ConnectionError,
-  HalfClosedRemote, Header, ProtocolError, PushPromiseReceived, ReservedLocal,
-  ReservedRemote, Server, StreamReset, WithIndexing, open_stream, receive_data,
-  send_headers, send_rst_stream,
+  type Connection, Cancel, Client, Connected, ConnectionError, Header,
+  ProtocolError, PushPromiseReceived, Server, StreamReset, WithIndexing,
+  open_stream, receive_data, send_headers, send_rst_stream,
+}
+import h2_core/internal/stream.{
+  Closed, HalfClosedRemote, ReservedLocal, ReservedRemote,
 }
 import h2_frame
 import helper
@@ -512,7 +514,7 @@ pub fn receive_push_promise_on_closed_stream_is_handled_gracefully_test() {
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.NoError)
   let assert Ok(#(client, _events, _to_send)) = receive_data(client, rst)
   let assert Ok(stream) = dict.get(client.streams, 1)
-  assert stream.state == h2_core.Closed
+  assert stream.state == Closed
 
   // PUSH_PROMISE arrives on closed stream — must be handled, not rejected
   let assert Ok(pp) =

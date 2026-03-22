@@ -4,8 +4,9 @@ import h2_core.{
   Client, CompressionError, Connected, ConnectionError, FlowControlError,
   FrameSizeError, HeaderTableSize, InitialWindowSize, MaxConcurrentStreams,
   MaxFrameSize, ProtocolError, RemoteSettingsChanged, Server,
-  SettingsAcknowledged, Stream, open_stream, receive_data, send_settings,
+  SettingsAcknowledged, open_stream, receive_data, send_settings,
 }
+import h2_core/internal/stream.{Open, Stream}
 import h2_frame
 import helper
 
@@ -489,7 +490,7 @@ pub fn receive_settings_initial_window_size_negative_window_tracked_test() {
       streams: dict.insert(
         server.streams,
         1,
-        Stream(..helper.new_stream(h2_core.Open), send_window_size: 5535),
+        Stream(..helper.new_stream(Open), send_window_size: 5535),
       ),
     )
 

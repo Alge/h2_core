@@ -1,9 +1,9 @@
 import gleam/dict
 import h2_core.{
-  Cancel, Client, Closed, Connected, ConnectionError, FrameSizeError,
-  InternalError, Open, ProtocolError, Server, StreamReset, open_stream,
-  receive_data, send_rst_stream,
+  Cancel, Client, Connected, ConnectionError, FrameSizeError, InternalError,
+  ProtocolError, Server, StreamReset, open_stream, receive_data, send_rst_stream,
 }
+import h2_core/internal/stream.{Closed, Open}
 import h2_frame
 import helper
 

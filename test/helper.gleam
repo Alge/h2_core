@@ -2,10 +2,10 @@ import gleam/dict
 import gleam/list
 import gleam/option
 import h2_core.{
-  type Connection, type ConnectionState, type Header, type StreamState, Client,
-  Connected, Connection, Header, Server, Stream, WithIndexing, open_stream,
-  receive_data,
+  type Connection, type ConnectionState, type Header, Client, Connected,
+  Connection, Header, Server, WithIndexing, open_stream, receive_data,
 }
+import h2_core/internal/stream.{type Stream, type StreamState, Stream}
 import h2_frame
 
 pub fn request_headers() -> List(Header) {
@@ -26,7 +26,7 @@ pub fn new_connection(role: h2_core.Role, state: ConnectionState) -> Connection 
   Connection(..conn, state: state, pending_settings: [])
 }
 
-pub fn new_stream(state: StreamState) -> h2_core.Stream {
+pub fn new_stream(state: StreamState) -> Stream {
   Stream(
     state: state,
     send_window_size: 65_535,

@@ -1,10 +1,12 @@
 import gleam/bit_array
 import gleam/dict
 import h2_core.{
-  type Connection, Closed, Connected, ConnectionError, HalfClosedLocal,
-  HalfClosedRemote, Header, Open, ProtocolError, ReservedLocal, ReservedRemote,
-  Server, StreamClosed, StreamError, WithIndexing, open_stream, receive_data,
+  type Connection, Connected, ConnectionError, Header, ProtocolError, Server,
+  StreamClosed, StreamError, WithIndexing, open_stream, receive_data,
   send_headers,
+}
+import h2_core/internal/stream.{
+  Closed, HalfClosedLocal, HalfClosedRemote, Open, ReservedLocal, ReservedRemote,
 }
 import h2_frame
 import helper

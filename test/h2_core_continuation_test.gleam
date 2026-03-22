@@ -2,11 +2,11 @@ import gleam/bit_array
 import gleam/dict
 import gleam/list
 import h2_core.{
-  Client, Closed, CompressionError, Connected, Connection, ConnectionError,
-  HalfClosedLocal, HalfClosedRemote, Header, HeadersReceived, Open,
-  ProtocolError, Server, Settings, StreamClosed, StreamReset, WithIndexing,
-  open_stream, receive_data,
+  Client, CompressionError, Connected, Connection, ConnectionError, Header,
+  HeadersReceived, ProtocolError, Server, Settings, StreamClosed, StreamReset,
+  WithIndexing, open_stream, receive_data,
 }
+import h2_core/internal/stream.{Closed, HalfClosedLocal, HalfClosedRemote, Open}
 import h2_frame
 import helper
 

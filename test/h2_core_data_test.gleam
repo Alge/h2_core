@@ -1,11 +1,14 @@
 import gleam/dict
 import gleam/option.{None, Some}
 import h2_core.{
-  type Connection, Client, Closed, Connected, ConnectionError, DataReceived,
-  FlowControlError, FrameSizeError, HalfClosedRemote, Header, HeadersReceived,
-  NoError, Open, ProtocolError, ReservedLocal, ReservedRemote, Server, Stream,
-  StreamClosed, StreamError, StreamReset, WithIndexing, open_stream,
-  receive_data, send_headers,
+  type Connection, Client, Connected, ConnectionError, DataReceived,
+  FlowControlError, FrameSizeError, Header, HeadersReceived, NoError,
+  ProtocolError, Server, StreamClosed, StreamError, StreamReset, WithIndexing,
+  open_stream, receive_data, send_headers,
+}
+import h2_core/internal/stream.{
+  Closed, HalfClosedLocal, HalfClosedRemote, Open, ReservedLocal, ReservedRemote,
+  Stream,
 }
 import h2_frame
 import helper
@@ -87,7 +90,7 @@ pub fn receive_data_with_end_stream_test() {
       ),
     ]
   let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == h2_core.HalfClosedRemote
+  assert stream.state == HalfClosedRemote
 }
 
 // RFC 9113 Section 6.1 - DATA with END_STREAM on a half-closed (local)
@@ -106,7 +109,7 @@ pub fn receive_data_with_end_stream_on_half_closed_local_closes_stream_test() {
   let assert Ok(#(_client, _events, _to_send)) =
     receive_data(client, response_headers)
   let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == h2_core.HalfClosedLocal
+  assert stream.state == HalfClosedLocal
 
   // Client sends DATA with END_STREAM
   let assert Ok(data_frame) =
@@ -118,7 +121,7 @@ pub fn receive_data_with_end_stream_on_half_closed_local_closes_stream_test() {
     )
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
   let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == h2_core.Closed
+  assert stream.state == Closed
 }
 
 // RFC 9113 Section 6.1 - "If a DATA frame is received whose stream is not
@@ -242,7 +245,7 @@ pub fn receive_empty_data_frame_with_end_stream_test() {
       ),
     ]
   let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == h2_core.HalfClosedRemote
+  assert stream.state == HalfClosedRemote
 }
 
 // =============================================================================
@@ -385,7 +388,7 @@ pub fn send_data_with_end_stream_test() {
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<"done":utf8>>, True, None)
   let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == h2_core.HalfClosedLocal
+  assert stream.state == HalfClosedLocal
 }
 
 // send_data exceeding the send window should return an error
@@ -440,7 +443,7 @@ pub fn send_data_on_half_closed_local_is_error_test() {
   let assert Ok(#(server, _to_send)) =
     send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
   let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == h2_core.HalfClosedLocal
+  assert stream.state == HalfClosedLocal
   let assert Error(StreamError(1, StreamClosed)) =
     h2_core.send_data(server, 1, <<"bad":utf8>>, False, None)
 }
@@ -523,7 +526,7 @@ pub fn send_data_empty_with_end_stream_closes_test() {
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<>>, True, None)
   let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == h2_core.HalfClosedLocal
+  assert stream.state == HalfClosedLocal
 }
 
 // RFC 9113 Section 5.1 - END_STREAM on a half-closed (remote) stream causes
@@ -765,7 +768,7 @@ pub fn send_empty_data_with_end_stream_when_window_exhausted_test() {
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<>>, True, None)
   let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == h2_core.HalfClosedLocal
+  assert stream.state == HalfClosedLocal
 }
 
 // RFC 9113 Section 5.2 - Flow control is based on both stream and connection
@@ -968,7 +971,7 @@ pub fn receive_multiple_data_frames_test() {
       ),
     ]
   let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == h2_core.HalfClosedRemote
+  assert stream.state == HalfClosedRemote
 }
 
 // =============================================================================
@@ -1111,7 +1114,7 @@ pub fn receive_data_on_closed_stream_is_handled_gracefully_test() {
   let assert Ok(#(server, _to_send)) =
     h2_core.send_rst_stream(server, 1, NoError)
   let assert Ok(stream) = dict.get(server.streams, 1)
-  assert stream.state == h2_core.Closed
+  assert stream.state == Closed
 
   // Receive DATA on the now-closed stream — should not be a connection error
   let assert Ok(stale_data) =
