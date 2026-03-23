@@ -8,6 +8,9 @@ import gleam/list
 import gleam/option
 import gleam/result
 import gleam/string
+import h2_core/internal.{
+  type ConnectionState, AwaitingPreface, AwaitingSettings, Connected, Draining,
+}
 import h2_core/internal/stream.{
   type Stream, type StreamState, Closed, HalfClosedLocal, HalfClosedRemote, Idle,
   Open, ReservedLocal, ReservedRemote, Stream, new_stream,
@@ -283,13 +286,6 @@ pub type Event {
 
 pub opaque type HpackContext {
   HpackContext(table: alpacki.DynamicTable)
-}
-
-pub type ConnectionState {
-  AwaitingPreface
-  AwaitingSettings
-  Connected
-  Draining
 }
 
 type PendingHeaderBlock {

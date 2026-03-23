@@ -1,11 +1,11 @@
 import gleam/list
 import gleam/option
 import h2_core.{
-  AwaitingPreface, AwaitingSettings, Client, Connected, ConnectionError,
-  ProtocolError, RemoteSettingsChanged, Server, SettingsAcknowledged,
-  default_settings, get_connection_state, get_remote_settings, new_connection,
-  receive_data,
+  Client, ConnectionError, ProtocolError, RemoteSettingsChanged, Server,
+  SettingsAcknowledged, default_settings, get_connection_state,
+  get_remote_settings, new_connection, receive_data,
 }
+import h2_core/internal.{AwaitingPreface, AwaitingSettings, Connected}
 import h2_frame
 import helper
 
