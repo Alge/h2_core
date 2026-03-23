@@ -498,7 +498,7 @@ fn validate_headers(
   headers headers: List(Header),
   is_trailer is_trailer: Bool,
 ) -> Result(Nil, Nil) {
-  use _ <- result.try(do_validate_headers(headers, is_trailer, False, []))
+  use _ <- result.try(do_validate_headers(role, headers, is_trailer, False, []))
   case is_trailer {
     True -> Ok(Nil)
     False -> verify_mandatory_pseudoheaders(role, headers)
@@ -543,6 +543,7 @@ fn check_header_value_bytes(bytes: BitArray) -> Result(Nil, Nil) {
 }
 
 fn do_validate_headers(
+  role role: Role,
   headers headers: List(Header),
   is_trailer is_trailer: Bool,
   seen_regular seen_regular: Bool,
@@ -605,7 +606,7 @@ fn do_validate_headers(
         False -> #(seen_pseudos, True)
       }
 
-      do_validate_headers(rest, is_trailer, seen_regular, seen_pseudos)
+      do_validate_headers(role, rest, is_trailer, seen_regular, seen_pseudos)
     }
   }
 }

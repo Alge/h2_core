@@ -1274,6 +1274,66 @@ pub fn receive_valid_connect_request_is_accepted_test() {
   let assert [HeadersReceived(stream_id: 1, ..)] = events
 }
 
+// RFC 9113 Section 8.2.1 - "A field name MUST NOT contain characters
+// in the ranges 0x00-0x20, 0x41-0x5a, or 0x7f-0xff (all ranges
+// inclusive). This specifically excludes... uppercase characters
+// ('A' to 'Z', ASCII 0x41 to 0x5a)."
+//
+// NOTE: This test may fail at the HPACK layer if alpacki rejects
+// uppercase field names during decoding (InvalidHeaderName). The
+// correct behavior is a stream error (PROTOCOL_ERROR) from our
+// validation layer, not a connection error (COMPRESSION_ERROR).
+pub fn receive_headers_uppercase_field_name_is_malformed_test() {
+  let server = helper.connected_connection(Server)
+  let bad_hpack = <<
+    0x82, 0x87, 0x84, 0x40, 0x07, "X-Upper":utf8, 0x05, "value":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
+  let assert Ok(#(_server, events, to_send)) =
+    receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+// RFC 9113 Section 8.2.1 - "With the exception of pseudo-header fields,
+// which have a name that starts with a single colon, field names MUST
+// NOT include a colon (ASCII COLON, 0x3a)."
+//
+// NOTE: This test may fail at the HPACK layer if alpacki rejects
+// colons in literal field names during decoding.
+pub fn receive_headers_colon_in_field_name_is_malformed_test() {
+  let server = helper.connected_connection(Server)
+  let bad_hpack = <<
+    0x82, 0x87, 0x84, 0x40, 0x05, "x:bad":utf8, 0x05, "value":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_server, events, to_send)) =
+    receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
 // RFC 9113 Section 8.2.1 - "A field value MUST NOT contain the zero
 // value (ASCII NUL, 0x00), line feed (ASCII LF, 0x0a), or carriage
 // return (ASCII CR, 0x0d) at any position."
