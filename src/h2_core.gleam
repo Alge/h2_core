@@ -284,10 +284,6 @@ pub type Event {
   PingAcknowledged(data: BitArray)
 }
 
-pub opaque type HpackContext {
-  HpackContext(table: alpacki.DynamicTable)
-}
-
 type PendingHeaderBlock {
   PendingHeaders(stream_id: Int, end_stream: Bool, fragment: BitArray)
   PendingPushPromise(
@@ -310,8 +306,8 @@ pub opaque type Connection {
     recv_buffer: BitArray,
     send_window_size: Int,
     recv_window_size: Int,
-    hpack_encoder: HpackContext,
-    hpack_decoder: HpackContext,
+    hpack_encoder: alpacki.DynamicTable,
+    hpack_decoder: alpacki.DynamicTable,
     pending_header_blocks: option.Option(PendingHeaderBlock),
   )
 }
@@ -349,8 +345,8 @@ pub fn new_connection(
       recv_buffer: <<>>,
       send_window_size: 65_535,
       recv_window_size: 65_535,
-      hpack_encoder: HpackContext(alpacki.new_dynamic(4096)),
-      hpack_decoder: HpackContext(alpacki.new_dynamic(4096)),
+      hpack_encoder: alpacki.new_dynamic(4096),
+      hpack_decoder: alpacki.new_dynamic(4096),
       pending_header_blocks: option.None,
     )
 
@@ -797,12 +793,12 @@ pub fn decode_headers(
   encoded_headers encoded_headers: BitArray,
 ) -> Result(#(Connection, List(Header)), H2Error) {
   use #(decoded_headers, new_table) <- result.try(
-    alpacki.decode_header_block(encoded_headers, conn.hpack_decoder.table)
+    alpacki.decode_header_block(encoded_headers, conn.hpack_decoder)
     |> result.replace_error(ConnectionError(CompressionError)),
   )
 
   let decoded_headers = list.map(decoded_headers, from_alpacki_header)
-  let conn = Connection(..conn, hpack_decoder: HpackContext(table: new_table))
+  let conn = Connection(..conn, hpack_decoder: new_table)
 
   Ok(#(conn, decoded_headers))
 }
@@ -817,12 +813,12 @@ pub fn encode_headers(
   let #(encoded_headers, new_table) =
     alpacki.encode_header_block(
       headers,
-      conn.hpack_encoder.table,
+      conn.hpack_encoder,
       huffman: True,
     )
 
   // Add the new table to the conn
-  let conn = Connection(..conn, hpack_encoder: HpackContext(table: new_table))
+  let conn = Connection(..conn, hpack_encoder: new_table)
 
   Ok(#(conn, bytes_tree.to_bit_array(encoded_headers)))
 }
