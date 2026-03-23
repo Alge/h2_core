@@ -788,7 +788,7 @@ fn encode_header_continuations(
 
 /// Decodes headers using the conns HPACK table, returning the headers
 /// and a Connection with updated tables
-pub fn decode_headers(
+fn decode_headers(
   conn conn: Connection,
   encoded_headers encoded_headers: BitArray,
 ) -> Result(#(Connection, List(Header)), H2Error) {
@@ -803,7 +803,7 @@ pub fn decode_headers(
   Ok(#(conn, decoded_headers))
 }
 
-pub fn encode_headers(
+fn encode_headers(
   conn conn: Connection,
   headers headers: List(Header),
 ) -> Result(#(Connection, BitArray), H2Error) {
