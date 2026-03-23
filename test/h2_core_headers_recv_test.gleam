@@ -2,7 +2,7 @@ import gleam/bit_array
 import gleam/list
 import gleam/option
 import h2_core.{
-  Client, CompressionError, Connection, ConnectionError, Header, HeadersReceived,
+  Client, CompressionError, ConnectionError, Header, HeadersReceived,
   MaxConcurrentStreams, NeverIndexed, ProtocolError, RefusedStream, Server,
   StreamClosed, StreamReset, WithIndexing, WithoutIndexing, get_stream_state,
   open_stream, receive_data, send_headers, send_settings,
@@ -670,19 +670,13 @@ pub fn receive_headers_exceeding_max_concurrent_streams_test() {
   let client = helper.connected_connection(Client)
 
   // Server advertises MAX_CONCURRENT_STREAMS=1
-  let assert Ok(#(server, _to_send)) =
+  let assert Ok(#(server, settings_bytes)) =
     send_settings(server, [MaxConcurrentStreams(1)])
-  // Simulate the client having received and acked our settings
-  // by directly setting local_settings (the ack path is tested elsewhere)
-  let server =
-    Connection(
-      ..server,
-      local_settings: h2_core.Settings(
-        ..h2_core.get_local_settings(server),
-        max_concurrent_streams: option.Some(1),
-      ),
-      pending_settings: [],
-    )
+  // Client receives the settings and ACKs
+  let assert Ok(#(client, _events, ack_bytes)) =
+    receive_data(client, settings_bytes)
+  // Server receives the ACK, applying the settings locally
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, ack_bytes)
 
   // Open stream 1
   let assert Ok(#(client, encoded1, _stream_id)) =

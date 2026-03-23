@@ -301,7 +301,7 @@ pub type PendingHeaderBlock {
   )
 }
 
-pub type Connection {
+pub opaque type Connection {
   Connection(
     state: ConnectionState,
     role: Role,
