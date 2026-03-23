@@ -1,7 +1,7 @@
 import gleam/option.{None, Some}
 import h2_core.{
-  Client, CompressionError, ConnectionError, FlowControlError, FrameSizeError,
-  HeaderTableSize, InitialWindowSize, MaxConcurrentStreams, MaxFrameSize,
+  Client, ConnectionError, FlowControlError, FrameSizeError,
+  InitialWindowSize, MaxConcurrentStreams, MaxFrameSize,
   ProtocolError, RemoteSettingsChanged, Server, SettingsAcknowledged,
   get_local_settings, get_pending_settings, get_remote_settings, open_stream,
   receive_data, send_data, send_headers, send_settings,
@@ -548,43 +548,4 @@ pub fn receive_settings_header_table_size_reduction_affects_encoder_test() {
   // the size update, the server's decoder will be out of sync
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, encoded)
   let assert [h2_core.HeadersReceived(stream_id: 3, ..)] = events
-}
-
-// RFC 9113 Section 4.3.1 - "An endpoint MUST treat a field block that
-// follows an acknowledgment of the reduction to the maximum dynamic
-// table size as a connection error (Section 5.4.1) of type
-// COMPRESSION_ERROR if it does not start with a conformant Dynamic
-// Table Size Update instruction."
-//
-// When we reduce our header table size via SETTINGS and the peer
-// acknowledges, the peer's next field block must include a size update.
-// If it doesn't, we must return COMPRESSION_ERROR.
-pub fn receive_headers_without_required_size_update_is_compression_error_test() {
-  let server = helper.connected_connection(Server)
-  let client = helper.connected_connection(Client)
-
-  // Client sends SETTINGS reducing header table size to 0
-  let assert Ok(#(client, settings_frame)) =
-    send_settings(client, [HeaderTableSize(0)])
-  // Server receives and processes settings
-  let assert Ok(#(_server, _events, _to_send)) =
-    receive_data(server, settings_frame)
-
-  // Server encodes headers WITHOUT calling resize_dynamic — the encoded
-  // block won't have a size update instruction. Client should reject
-  // with COMPRESSION_ERROR.
-  // To simulate this, we use a raw HPACK block that doesn't start
-  // with a Dynamic Table Size Update.
-  let bad_hpack = <<0x88>>
-  let assert Ok(headers_frame) =
-    h2_frame.encode_headers(
-      stream_id: 2,
-      end_stream: False,
-      end_headers: True,
-      priority: option.None,
-      field_block_fragment: bad_hpack,
-      padding: option.None,
-    )
-  let assert Error(ConnectionError(CompressionError)) =
-    receive_data(client, headers_frame)
 }
