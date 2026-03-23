@@ -292,7 +292,7 @@ pub type ConnectionState {
   Draining
 }
 
-pub type PendingHeaderBlock {
+type PendingHeaderBlock {
   PendingHeaders(stream_id: Int, end_stream: Bool, fragment: BitArray)
   PendingPushPromise(
     stream_id: Int,
