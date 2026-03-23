@@ -2414,7 +2414,7 @@ fn parse_loop(
 
     Error(h2_frame.NeedMoreData) -> Ok(#(conn, list.reverse(events), to_send))
 
-    _ -> todo
+    _ -> Error(ConnectionError(InternalError))
   }
 }
 
