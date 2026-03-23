@@ -1276,6 +1276,35 @@ pub fn receive_valid_connect_request_is_accepted_test() {
 
 // RFC 9113 Section 8.2.1 - "A field name MUST NOT contain characters
 // in the ranges 0x00-0x20, 0x41-0x5a, or 0x7f-0xff (all ranges
+// inclusive)."
+//
+// Valid UTF-8 non-ASCII characters (e.g. "é" = 0xC3 0xA9) use bytes
+// in the 0x80-0xff range, which the RFC explicitly forbids in field names.
+pub fn receive_headers_non_ascii_utf8_field_name_is_malformed_test() {
+  let server = helper.connected_connection(Server)
+  // "x-café" is valid UTF-8 but contains bytes 0xC3 0xA9 (> 0x7f)
+  let bad_hpack = <<
+    0x82, 0x87, 0x84, 0x40, 0x07, "x-caf":utf8, 0xC3, 0xA9, 0x05, "value":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_server, events, to_send)) =
+    receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+// RFC 9113 Section 8.2.1 - "A field name MUST NOT contain characters
+// in the ranges 0x00-0x20, 0x41-0x5a, or 0x7f-0xff (all ranges
 // inclusive). This specifically excludes... uppercase characters
 // ('A' to 'Z', ASCII 0x41 to 0x5a)."
 pub fn receive_headers_uppercase_field_name_is_malformed_test() {
@@ -1293,6 +1322,112 @@ pub fn receive_headers_uppercase_field_name_is_malformed_test() {
       padding: option.None,
     )
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
+  let assert Ok(#(_server, events, to_send)) =
+    receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+// RFC 9113 Section 8.2.1 - "A field name MUST NOT contain characters
+// in the ranges 0x00-0x20, 0x41-0x5a, or 0x7f-0xff (all ranges
+// inclusive)." NUL (0x00) in a field name must be rejected.
+pub fn receive_headers_nul_in_field_name_is_malformed_test() {
+  let server = helper.connected_connection(Server)
+  // Field name "x\x00a" contains NUL byte
+  let bad_hpack = <<
+    0x82, 0x87, 0x84, 0x40, 0x03, "x":utf8, 0x00, "a":utf8, 0x05, "value":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_server, events, to_send)) =
+    receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+// RFC 9113 Section 8.2.1 - "A field name MUST NOT contain characters
+// in the ranges 0x00-0x20, 0x41-0x5a, or 0x7f-0xff (all ranges
+// inclusive)." Control character BEL (0x07) in a field name must be rejected.
+pub fn receive_headers_control_char_in_field_name_is_malformed_test() {
+  let server = helper.connected_connection(Server)
+  // Field name "x\x07a" contains BEL control character
+  let bad_hpack = <<
+    0x82, 0x87, 0x84, 0x40, 0x03, "x":utf8, 0x07, "a":utf8, 0x05, "value":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_server, events, to_send)) =
+    receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+// RFC 9113 Section 8.2.1 - "A field name MUST NOT contain characters
+// in the ranges 0x00-0x20, 0x41-0x5a, or 0x7f-0xff (all ranges
+// inclusive). This specifically excludes all non-visible ASCII
+// characters, ASCII SP (0x20)..."
+pub fn receive_headers_space_in_field_name_is_malformed_test() {
+  let server = helper.connected_connection(Server)
+  // Field name "x a" contains space (0x20)
+  let bad_hpack = <<
+    0x82, 0x87, 0x84, 0x40, 0x03, "x":utf8, 0x20, "a":utf8, 0x05, "value":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_server, events, to_send)) =
+    receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+// RFC 9113 Section 8.2.1 - "A field name MUST NOT contain characters
+// in the ranges 0x00-0x20, 0x41-0x5a, or 0x7f-0xff (all ranges
+// inclusive)." DEL (0x7f) sits at the boundary of the 0x7f-0xff range
+// and must be rejected.
+pub fn receive_headers_del_in_field_name_is_malformed_test() {
+  let server = helper.connected_connection(Server)
+  // Field name "x\x7fa" contains DEL character
+  let bad_hpack = <<
+    0x82, 0x87, 0x84, 0x40, 0x03, "x":utf8, 0x7F, "a":utf8, 0x05, "value":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, headers_frame)
   assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
@@ -1530,8 +1665,7 @@ pub fn receive_headers_invalid_utf8_in_field_value_is_protocol_error_test() {
   // 0x05=name length 5, "x-foo"
   // 0x03=value length 3, then 3 raw bytes including 0x80 (invalid UTF-8)
   let bad_hpack = <<
-    0x82, 0x87, 0x84, 0x40, 0x05, "x-foo":utf8, 0x03, "a":utf8, 0x80,
-    "b":utf8,
+    0x82, 0x87, 0x84, 0x40, 0x05, "x-foo":utf8, 0x03, "a":utf8, 0x80, "b":utf8,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(

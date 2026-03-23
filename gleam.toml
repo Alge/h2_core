@@ -16,7 +16,7 @@ internal_modules = ["h2_core/internal", "h2_core/internal/*"]
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 h2_frame = ">= 0.2.1 and < 1.0.0"
-alpacki = { path = "../alpacki" }
+alpacki = ">= 2.0.0 and < 3.0.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

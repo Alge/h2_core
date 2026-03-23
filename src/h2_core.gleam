@@ -504,6 +504,32 @@ fn validate_headers(
   }
 }
 
+fn validate_header_name(name: BitArray) -> Result(Nil, Nil) {
+  // First char might be a ":", but that is not allowed after first byte
+  case name {
+    <<":", rest:bits>> -> check_header_name_bytes(rest)
+    _ -> check_header_name_bytes(name)
+  }
+}
+
+fn check_header_name_bytes(name: BitArray) -> Result(Nil, Nil) {
+  case name {
+    <<>> -> Ok(Nil)
+    <<byte, rest:bits>> -> {
+      case byte {
+        b if b >= 0x21 && b <= 0x39 -> check_header_name_bytes(rest)
+        // '!' to '9', excluding nothing
+        b if b >= 0x3b && b <= 0x40 -> check_header_name_bytes(rest)
+        // ';' to '@', skipping ':'
+        b if b >= 0x5b && b <= 0x7e -> check_header_name_bytes(rest)
+        // '[' to '~', skipping uppercase
+        _ -> Error(Nil)
+      }
+    }
+    _ -> Error(Nil)
+  }
+}
+
 fn validate_header_value(header: Header) -> Result(Nil, Nil) {
   use _ <- result.try(check_header_value_bytes(<<header.value:utf8>>))
 
@@ -543,7 +569,7 @@ fn check_header_value_bytes(bytes: BitArray) -> Result(Nil, Nil) {
 
 fn do_validate_headers(
   role role: Role,
-  headers headers: List(Header),
+  headers headers: List(alpacki.HeaderField),
   is_trailer is_trailer: Bool,
   seen_regular seen_regular: Bool,
   seen_pseudos seen_pseudos: List(String),
@@ -552,6 +578,9 @@ fn do_validate_headers(
     [] -> Ok(Nil)
 
     [header, ..rest] -> {
+      // Validate header name content
+      use _ <- result.try(validate_header_name(<<header.name:utf8>>))
+
       // Pseudo headers cannot arrive after regular headers
       use <- bool.guard(
         string.starts_with(header.name, ":") && seen_regular,
@@ -623,9 +652,7 @@ fn to_alpacki_header(header: Header) -> alpacki.HeaderField {
   )
 }
 
-fn from_alpacki_header(
-  header: alpacki.HeaderField,
-) -> Result(Header, Nil) {
+fn from_alpacki_header(header: alpacki.HeaderField) -> Result(Header, Nil) {
   let indexing = case header.indexing {
     alpacki.WithIndexing -> WithIndexing
     alpacki.WithoutIndexing -> WithoutIndexing
@@ -817,11 +844,7 @@ fn encode_headers(
   let headers = list.map(headers, to_alpacki_header)
 
   let #(encoded_headers, new_table) =
-    alpacki.encode_header_block(
-      headers,
-      conn.hpack_encoder,
-      huffman: True,
-    )
+    alpacki.encode_header_block(headers, conn.hpack_encoder, huffman: True)
 
   // Add the new table to the conn
   let conn = Connection(..conn, hpack_encoder: new_table)
