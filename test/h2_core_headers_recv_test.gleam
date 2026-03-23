@@ -1278,11 +1278,6 @@ pub fn receive_valid_connect_request_is_accepted_test() {
 // in the ranges 0x00-0x20, 0x41-0x5a, or 0x7f-0xff (all ranges
 // inclusive). This specifically excludes... uppercase characters
 // ('A' to 'Z', ASCII 0x41 to 0x5a)."
-//
-// NOTE: This test may fail at the HPACK layer if alpacki rejects
-// uppercase field names during decoding (InvalidHeaderName). The
-// correct behavior is a stream error (PROTOCOL_ERROR) from our
-// validation layer, not a connection error (COMPRESSION_ERROR).
 pub fn receive_headers_uppercase_field_name_is_malformed_test() {
   let server = helper.connected_connection(Server)
   let bad_hpack = <<
@@ -1309,9 +1304,6 @@ pub fn receive_headers_uppercase_field_name_is_malformed_test() {
 // RFC 9113 Section 8.2.1 - "With the exception of pseudo-header fields,
 // which have a name that starts with a single colon, field names MUST
 // NOT include a colon (ASCII COLON, 0x3a)."
-//
-// NOTE: This test may fail at the HPACK layer if alpacki rejects
-// colons in literal field names during decoding.
 pub fn receive_headers_colon_in_field_name_is_malformed_test() {
   let server = helper.connected_connection(Server)
   let bad_hpack = <<
@@ -1478,6 +1470,91 @@ pub fn receive_headers_field_value_trailing_tab_is_malformed_test() {
   let server = helper.connected_connection(Server)
   let bad_hpack = <<
     0x82, 0x87, 0x84, 0x40, 0x05, "x-foo":utf8, 0x06, "value\t":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_server, events, to_send)) =
+    receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+// RFC 9113 Section 8.2.1 - Field names and values are conveyed as byte
+// sequences via HPACK (RFC 7541). Since h2_core exposes headers as Strings,
+// we MUST reject any header whose name or value is not valid UTF-8.
+// Invalid UTF-8 makes the header unrepresentable, so this is treated as
+// a malformed message: stream error of type PROTOCOL_ERROR (Section 8.1.1).
+
+// Invalid UTF-8 in a header field name (truncated 2-byte sequence: 0xC3
+// without continuation byte).
+pub fn receive_headers_invalid_utf8_in_field_name_is_protocol_error_test() {
+  let server = helper.connected_connection(Server)
+  // 0x82=:method GET, 0x87=:scheme https, 0x84=:path /
+  // 0x40=literal with indexing, new name
+  // 0x03=name length 3, then 3 raw bytes including 0xC3 (invalid UTF-8)
+  // 0x05=value length 5, "value"
+  let bad_hpack = <<
+    0x82, 0x87, 0x84, 0x40, 0x03, "x":utf8, 0xC3, 0x00, 0x05, "value":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_server, events, to_send)) =
+    receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+// Invalid UTF-8 in a header field value (lone continuation byte 0x80
+// without a leading byte).
+pub fn receive_headers_invalid_utf8_in_field_value_is_protocol_error_test() {
+  let server = helper.connected_connection(Server)
+  // 0x40=literal with indexing, new name
+  // 0x05=name length 5, "x-foo"
+  // 0x03=value length 3, then 3 raw bytes including 0x80 (invalid UTF-8)
+  let bad_hpack = <<
+    0x82, 0x87, 0x84, 0x40, 0x05, "x-foo":utf8, 0x03, "a":utf8, 0x80,
+    "b":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_server, events, to_send)) =
+    receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+// A field value consisting entirely of 0xFF bytes (invalid in UTF-8).
+pub fn receive_headers_all_invalid_utf8_bytes_in_value_is_protocol_error_test() {
+  let server = helper.connected_connection(Server)
+  let bad_hpack = <<
+    0x82, 0x87, 0x84, 0x40, 0x05, "x-foo":utf8, 0x02, 0xFF, 0xFE,
   >>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(

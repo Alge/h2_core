@@ -1,7 +1,6 @@
 import alpacki
 import gleam/bit_array
 import gleam/bool
-import gleam/bytes_tree
 import gleam/dict
 import gleam/int
 import gleam/list
@@ -618,19 +617,23 @@ fn to_alpacki_header(header: Header) -> alpacki.HeaderField {
     NeverIndexed -> alpacki.NeverIndexed
   }
   alpacki.HeaderField(
-    name: header.name,
-    value: header.value,
+    name: <<header.name:utf8>>,
+    value: <<header.value:utf8>>,
     indexing: alpacki_indexing,
   )
 }
 
-fn from_alpacki_header(header: alpacki.HeaderField) -> Header {
+fn from_alpacki_header(
+  header: alpacki.HeaderField,
+) -> Result(Header, Nil) {
   let indexing = case header.indexing {
     alpacki.WithIndexing -> WithIndexing
     alpacki.WithoutIndexing -> WithoutIndexing
     alpacki.NeverIndexed -> NeverIndexed
   }
-  Header(name: header.name, value: header.value, indexing: indexing)
+  use name <- result.try(bit_array.to_string(header.name))
+  use value <- result.try(bit_array.to_string(header.value))
+  Ok(Header(name: name, value: value, indexing: indexing))
 }
 
 pub type Setting {
@@ -797,7 +800,10 @@ fn decode_headers(
     |> result.replace_error(ConnectionError(CompressionError)),
   )
 
-  let decoded_headers = list.map(decoded_headers, from_alpacki_header)
+  use decoded_headers <- result.try(
+    list.try_map(decoded_headers, from_alpacki_header)
+    |> result.replace_error(ConnectionError(ProtocolError)),
+  )
   let conn = Connection(..conn, hpack_decoder: new_table)
 
   Ok(#(conn, decoded_headers))
@@ -820,7 +826,7 @@ fn encode_headers(
   // Add the new table to the conn
   let conn = Connection(..conn, hpack_encoder: new_table)
 
-  Ok(#(conn, bytes_tree.to_bit_array(encoded_headers)))
+  Ok(#(conn, encoded_headers))
 }
 
 fn handle_decoded_push_promise(
