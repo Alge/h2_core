@@ -251,7 +251,8 @@ pub fn receive_goaway_prevents_opening_new_streams_test() {
   let assert Ok(#(client, _events, _to_send)) = receive_data(client, goaway)
 
   // Attempt to open a new stream — must be rejected
-  let assert Error(_) = open_stream(client, helper.request_headers(), False)
+  let assert Error(ConnectionError(ProtocolError)) =
+    open_stream(client, helper.request_headers(), False)
 }
 
 // RFC 9113 Section 6.8 - "Activity on streams numbered lower than or
@@ -289,7 +290,7 @@ pub fn receive_goaway_prevents_push_promise_test() {
   let assert Ok(#(server, _to_send)) = send_goaway(server, NoError, <<>>)
 
   // Server tries to push — must be rejected (no new streams)
-  let assert Error(_) =
+  let assert Error(ConnectionError(ProtocolError)) =
     h2_core.send_push_promise(server, 1, helper.request_headers())
 }
 

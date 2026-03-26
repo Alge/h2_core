@@ -530,7 +530,7 @@ pub fn send_data_on_stream_zero_is_error_test() {
 pub fn send_data_on_idle_stream_is_error_test() {
   let server = helper.connected_connection(Server)
   // Stream 99 was never opened — it is in idle state
-  let assert Error(_) =
+  let assert Error(StreamError(99, StreamClosed)) =
     h2_core.send_data(server, 99, <<"bad":utf8>>, False, None)
 }
 
@@ -970,7 +970,7 @@ pub fn get_send_window_size_default_values_test() {
 
 pub fn get_send_window_size_unknown_stream_is_error_test() {
   let server = helper.connected_connection(Server)
-  let assert Error(_) = h2_core.get_send_window_size(server, 99)
+  let assert Error(Nil) = h2_core.get_send_window_size(server, 99)
 }
 
 pub fn get_send_window_size_negative_window_returns_zero_test() {

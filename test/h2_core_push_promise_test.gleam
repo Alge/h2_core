@@ -409,7 +409,7 @@ pub fn send_push_promise_on_half_closed_remote_test() {
 // unless that stream is either 'open' or 'half-closed (remote)'"
 pub fn send_push_promise_on_idle_stream_is_error_test() {
   let server = helper.connected_connection(Server)
-  let assert Error(_) =
+  let assert Error(ConnectionError(ProtocolError)) =
     h2_core.send_push_promise(server, 1, [
       Header(":method", <<"GET":utf8>>, WithIndexing),
     ])
@@ -444,7 +444,7 @@ pub fn send_push_promise_when_peer_disabled_push_is_error_test() {
   let assert Ok(#(server, _events, _to_send)) =
     receive_data(server, settings_frame)
   // Server tries to push — should fail
-  let assert Error(_) =
+  let assert Error(ConnectionError(ProtocolError)) =
     h2_core.send_push_promise(server, 1, [
       Header(":method", <<"GET":utf8>>, WithIndexing),
     ])
@@ -460,7 +460,7 @@ pub fn client_send_push_promise_is_error_test() {
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
   // Client tries to push — must be rejected
-  let assert Error(_) =
+  let assert Error(ConnectionError(ProtocolError)) =
     h2_core.send_push_promise(client, 1, [
       Header(":method", <<"GET":utf8>>, WithIndexing),
     ])
@@ -469,7 +469,7 @@ pub fn client_send_push_promise_is_error_test() {
 // RFC 9113 Section 6.6 - Stream ID 0 is invalid for PUSH_PROMISE
 pub fn send_push_promise_on_stream_zero_is_error_test() {
   let #(server, _client) = server_with_open_stream()
-  let assert Error(_) =
+  let assert Error(ConnectionError(ProtocolError)) =
     h2_core.send_push_promise(server, 0, [
       Header(":method", <<"GET":utf8>>, WithIndexing),
     ])
@@ -493,7 +493,7 @@ pub fn send_push_promise_on_half_closed_local_is_error_test() {
       [Header(":status", <<"200":utf8>>, WithIndexing)],
       True,
     )
-  let assert Error(_) =
+  let assert Error(ConnectionError(ProtocolError)) =
     h2_core.send_push_promise(server, 1, [
       Header(":method", <<"GET":utf8>>, WithIndexing),
     ])
@@ -657,7 +657,7 @@ pub fn send_push_promise_on_closed_stream_is_error_test() {
   // Close stream 1 by sending RST_STREAM
   let assert Ok(#(server, _to_send)) =
     send_rst_stream(server, 1, h2_core.NoError)
-  let assert Error(_) =
+  let assert Error(ConnectionError(ProtocolError)) =
     h2_core.send_push_promise(server, 1, [
       Header(":method", <<"GET":utf8>>, WithIndexing),
     ])

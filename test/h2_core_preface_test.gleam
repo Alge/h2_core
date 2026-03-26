@@ -1,8 +1,8 @@
 import gleam/list
 import gleam/option
 import h2_core.{
-  Client, ConnectionError, ProtocolError, RemoteSettingsChanged, Server,
-  SettingsAcknowledged, default_settings, get_connection_state,
+  Client, ConnectionError, FrameSizeError, ProtocolError, RemoteSettingsChanged,
+  Server, SettingsAcknowledged, default_settings, get_connection_state,
   get_remote_settings, new_connection, receive_data,
 }
 import h2_core/internal.{AwaitingPreface, AwaitingSettings, Connected}
@@ -437,7 +437,8 @@ pub fn client_receives_window_update_as_first_frame_test() {
 
 pub fn client_receiving_magic_bytes_is_error_test() {
   let assert Ok(#(conn, _preface)) = new_connection(Client, default_settings())
-  let assert Error(_) = receive_data(conn, client_preface_magic)
+  let assert Error(ConnectionError(FrameSizeError)) =
+    receive_data(conn, client_preface_magic)
 }
 
 // =============================================================================

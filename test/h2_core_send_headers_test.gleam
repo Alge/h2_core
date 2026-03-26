@@ -203,7 +203,7 @@ pub fn send_headers_on_reserved_remote_is_protocol_error_test() {
 // use open_stream to initiate new streams instead.
 pub fn send_headers_on_idle_stream_is_error_test() {
   let server = helper.connected_connection(Server)
-  let assert Error(_) =
+  let assert Error(StreamError(99, StreamClosed)) =
     send_headers(
       server,
       99,

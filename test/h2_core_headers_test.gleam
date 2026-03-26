@@ -1,7 +1,10 @@
 import gleam/bit_array
 import gleam/list
 import gleam/option.{None}
-import h2_core.{Client, Header, Server, WithIndexing, open_stream, send_headers}
+import h2_core.{
+  Client, Header, ProtocolError, Server, StreamError, WithIndexing, open_stream,
+  send_headers,
+}
 import h2_core/internal/stream.{HalfClosedLocal, Open}
 import h2_frame
 import helper
@@ -121,13 +124,13 @@ pub fn open_stream_updates_hpack_encoder_test() {
 // Sending headers with empty list is missing mandatory pseudo-headers.
 pub fn open_stream_empty_headers_is_error_test() {
   let conn = helper.connected_connection(Client)
-  let assert Error(_) = open_stream(conn, [], False)
+  let assert Error(StreamError(1, ProtocolError)) = open_stream(conn, [], False)
 }
 
 // RFC 9113 Section 8.3.1 - Missing :scheme is malformed.
 pub fn open_stream_missing_scheme_is_error_test() {
   let conn = helper.connected_connection(Client)
-  let assert Error(_) =
+  let assert Error(StreamError(1, ProtocolError)) =
     open_stream(
       conn,
       [
@@ -141,7 +144,7 @@ pub fn open_stream_missing_scheme_is_error_test() {
 // RFC 9113 Section 8.3.1 - Missing :path is malformed.
 pub fn open_stream_missing_path_is_error_test() {
   let conn = helper.connected_connection(Client)
-  let assert Error(_) =
+  let assert Error(StreamError(1, ProtocolError)) =
     open_stream(
       conn,
       [
@@ -155,7 +158,7 @@ pub fn open_stream_missing_path_is_error_test() {
 // RFC 9113 Section 8.3.1 - Missing :method is malformed.
 pub fn open_stream_missing_method_is_error_test() {
   let conn = helper.connected_connection(Client)
-  let assert Error(_) =
+  let assert Error(StreamError(1, ProtocolError)) =
     open_stream(
       conn,
       [
@@ -170,7 +173,7 @@ pub fn open_stream_missing_method_is_error_test() {
 // field block before all regular field lines."
 pub fn open_stream_pseudo_after_regular_is_error_test() {
   let conn = helper.connected_connection(Client)
-  let assert Error(_) =
+  let assert Error(StreamError(1, ProtocolError)) =
     open_stream(
       conn,
       [
@@ -187,7 +190,7 @@ pub fn open_stream_pseudo_after_regular_is_error_test() {
 // appear more than once in a field block."
 pub fn open_stream_duplicate_pseudo_is_error_test() {
   let conn = helper.connected_connection(Client)
-  let assert Error(_) =
+  let assert Error(StreamError(1, ProtocolError)) =
     open_stream(
       conn,
       [
@@ -204,7 +207,7 @@ pub fn open_stream_duplicate_pseudo_is_error_test() {
 // header fields MUST be treated as malformed."
 pub fn open_stream_with_connection_header_is_error_test() {
   let conn = helper.connected_connection(Client)
-  let assert Error(_) =
+  let assert Error(StreamError(1, ProtocolError)) =
     open_stream(
       conn,
       [
@@ -220,7 +223,7 @@ pub fn open_stream_with_connection_header_is_error_test() {
 // RFC 9113 Section 8.2.2 - TE header must only have value "trailers".
 pub fn open_stream_with_te_non_trailers_is_error_test() {
   let conn = helper.connected_connection(Client)
-  let assert Error(_) =
+  let assert Error(StreamError(1, ProtocolError)) =
     open_stream(
       conn,
       [
@@ -250,7 +253,7 @@ pub fn send_headers_response_missing_status_is_error_test() {
   let assert Ok(#(server, _events, _to_send)) =
     h2_core.receive_data(server, headers)
   // Server sends response without :status
-  let assert Error(_) =
+  let assert Error(StreamError(1, ProtocolError)) =
     send_headers(
       server,
       1,
