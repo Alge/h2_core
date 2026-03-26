@@ -295,25 +295,9 @@ pub fn send_data_on_closed_stream_is_error_test() {
 
 // RFC 9113 Section 5.1 (closed):
 // "An endpoint MUST NOT send frames other than PRIORITY on a closed stream."
-//
-// Test: send_headers on a closed stream should be an error.
-// Note: send_headers currently always creates a new stream, so this test
-// verifies that sending headers *on an existing closed stream* is rejected.
-// This may require send_headers to accept a stream_id parameter, or a
-// separate send function for trailers/additional headers on existing streams.
-// For now we test via send_data which takes a stream_id.
-pub fn send_headers_on_closed_stream_is_error_test() {
+pub fn send_on_closed_stream_is_error_test() {
   let #(server, _client) = server_with_closed_stream()
   let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
-
-  // Since send_headers always creates a new stream (doesn't take stream_id),
-  // we cannot directly test "send HEADERS on closed stream 1" with the
-  // current API. Instead, we verify that the closed stream cannot be used
-  // for any frame type by testing send_data (which takes a stream_id).
-  //
-  // TODO: When send_headers gains support for sending on existing streams
-  // (e.g. trailers), add a test that sending headers on a closed stream
-  // returns an error.
   let assert Error(_) = h2_core.send_data(server, 1, <<>>, True, None)
 }
 

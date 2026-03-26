@@ -127,6 +127,33 @@ pub fn send_headers_without_end_stream_does_not_change_state_test() {
 }
 
 // =============================================================================
+// Trailers - RFC 9113 Section 8.1
+// =============================================================================
+
+// RFC 9113 Section 8.1: "Trailers MUST NOT include pseudo-header fields
+// (Section 8.3). An endpoint that receives pseudo-header fields in trailers
+// MUST treat the request or response as malformed (Section 8.1.1)."
+pub fn send_trailers_with_pseudo_header_is_malformed_test() {
+  let #(server, _client) = server_with_open_stream()
+  // Send initial response — marks headers_sent: True on the stream
+  let assert Ok(#(server, _)) =
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
+  // Sending trailers containing a pseudo-header field must be rejected
+  let assert Error(StreamError(1, ProtocolError)) =
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      True,
+    )
+}
+
+// =============================================================================
 // Invalid states - RFC 9113 Section 5.1
 // =============================================================================
 
