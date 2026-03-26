@@ -1848,7 +1848,14 @@ fn parse_loop(
                             Error(ConnectionError(_) as err) -> Error(err)
                             Error(StreamError(sid, code)) -> {
                               use #(conn, events, to_send) <- result.try(
-                                handle_rst_stream(conn, sid, code, 0, events, to_send),
+                                handle_rst_stream(
+                                  conn,
+                                  sid,
+                                  code,
+                                  0,
+                                  events,
+                                  to_send,
+                                ),
                               )
                               parse_loop(conn, events, to_send)
                             }
@@ -1914,7 +1921,14 @@ fn parse_loop(
                             Error(ConnectionError(_) as err) -> Error(err)
                             Error(StreamError(sid, code)) -> {
                               use #(conn, events, to_send) <- result.try(
-                                handle_rst_stream(conn, sid, code, 0, events, to_send),
+                                handle_rst_stream(
+                                  conn,
+                                  sid,
+                                  code,
+                                  0,
+                                  events,
+                                  to_send,
+                                ),
                               )
                               parse_loop(conn, events, to_send)
                             }
