@@ -3,6 +3,7 @@ import h2_core.{
   Client, Server, default_settings, new_connection, open_stream, receive_data,
 }
 import h2_core/internal/stream.{HalfClosedRemote, Open}
+import h2_frame
 import helper
 
 pub fn main() -> Nil {
@@ -183,8 +184,9 @@ pub fn receive_frame_with_reserved_bit_set_is_accepted_test() {
   >>
   let assert Ok(#(_conn, _events, to_send)) =
     receive_data(conn, ping_with_reserved_bit)
-  // Should have responded with PING ACK
-  assert to_send != <<>>
+  let assert Ok(expected_ack) =
+    h2_frame.encode_ping(ack: True, data: <<1, 2, 3, 4, 5, 6, 7, 8>>)
+  assert to_send == expected_ack
 }
 
 // Bug: receiving a response with END_STREAM on a client-initiated stream

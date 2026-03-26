@@ -37,7 +37,9 @@ pub fn send_headers_on_open_stream_test() {
       [Header(":status", <<"200":utf8>>, WithIndexing)],
       False,
     )
-  assert to_send != <<>>
+  let assert Ok(#(frame_data, _)) = h2_frame.extract_frame(to_send, 16_384)
+  let assert Ok(h2_frame.Headers(stream_id: 1, end_stream: False, ..)) =
+    h2_frame.decode_frame(frame_data)
 }
 
 // RFC 9113 Section 5.1 - "An endpoint sending an END_STREAM flag causes the
@@ -65,7 +67,9 @@ pub fn send_headers_on_half_closed_remote_stream_test() {
       [Header(":status", <<"200":utf8>>, WithIndexing)],
       False,
     )
-  assert to_send != <<>>
+  let assert Ok(#(frame_data, _)) = h2_frame.extract_frame(to_send, 16_384)
+  let assert Ok(h2_frame.Headers(stream_id: 1, end_stream: False, ..)) =
+    h2_frame.decode_frame(frame_data)
 }
 
 // RFC 9113 Section 5.1 - "A stream can transition from this ['half-closed

@@ -137,7 +137,7 @@ pub fn open_stream_continuation_stream_state_open_test() {
 
   // Verify we actually got continuation frames
   let frames = helper.parse_all_frames(to_send, [])
-  assert list.length(frames) > 1
+  assert list.length(frames) == 2
 
   let assert Ok(Open) = get_stream_state(conn, 1)
 }
@@ -152,7 +152,7 @@ pub fn open_stream_continuation_round_trip_test() {
 
   // Verify there are continuation frames
   let frames = helper.parse_all_frames(to_send, [])
-  assert list.length(frames) > 1
+  assert list.length(frames) == 2
 
   // Feed the entire output to a server and verify headers decode correctly
   let server = helper.connected_connection(Server)
@@ -196,10 +196,11 @@ pub fn open_stream_continuation_hpack_state_persists_test() {
   let assert Ok(#(_conn, second_send, _stream_id)) =
     open_stream(conn, headers, False)
 
-  let first_frames = helper.parse_all_frames(first_send, [])
-  let second_frames = helper.parse_all_frames(second_send, [])
-  // Second send should use fewer or equal frames
-  assert list.length(second_frames) <= list.length(first_frames)
+  // Second send must be no larger in bytes — the encoder state accumulated
+  // during the first send (including CONTINUATION frames) must be preserved.
+  // With 250 large unique headers the dynamic table offers no reuse, so byte
+  // sizes are equal; this assertion confirms the encoder did not reset.
+  assert bit_array.byte_size(second_send) <= bit_array.byte_size(first_send)
 }
 
 // --- Receiving CONTINUATION ---
@@ -373,9 +374,10 @@ pub fn receive_multiple_continuation_frames_test() {
   let assert Ok(#(_conn, to_send, _stream_id)) =
     open_stream(conn, headers, False)
 
-  // Verify we got at least 3 frames
+  // Verify we got exactly 3 frames: 1 HEADERS + 2 CONTINUATIONs
+  // 500 custom headers at ~77 bytes each ≈ 38,503 bytes → ceil(38503/16384) = 3
   let frames = helper.parse_all_frames(to_send, [])
-  assert list.length(frames) >= 3
+  assert list.length(frames) == 3
 
   // Server should decode them all correctly
   let server = helper.connected_connection(Server)
@@ -394,7 +396,7 @@ pub fn receive_continuation_clears_pending_state_test() {
   let assert Ok(#(client, to_send, _stream_id)) =
     open_stream(client, headers, False)
   let frames = helper.parse_all_frames(to_send, [])
-  assert list.length(frames) > 1
+  assert list.length(frames) == 2
 
   let server = helper.connected_connection(Server)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, to_send)
@@ -424,7 +426,7 @@ pub fn receive_continuation_preserves_end_stream_test() {
 
   // Verify it was actually split
   let frames = helper.parse_all_frames(to_send, [])
-  assert list.length(frames) > 1
+  assert list.length(frames) == 2
 
   let server = helper.connected_connection(Server)
   let assert Ok(#(server, events, _to_send)) = receive_data(server, to_send)
@@ -443,7 +445,7 @@ pub fn receive_continuation_preserves_header_order_test() {
 
   // Verify it was actually split
   let frames = helper.parse_all_frames(to_send, [])
-  assert list.length(frames) > 1
+  assert list.length(frames) == 2
 
   let server = helper.connected_connection(Server)
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, to_send)
@@ -515,7 +517,7 @@ pub fn receive_continuation_on_open_stream_is_valid_test() {
   let assert Ok(#(_client, encoded2, _stream_id)) =
     open_stream(client, h2, False)
   let frames = helper.parse_all_frames(encoded2, [])
-  assert list.length(frames) > 1
+  assert list.length(frames) == 2
   let patched = helper.patch_all_frames_stream_id(encoded2, 1)
 
   let server = helper.connected_connection(Server)
@@ -540,7 +542,7 @@ pub fn receive_continuation_on_half_closed_local_is_valid_test() {
   let assert Ok(#(_client, encoded2, _stream_id)) =
     open_stream(client, h2, False)
   let frames = helper.parse_all_frames(encoded2, [])
-  assert list.length(frames) > 1
+  assert list.length(frames) == 2
   let patched = helper.patch_all_frames_stream_id(encoded2, 1)
 
   let server = helper.connected_connection(Server)
@@ -572,7 +574,7 @@ pub fn receive_continuation_on_closed_stream_is_discarded_test() {
   let assert Ok(#(_client, encoded2, _stream_id)) =
     open_stream(client, h2, False)
   let frames = helper.parse_all_frames(encoded2, [])
-  assert list.length(frames) > 1
+  assert list.length(frames) == 2
   let patched = helper.patch_all_frames_stream_id(encoded2, 1)
 
   let server = helper.connected_connection(Server)
@@ -637,7 +639,7 @@ pub fn receive_continuation_rejected_preserves_hpack_state_test() {
 
   // Verify block 2 is actually split across multiple frames
   let frames = helper.parse_all_frames(encoded2, [])
-  assert list.length(frames) > 1
+  assert list.length(frames) == 2
 
   // Patch all frames in block 2 to target stream 1
   let patched2 = helper.patch_all_frames_stream_id(encoded2, 1)

@@ -19,10 +19,12 @@ pub fn open_stream_produces_encoded_frame_test() {
     Header(":path", <<"/":utf8>>, WithIndexing),
     Header(":scheme", <<"https":utf8>>, WithIndexing),
   ]
-  let assert Ok(#(_conn, to_send, _stream_id)) =
+  let assert Ok(#(_conn, to_send, stream_id)) =
     open_stream(conn, headers, False)
-  // The output should be non-empty (actual HPACK-encoded HEADERS frame)
-  assert to_send != <<>>
+  let assert Ok(#(frame_data, _)) = h2_frame.extract_frame(to_send, 16_384)
+  let assert Ok(frame) = h2_frame.decode_frame(frame_data)
+  let assert h2_frame.Headers(stream_id: sid, end_stream: False, ..) = frame
+  assert sid == stream_id
 }
 
 // open_stream opens a new stream in Open state
@@ -53,7 +55,7 @@ pub fn open_stream_server_uses_even_stream_ids_test() {
   let assert Ok(#(conn, _to_send, stream_id)) =
     open_stream(conn, headers, False)
   assert stream_id == 2
-  let assert Ok(_) = h2_core.get_stream_state(conn, 2)
+  let assert Ok(Open) = h2_core.get_stream_state(conn, 2)
 }
 
 // RFC 9113 Section 6.2 - END_STREAM flag transitions stream to half-closed (local)
