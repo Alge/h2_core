@@ -27,9 +27,9 @@ pub fn receive_headers_emits_event_test() {
     HeadersReceived(stream_id: 1, headers: recv_headers, end_stream: False),
   ] = events
   let assert [
-    Header(":method", "GET", _),
-    Header(":scheme", "https", _),
-    Header(":path", "/", _),
+    Header(":method", <<"GET":utf8>>, _),
+    Header(":scheme", <<"https":utf8>>, _),
+    Header(":path", <<"/":utf8>>, _),
   ] = recv_headers
 }
 
@@ -64,7 +64,7 @@ pub fn receive_headers_updates_hpack_decoder_test() {
   let client = helper.connected_connection(Client)
   let headers =
     list.append(helper.request_headers(), [
-      Header("custom-header", "custom-value", WithIndexing),
+      Header("custom-header", <<"custom-value":utf8>>, WithIndexing),
     ])
   // Send headers twice from the same client (HPACK state accumulates)
   let assert Ok(#(client, first_encoded, _stream_id)) =
@@ -79,10 +79,10 @@ pub fn receive_headers_updates_hpack_decoder_test() {
   let assert [HeadersReceived(stream_id: 1, headers: h1, end_stream: False)] =
     events1
   let assert [
-    Header(":method", "GET", _),
-    Header(":scheme", "https", _),
-    Header(":path", "/", _),
-    Header("custom-header", "custom-value", _),
+    Header(":method", <<"GET":utf8>>, _),
+    Header(":scheme", <<"https":utf8>>, _),
+    Header(":path", <<"/":utf8>>, _),
+    Header("custom-header", <<"custom-value":utf8>>, _),
   ] = h1
 
   let assert Ok(#(_server, events2, _to_send)) =
@@ -90,10 +90,10 @@ pub fn receive_headers_updates_hpack_decoder_test() {
   let assert [HeadersReceived(stream_id: 3, headers: h2, end_stream: False)] =
     events2
   let assert [
-    Header(":method", "GET", _),
-    Header(":scheme", "https", _),
-    Header(":path", "/", _),
-    Header("custom-header", "custom-value", _),
+    Header(":method", <<"GET":utf8>>, _),
+    Header(":scheme", <<"https":utf8>>, _),
+    Header(":path", <<"/":utf8>>, _),
+    Header("custom-header", <<"custom-value":utf8>>, _),
   ] = h2
 }
 
@@ -102,7 +102,7 @@ pub fn receive_headers_hpack_compression_works_test() {
   let client = helper.connected_connection(Client)
   let headers =
     list.append(helper.request_headers(), [
-      Header("custom-header", "custom-value", WithIndexing),
+      Header("custom-header", <<"custom-value":utf8>>, WithIndexing),
     ])
   let assert Ok(#(client, first_encoded, _stream_id)) =
     open_stream(client, headers, False)
@@ -122,10 +122,10 @@ pub fn receive_headers_hpack_compression_works_test() {
   let assert [HeadersReceived(stream_id: 3, headers: h, end_stream: False)] =
     events
   let assert [
-    Header(":method", "GET", _),
-    Header(":scheme", "https", _),
-    Header(":path", "/", _),
-    Header("custom-header", "custom-value", _),
+    Header(":method", <<"GET":utf8>>, _),
+    Header(":scheme", <<"https":utf8>>, _),
+    Header(":path", <<"/":utf8>>, _),
+    Header("custom-header", <<"custom-value":utf8>>, _),
   ] = h
 }
 
@@ -187,9 +187,9 @@ pub fn receive_multiple_headers_creates_streams_test() {
   let assert Ok(#(client, encoded1, _stream_id)) =
     open_stream(client, h1, False)
   let h2 = [
-    Header(":method", "POST", WithIndexing),
-    Header(":scheme", "https", WithIndexing),
-    Header(":path", "/", WithIndexing),
+    Header(":method", <<"POST":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/":utf8>>, WithIndexing),
   ]
   let assert Ok(#(_client, encoded2, _stream_id)) =
     open_stream(client, h2, False)
@@ -214,9 +214,9 @@ pub fn receive_multiple_headers_in_one_call_test() {
   let assert Ok(#(client, encoded1, _stream_id)) =
     open_stream(client, h1, False)
   let h2 = [
-    Header(":method", "POST", WithIndexing),
-    Header(":scheme", "https", WithIndexing),
-    Header(":path", "/", WithIndexing),
+    Header(":method", <<"POST":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/":utf8>>, WithIndexing),
   ]
   let assert Ok(#(_client, encoded2, _stream_id)) =
     open_stream(client, h2, False)
@@ -289,7 +289,7 @@ pub fn receive_headers_on_open_stream_is_valid_test() {
     open_stream(
       client,
       list.append(helper.request_headers(), [
-        Header("x-trailer", "value", WithIndexing),
+        Header("x-trailer", <<"value":utf8>>, WithIndexing),
       ]),
       False,
     )
@@ -318,7 +318,7 @@ pub fn receive_headers_on_half_closed_local_stream_is_valid_test() {
     open_stream(
       client,
       list.append(helper.request_headers(), [
-        Header("x-trailer", "value", WithIndexing),
+        Header("x-trailer", <<"value":utf8>>, WithIndexing),
       ]),
       False,
     )
@@ -346,7 +346,12 @@ pub fn receive_headers_end_stream_on_open_stream_transitions_state_test() {
     open_stream(client, helper.request_headers(), False)
   // Send trailers on stream 1 (headers_sent is True, so validation treats as trailers)
   let assert Ok(#(_client, encoded2)) =
-    send_headers(client, 1, [Header("x-trailer", "done", WithIndexing)], True)
+    send_headers(
+      client,
+      1,
+      [Header("x-trailer", <<"done":utf8>>, WithIndexing)],
+      True,
+    )
 
   let server = helper.connected_connection(Server)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
@@ -366,7 +371,12 @@ pub fn receive_headers_end_stream_on_half_closed_local_transitions_to_closed_tes
     open_stream(client, helper.request_headers(), False)
   // Send trailers on stream 1
   let assert Ok(#(_client, encoded2)) =
-    send_headers(client, 1, [Header("x-trailer", "done", WithIndexing)], True)
+    send_headers(
+      client,
+      1,
+      [Header("x-trailer", <<"done":utf8>>, WithIndexing)],
+      True,
+    )
 
   let server = helper.connected_connection(Server)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
@@ -427,7 +437,7 @@ pub fn receive_headers_without_indexing_test() {
   let client = helper.connected_connection(Client)
   let headers =
     list.append(helper.request_headers(), [
-      Header("authorization", "Bearer secret", WithoutIndexing),
+      Header("authorization", <<"Bearer secret":utf8>>, WithoutIndexing),
     ])
   let assert Ok(#(_client, encoded, _stream_id)) =
     open_stream(client, headers, False)
@@ -438,10 +448,10 @@ pub fn receive_headers_without_indexing_test() {
     HeadersReceived(stream_id: 1, headers: recv_headers, end_stream: False),
   ] = events
   let assert [
-    Header(":method", "GET", WithIndexing),
-    Header(":scheme", "https", WithIndexing),
-    Header(":path", "/", WithIndexing),
-    Header("authorization", "Bearer secret", WithoutIndexing),
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/":utf8>>, WithIndexing),
+    Header("authorization", <<"Bearer secret":utf8>>, WithoutIndexing),
   ] = recv_headers
 }
 
@@ -450,7 +460,7 @@ pub fn receive_headers_never_indexed_test() {
   let client = helper.connected_connection(Client)
   let headers =
     list.append(helper.request_headers(), [
-      Header("secret-token", "abc123", NeverIndexed),
+      Header("secret-token", <<"abc123":utf8>>, NeverIndexed),
     ])
   let assert Ok(#(_client, encoded, _stream_id)) =
     open_stream(client, headers, False)
@@ -461,10 +471,10 @@ pub fn receive_headers_never_indexed_test() {
     HeadersReceived(stream_id: 1, headers: recv_headers, end_stream: False),
   ] = events
   let assert [
-    Header(":method", "GET", _),
-    Header(":scheme", "https", _),
-    Header(":path", "/", _),
-    Header("secret-token", "abc123", NeverIndexed),
+    Header(":method", <<"GET":utf8>>, _),
+    Header(":scheme", <<"https":utf8>>, _),
+    Header(":path", <<"/":utf8>>, _),
+    Header("secret-token", <<"abc123":utf8>>, NeverIndexed),
   ] = recv_headers
 }
 
@@ -520,9 +530,9 @@ pub fn receive_headers_on_half_closed_remote_is_stream_error_test() {
     open_stream(
       client,
       [
-        Header(":method", "POST", WithIndexing),
-        Header(":scheme", "https", WithIndexing),
-        Header(":path", "/", WithIndexing),
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
       ],
       False,
     )
@@ -546,9 +556,9 @@ pub fn receive_headers_on_half_closed_remote_sends_rst_stream_test() {
     open_stream(
       client,
       [
-        Header(":method", "POST", WithIndexing),
-        Header(":scheme", "https", WithIndexing),
-        Header(":path", "/", WithIndexing),
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
       ],
       False,
     )
@@ -573,9 +583,9 @@ pub fn receive_headers_after_stream_error_succeeds_test() {
     open_stream(
       client,
       [
-        Header(":method", "POST", WithIndexing),
-        Header(":scheme", "https", WithIndexing),
-        Header(":path", "/", WithIndexing),
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
       ],
       False,
     )
@@ -583,9 +593,9 @@ pub fn receive_headers_after_stream_error_succeeds_test() {
     open_stream(
       client,
       [
-        Header(":method", "PUT", WithIndexing),
-        Header(":scheme", "https", WithIndexing),
-        Header(":path", "/", WithIndexing),
+        Header(":method", <<"PUT":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
       ],
       False,
     )
@@ -617,7 +627,7 @@ pub fn rejected_headers_must_still_update_hpack_state_test() {
     open_stream(
       client,
       list.append(helper.request_headers(), [
-        Header("x-custom", "value1", WithIndexing),
+        Header("x-custom", <<"value1":utf8>>, WithIndexing),
       ]),
       True,
     )
@@ -625,7 +635,7 @@ pub fn rejected_headers_must_still_update_hpack_state_test() {
     open_stream(
       client,
       list.append(helper.request_headers(), [
-        Header("x-custom", "value2", WithIndexing),
+        Header("x-custom", <<"value2":utf8>>, WithIndexing),
       ]),
       False,
     )
@@ -633,7 +643,7 @@ pub fn rejected_headers_must_still_update_hpack_state_test() {
     open_stream(
       client,
       list.append(helper.request_headers(), [
-        Header("x-custom", "value3", WithIndexing),
+        Header("x-custom", <<"value3":utf8>>, WithIndexing),
       ]),
       False,
     )
@@ -652,7 +662,7 @@ pub fn rejected_headers_must_still_update_hpack_state_test() {
   let assert [HeadersReceived(stream_id: 5, headers: h, end_stream: False)] =
     events
   // Verify the custom header survived — mandatory pseudo-headers are also present
-  let assert [_, _, _, Header("x-custom", "value3", _)] = h
+  let assert [_, _, _, Header("x-custom", <<"value3":utf8>>, _)] = h
 }
 
 // --- MAX_CONCURRENT_STREAMS enforcement ---
@@ -723,7 +733,11 @@ pub fn receive_headers_on_even_stream_id_is_protocol_error_test() {
 pub fn client_receive_headers_on_odd_stream_id_is_protocol_error_test() {
   let server = helper.connected_connection(Server)
   let assert Ok(#(_server, encoded, _stream_id)) =
-    open_stream(server, [Header(":status", "200", WithIndexing)], False)
+    open_stream(
+      server,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   // Patch stream ID from 2 (even/server) to 1 (odd/client)
   let patched = helper.patch_stream_id(encoded, 1)
 
@@ -1657,13 +1671,15 @@ pub fn receive_headers_invalid_utf8_in_field_name_is_protocol_error_test() {
   assert to_send == expected_rst
 }
 
-// Invalid UTF-8 in a header field value (lone continuation byte 0x80
-// without a leading byte).
-pub fn receive_headers_invalid_utf8_in_field_value_is_protocol_error_test() {
+// RFC 9113 Section 8.2.1: a field value MUST NOT contain NUL, LF, or CR,
+// and MUST NOT start or end with whitespace. Bytes 0x80-0xFF (obs-text) are
+// NOT prohibited. A value containing obs-text bytes MUST be passed through
+// as HeadersReceived with the raw bytes intact.
+pub fn receive_headers_obs_text_in_field_value_is_accepted_test() {
   let server = helper.connected_connection(Server)
   // 0x40=literal with indexing, new name
   // 0x05=name length 5, "x-foo"
-  // 0x03=value length 3, then 3 raw bytes including 0x80 (invalid UTF-8)
+  // 0x03=value length 3, then 3 raw bytes including 0x80 (obs-text)
   let bad_hpack = <<
     0x82, 0x87, 0x84, 0x40, 0x05, "x-foo":utf8, 0x03, "a":utf8, 0x80, "b":utf8,
   >>
@@ -1676,16 +1692,27 @@ pub fn receive_headers_invalid_utf8_in_field_value_is_protocol_error_test() {
       field_block_fragment: bad_hpack,
       padding: option.None,
     )
-  let assert Ok(#(_server, events, to_send)) =
+  let assert Ok(#(_server, events, _to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
-  let assert Ok(expected_rst) =
-    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
-  assert to_send == expected_rst
+  assert events
+    == [
+      HeadersReceived(
+        stream_id: 1,
+        headers: [
+          Header(":method", <<"GET":utf8>>, WithIndexing),
+          Header(":scheme", <<"https":utf8>>, WithIndexing),
+          Header(":path", <<"/":utf8>>, WithIndexing),
+          Header("x-foo", <<97, 128, 98>>, WithIndexing),
+        ],
+        end_stream: False,
+      ),
+    ]
 }
 
-// A field value consisting entirely of 0xFF bytes (invalid in UTF-8).
-pub fn receive_headers_all_invalid_utf8_bytes_in_value_is_protocol_error_test() {
+// RFC 9113 Section 8.2.1: bytes 0x80-0xFF (obs-text) are not prohibited in
+// field values. A value consisting entirely of obs-text bytes MUST be passed
+// through as HeadersReceived with the raw bytes intact.
+pub fn receive_headers_all_obs_text_bytes_in_value_is_accepted_test() {
   let server = helper.connected_connection(Server)
   let bad_hpack = <<
     0x82, 0x87, 0x84, 0x40, 0x05, "x-foo":utf8, 0x02, 0xFF, 0xFE,
@@ -1699,10 +1726,19 @@ pub fn receive_headers_all_invalid_utf8_bytes_in_value_is_protocol_error_test() 
       field_block_fragment: bad_hpack,
       padding: option.None,
     )
-  let assert Ok(#(_server, events, to_send)) =
+  let assert Ok(#(_server, events, _to_send)) =
     receive_data(server, headers_frame)
-  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
-  let assert Ok(expected_rst) =
-    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
-  assert to_send == expected_rst
+  assert events
+    == [
+      HeadersReceived(
+        stream_id: 1,
+        headers: [
+          Header(":method", <<"GET":utf8>>, WithIndexing),
+          Header(":scheme", <<"https":utf8>>, WithIndexing),
+          Header(":path", <<"/":utf8>>, WithIndexing),
+          Header("x-foo", <<0xFF, 0xFE>>, WithIndexing),
+        ],
+        end_stream: False,
+      ),
+    ]
 }

@@ -432,9 +432,9 @@ pub fn receive_window_update_connection_survives_stream_overflow_test() {
     open_stream(
       client,
       [
-        Header(":method", "POST", WithIndexing),
-        Header(":scheme", "https", WithIndexing),
-        Header(":path", "/", WithIndexing),
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
       ],
       False,
     )

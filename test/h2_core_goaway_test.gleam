@@ -193,7 +193,7 @@ pub fn receive_headers_after_goaway_maintains_hpack_state_test() {
     open_stream(
       client,
       list.append(helper.request_headers(), [
-        Header("x-custom", "value1", WithIndexing),
+        Header("x-custom", <<"value1":utf8>>, WithIndexing),
       ]),
       False,
     )
@@ -201,7 +201,7 @@ pub fn receive_headers_after_goaway_maintains_hpack_state_test() {
     open_stream(
       client,
       list.append(helper.request_headers(), [
-        Header("x-custom", "value2", WithIndexing),
+        Header("x-custom", <<"value2":utf8>>, WithIndexing),
       ]),
       False,
     )
@@ -209,7 +209,7 @@ pub fn receive_headers_after_goaway_maintains_hpack_state_test() {
     open_stream(
       client,
       list.append(helper.request_headers(), [
-        Header("x-custom", "value3", WithIndexing),
+        Header("x-custom", <<"value3":utf8>>, WithIndexing),
       ]),
       False,
     )
@@ -272,7 +272,12 @@ pub fn receive_goaway_existing_streams_still_work_test() {
 
   // Client can still send trailers on stream 1
   let assert Ok(#(_client, _to_send)) =
-    send_headers(client, 1, [Header("x-trailer", "done", WithIndexing)], True)
+    send_headers(
+      client,
+      1,
+      [Header("x-trailer", <<"done":utf8>>, WithIndexing)],
+      True,
+    )
 }
 
 // RFC 9113 Section 6.8 - After receiving GOAWAY, the server should not
@@ -344,7 +349,7 @@ pub fn send_goaway_ignores_streams_above_last_stream_id_test() {
     open_stream(
       client,
       list.append(helper.request_headers(), [
-        Header("x-custom", "value", WithIndexing),
+        Header("x-custom", <<"value":utf8>>, WithIndexing),
       ]),
       False,
     )
@@ -361,7 +366,7 @@ pub fn send_goaway_ignores_streams_above_last_stream_id_test() {
     open_stream(
       client,
       list.append(helper.request_headers(), [
-        Header("x-other", "test", WithIndexing),
+        Header("x-other", <<"test":utf8>>, WithIndexing),
       ]),
       False,
     )

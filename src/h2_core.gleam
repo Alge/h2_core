@@ -396,7 +396,7 @@ pub type Indexing {
 }
 
 pub type Header {
-  Header(name: String, value: String, indexing: Indexing)
+  Header(name: String, value: BitArray, indexing: Indexing)
 }
 
 fn extract_status_code(headers: List(Header)) -> Result(Int, Nil) {
@@ -404,12 +404,10 @@ fn extract_status_code(headers: List(Header)) -> Result(Int, Nil) {
     [] -> Error(Nil)
     [header, ..rest] -> {
       case header.name {
-        ":status" -> {
-          case int.parse(header.value) {
-            Ok(status_code) -> Ok(status_code)
-            Error(_) -> Error(Nil)
-          }
-        }
+        ":status" ->
+          header.value
+          |> bit_array.to_string
+          |> result.try(int.parse)
         _ -> extract_status_code(rest)
       }
     }
@@ -423,12 +421,11 @@ fn extract_content_length(
     [] -> Ok(option.None)
     [header, ..rest] -> {
       case header.name {
-        "content-length" -> {
-          case int.parse(header.value) {
-            Ok(content_length) -> Ok(option.Some(content_length))
-            Error(_) -> Error(Nil)
-          }
-        }
+        "content-length" ->
+          header.value
+          |> bit_array.to_string
+          |> result.try(int.parse)
+          |> result.map(option.Some)
         _ -> extract_content_length(rest)
       }
     }
@@ -452,7 +449,7 @@ fn verify_mandatory_pseudoheaders(
         list.find(headers, fn(h) { h.name == ":method" }),
       )
       case method.value {
-        "CONNECT" -> {
+        <<"CONNECT":utf8>> -> {
           case list.contains(pseudo_names, ":authority") {
             True -> {
               case
@@ -471,7 +468,7 @@ fn verify_mandatory_pseudoheaders(
           use path <- result.try(
             list.find(headers, fn(h) { h.name == ":path" }),
           )
-          use <- bool.guard(path.value == "", Error(Nil))
+          use <- bool.guard(path.value == <<>>, Error(Nil))
 
           case
             list.contains(pseudo_names, ":method")
@@ -531,21 +528,23 @@ fn check_header_name_bytes(name: BitArray) -> Result(Nil, Nil) {
 }
 
 fn validate_header_value(header: Header) -> Result(Nil, Nil) {
-  use _ <- result.try(check_header_value_bytes(<<header.value:utf8>>))
-
-  // header values must not start or end with a space character  
+  use _ <- result.try(check_header_value_bytes(header.value))
+  // RFC 9113 Section 8.2.1: a field value MUST NOT start or end with ASCII                                     
+  // whitespace (SP 0x20 or HTAB 0x09).                                                                         
   use <- bool.guard(
-    string.starts_with(header.value, " ") || string.ends_with(header.value, " "),
+    bit_array.starts_with(header.value, <<0x20>>)
+      || bit_array.starts_with(header.value, <<0x09>>),
     Error(Nil),
   )
-
-  // header values must not start or end with a tab character
+  let size = bit_array.byte_size(header.value)
   use <- bool.guard(
-    string.starts_with(header.value, "\t")
-      || string.ends_with(header.value, "\t"),
+    size > 0
+      && {
+      let last = bit_array.slice(header.value, size - 1, 1)
+      last == Ok(<<0x20>>) || last == Ok(<<0x09>>)
+    },
     Error(Nil),
   )
-
   Ok(Nil)
 }
 
@@ -569,7 +568,7 @@ fn check_header_value_bytes(bytes: BitArray) -> Result(Nil, Nil) {
 
 fn do_validate_headers(
   role role: Role,
-  headers headers: List(alpacki.HeaderField),
+  headers headers: List(Header),
   is_trailer is_trailer: Bool,
   seen_regular seen_regular: Bool,
   seen_pseudos seen_pseudos: List(String),
@@ -625,7 +624,7 @@ fn do_validate_headers(
       )
 
       use <- bool.guard(
-        !is_pseudo && header.name == "te" && header.value != "trailers",
+        !is_pseudo && header.name == "te" && header.value != <<"trailers":utf8>>,
         Error(Nil),
       )
 
@@ -647,7 +646,7 @@ fn to_alpacki_header(header: Header) -> alpacki.HeaderField {
   }
   alpacki.HeaderField(
     name: <<header.name:utf8>>,
-    value: <<header.value:utf8>>,
+    value: header.value,
     indexing: alpacki_indexing,
   )
 }
@@ -659,8 +658,7 @@ fn from_alpacki_header(header: alpacki.HeaderField) -> Result(Header, Nil) {
     alpacki.NeverIndexed -> NeverIndexed
   }
   use name <- result.try(bit_array.to_string(header.name))
-  use value <- result.try(bit_array.to_string(header.value))
-  Ok(Header(name: name, value: value, indexing: indexing))
+  Ok(Header(name: name, value: header.value, indexing: indexing))
 }
 
 pub type Setting {
@@ -1574,6 +1572,27 @@ pub fn send_settings(
       ..conn,
       pending_settings: list.append(conn.pending_settings, [settings]),
     )
+
+  let conn = case
+    list.find(settings, fn(s) {
+      case s {
+        HeaderTableSize(_) -> True
+        _ -> False
+      }
+    })
+  {
+    Ok(HeaderTableSize(new_size)) ->
+      case new_size < alpacki.dynamic_max_size(conn.hpack_decoder) {
+        True ->
+          Connection(
+            ..conn,
+            hpack_decoder: alpacki.expect_table_size_update(conn.hpack_decoder),
+          )
+        False -> conn
+      }
+    _ -> conn
+  }
+
   case
     h2_frame.encode_settings(ack: False, settings: to_frame_settings(settings))
   {

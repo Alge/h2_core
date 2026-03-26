@@ -20,16 +20,16 @@ import helper
 fn large_request_headers(count: Int) -> List(h2_core.Header) {
   // Required pseudo-headers for a valid request
   let pseudo = [
-    Header(":method", "GET", WithIndexing),
-    Header(":scheme", "https", WithIndexing),
-    Header(":path", "/", WithIndexing),
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/":utf8>>, WithIndexing),
   ]
   // Generate `count` unique custom headers with long values
   let custom =
     int.range(1, count + 1, [], fn(acc, i) {
       let name = "x-hdr-" <> string.pad_start(int.to_string(i), 4, "0")
       let value = string.repeat("x", 64)
-      [Header(name, value, WithIndexing), ..acc]
+      [Header(name, <<value:utf8>>, WithIndexing), ..acc]
     })
     |> list.reverse
   list.append(pseudo, custom)
@@ -404,9 +404,9 @@ pub fn receive_continuation_clears_pending_state_test() {
     open_stream(
       client,
       [
-        Header(":method", "POST", WithIndexing),
-        Header(":scheme", "https", WithIndexing),
-        Header(":path", "/", WithIndexing),
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
       ],
       False,
     )
@@ -598,30 +598,30 @@ pub fn receive_continuation_rejected_preserves_hpack_state_test() {
   let h1 = large_request_headers(250)
   let h2 = {
     let pseudo = [
-      Header(":method", "POST", WithIndexing),
-      Header(":scheme", "https", WithIndexing),
-      Header(":path", "/second", WithIndexing),
+      Header(":method", <<"POST":utf8>>, WithIndexing),
+      Header(":scheme", <<"https":utf8>>, WithIndexing),
+      Header(":path", <<"/second":utf8>>, WithIndexing),
     ]
     let custom =
       int.range(1, 251, [], fn(acc, i) {
         let name = "x-second-" <> string.pad_start(int.to_string(i), 4, "0")
         let value = string.repeat("y", 64)
-        [Header(name, value, WithIndexing), ..acc]
+        [Header(name, <<value:utf8>>, WithIndexing), ..acc]
       })
       |> list.reverse
     list.append(pseudo, custom)
   }
   let h3 = {
     let pseudo = [
-      Header(":method", "PUT", WithIndexing),
-      Header(":scheme", "https", WithIndexing),
-      Header(":path", "/third", WithIndexing),
+      Header(":method", <<"PUT":utf8>>, WithIndexing),
+      Header(":scheme", <<"https":utf8>>, WithIndexing),
+      Header(":path", <<"/third":utf8>>, WithIndexing),
     ]
     let custom =
       int.range(1, 251, [], fn(acc, i) {
         let name = "x-third-" <> string.pad_start(int.to_string(i), 4, "0")
         let value = string.repeat("z", 64)
-        [Header(name, value, WithIndexing), ..acc]
+        [Header(name, <<value:utf8>>, WithIndexing), ..acc]
       })
       |> list.reverse
     list.append(pseudo, custom)

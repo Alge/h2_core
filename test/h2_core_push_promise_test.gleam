@@ -356,9 +356,9 @@ pub fn receive_push_promise_updates_hpack_state_test() {
     PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: h),
   ] = events
   let assert [
-    Header(":method", "GET", _),
-    Header(":scheme", "https", _),
-    Header(":path", "/", _),
+    Header(":method", <<"GET":utf8>>, _),
+    Header(":scheme", <<"https":utf8>>, _),
+    Header(":path", <<"/":utf8>>, _),
   ] = h
 }
 
@@ -383,7 +383,7 @@ pub fn send_push_promise_on_open_peer_stream_test() {
   // Server pushes on stream 1 (client-initiated, open)
   let assert Ok(#(server, _to_send, promised_id)) =
     h2_core.send_push_promise(server, 1, [
-      Header(":method", "GET", WithIndexing),
+      Header(":method", <<"GET":utf8>>, WithIndexing),
     ])
   // Promised stream should be even and in reserved (local) on server side
   assert promised_id % 2 == 0
@@ -400,7 +400,7 @@ pub fn send_push_promise_on_half_closed_remote_test() {
   // Stream 1 is half-closed (remote) on server — push should work
   let assert Ok(#(server, _to_send, promised_id)) =
     h2_core.send_push_promise(server, 1, [
-      Header(":method", "GET", WithIndexing),
+      Header(":method", <<"GET":utf8>>, WithIndexing),
     ])
   let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, promised_id)
 }
@@ -411,7 +411,7 @@ pub fn send_push_promise_on_idle_stream_is_error_test() {
   let server = helper.connected_connection(Server)
   let assert Error(_) =
     h2_core.send_push_promise(server, 1, [
-      Header(":method", "GET", WithIndexing),
+      Header(":method", <<"GET":utf8>>, WithIndexing),
     ])
 }
 
@@ -421,11 +421,11 @@ pub fn send_push_promise_auto_allocates_increasing_even_ids_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send, id1)) =
     h2_core.send_push_promise(server, 1, [
-      Header(":method", "GET", WithIndexing),
+      Header(":method", <<"GET":utf8>>, WithIndexing),
     ])
   let assert Ok(#(_server, _to_send, id2)) =
     h2_core.send_push_promise(server, 1, [
-      Header(":method", "GET", WithIndexing),
+      Header(":method", <<"GET":utf8>>, WithIndexing),
     ])
   assert id1 % 2 == 0
   assert id2 % 2 == 0
@@ -446,7 +446,7 @@ pub fn send_push_promise_when_peer_disabled_push_is_error_test() {
   // Server tries to push — should fail
   let assert Error(_) =
     h2_core.send_push_promise(server, 1, [
-      Header(":method", "GET", WithIndexing),
+      Header(":method", <<"GET":utf8>>, WithIndexing),
     ])
 }
 
@@ -462,7 +462,7 @@ pub fn client_send_push_promise_is_error_test() {
   // Client tries to push — must be rejected
   let assert Error(_) =
     h2_core.send_push_promise(client, 1, [
-      Header(":method", "GET", WithIndexing),
+      Header(":method", <<"GET":utf8>>, WithIndexing),
     ])
 }
 
@@ -471,7 +471,7 @@ pub fn send_push_promise_on_stream_zero_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Error(_) =
     h2_core.send_push_promise(server, 0, [
-      Header(":method", "GET", WithIndexing),
+      Header(":method", <<"GET":utf8>>, WithIndexing),
     ])
 }
 
@@ -487,10 +487,15 @@ pub fn send_push_promise_on_half_closed_local_is_error_test() {
   // Server sends response headers with END_STREAM — stream becomes
   // half-closed (local) from the server's perspective
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      True,
+    )
   let assert Error(_) =
     h2_core.send_push_promise(server, 1, [
-      Header(":method", "GET", WithIndexing),
+      Header(":method", <<"GET":utf8>>, WithIndexing),
     ])
 }
 
@@ -654,7 +659,7 @@ pub fn send_push_promise_on_closed_stream_is_error_test() {
     send_rst_stream(server, 1, h2_core.NoError)
   let assert Error(_) =
     h2_core.send_push_promise(server, 1, [
-      Header(":method", "GET", WithIndexing),
+      Header(":method", <<"GET":utf8>>, WithIndexing),
     ])
 }
 
@@ -701,8 +706,8 @@ pub fn send_push_promise_multiple_headers_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, to_send, promised_id)) =
     h2_core.send_push_promise(server, 1, [
-      Header(":method", "GET", WithIndexing),
-      Header(":path", "/", WithIndexing),
+      Header(":method", <<"GET":utf8>>, WithIndexing),
+      Header(":path", <<"/":utf8>>, WithIndexing),
     ])
   // :method GET = 0x82, :path / = 0x84 (HPACK static table indices)
   let assert Ok(expected) =
@@ -718,7 +723,7 @@ pub fn send_push_promise_multiple_headers_test() {
   // Verify by sending a second push — the encoder should still work
   let assert Ok(#(_server, _to_send, id2)) =
     h2_core.send_push_promise(server, 1, [
-      Header(":method", "GET", WithIndexing),
+      Header(":method", <<"GET":utf8>>, WithIndexing),
     ])
   assert id2 > promised_id
 }

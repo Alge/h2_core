@@ -193,7 +193,12 @@ pub fn receive_data_with_end_stream_on_half_closed_local_closes_stream_test() {
 
   // Server sends headers with END_STREAM, making it half-closed (local)
   let assert Ok(#(server, response_headers)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      True,
+    )
   let assert Ok(#(_client, _events, _to_send)) =
     receive_data(client, response_headers)
   let assert Ok(HalfClosedLocal) = h2_core.get_stream_state(server, 1)
@@ -445,7 +450,12 @@ pub fn send_data_on_open_stream_test() {
   let #(server, _client) = server_with_open_stream()
   // Server sends response headers first (non-END_STREAM)
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   let assert Ok(#(server, to_send)) =
     h2_core.send_data(server, 1, <<"hello":utf8>>, False, None)
   let assert Ok(expected) =
@@ -463,7 +473,12 @@ pub fn send_data_on_open_stream_test() {
 pub fn send_data_with_end_stream_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<"done":utf8>>, True, None)
   let assert Ok(HalfClosedLocal) = h2_core.get_stream_state(server, 1)
@@ -473,7 +488,12 @@ pub fn send_data_with_end_stream_test() {
 pub fn send_data_exceeding_stream_window_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   // Set stream send_window_size to 5 via peer SETTINGS
   let server = set_stream_send_window(server, 5)
   let assert Error(ConnectionError(FlowControlError)) =
@@ -483,7 +503,12 @@ pub fn send_data_exceeding_stream_window_is_error_test() {
 pub fn send_data_exceeding_connection_window_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   // Consume connection send window down to 5 by sending data,
   // then restore stream window via peer WINDOW_UPDATE
   let server = consume_send_window(server, 65_530)
@@ -514,7 +539,12 @@ pub fn send_data_on_half_closed_local_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   // Server sends headers with END_STREAM
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      True,
+    )
   let assert Ok(HalfClosedLocal) = h2_core.get_stream_state(server, 1)
   let assert Error(StreamError(1, StreamClosed)) =
     h2_core.send_data(server, 1, <<"bad":utf8>>, False, None)
@@ -555,7 +585,12 @@ pub fn send_data_on_reserved_remote_stream_is_error_test() {
 pub fn send_data_decrements_stream_send_window_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<"hello world":utf8>>, False, None)
   let assert Ok(65_524) = h2_core.get_stream_send_window_size(server, 1)
@@ -567,7 +602,12 @@ pub fn send_data_decrements_stream_send_window_test() {
 pub fn send_data_decrements_connection_send_window_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<"hello world":utf8>>, False, None)
   assert get_connection_send_window_size(server) == 65_535 - 11
@@ -577,7 +617,12 @@ pub fn send_data_decrements_connection_send_window_test() {
 pub fn send_data_empty_payload_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   let assert Ok(#(_server, to_send)) =
     h2_core.send_data(server, 1, <<>>, False, None)
   let assert Ok(expected) =
@@ -594,7 +639,12 @@ pub fn send_data_empty_payload_test() {
 pub fn send_data_empty_with_end_stream_closes_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<>>, True, None)
   let assert Ok(HalfClosedLocal) = h2_core.get_stream_state(server, 1)
@@ -605,7 +655,12 @@ pub fn send_data_empty_with_end_stream_closes_test() {
 pub fn send_data_with_end_stream_on_half_closed_remote_closes_stream_test() {
   let #(server, _client) = server_with_half_closed_remote_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<"done":utf8>>, True, None)
   let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
@@ -618,7 +673,12 @@ pub fn send_data_with_end_stream_on_half_closed_remote_closes_stream_test() {
 pub fn send_data_with_negative_window_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   // Create a negative stream window: send 100 bytes to consume window,
   // then peer reduces INITIAL_WINDOW_SIZE to 0, pushing the window negative.
   // stream_sw = 65535 - 100 = 65435, then delta = 0 - 65535 = -65535
@@ -639,7 +699,12 @@ pub fn send_data_with_negative_window_is_error_test() {
 pub fn send_padded_data_frame_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   let assert Ok(#(_server, to_send)) =
     h2_core.send_data(server, 1, <<"hello":utf8>>, False, Some(10))
   // Manually crafted padded DATA frame:
@@ -665,7 +730,12 @@ pub fn send_padded_data_frame_test() {
 pub fn send_padded_data_decrements_stream_send_window_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   // 5 bytes data + 1 byte pad_length + 10 bytes padding = 16 bytes total payload
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<"hello":utf8>>, False, Some(10))
@@ -679,7 +749,12 @@ pub fn send_padded_data_decrements_stream_send_window_test() {
 pub fn send_padded_data_decrements_connection_send_window_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   // 5 bytes data + 1 byte pad_length + 10 bytes padding = 16 bytes total payload
   let assert Ok(#(server, _to_send)) =
     h2_core.send_data(server, 1, <<"hello":utf8>>, False, Some(10))
@@ -693,7 +768,12 @@ pub fn send_padded_data_decrements_connection_send_window_test() {
 pub fn send_data_exceeding_max_frame_size_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   // Default max frame size is 16384. Send 16385 bytes — one over the limit.
   let big_data = <<0:size(16_385)-unit(8)>>
   let assert Error(ConnectionError(FrameSizeError)) =
@@ -710,7 +790,12 @@ pub fn send_data_exceeding_max_frame_size_is_error_test() {
 pub fn send_padded_data_exceeding_max_frame_size_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   // Default max frame size is 16384.
   // Send 16380 bytes of data with 10 bytes of padding:
   // payload = 1 (pad_length) + 16380 (data) + 10 (padding) = 16391 > 16384
@@ -726,7 +811,12 @@ pub fn send_padded_data_exceeding_max_frame_size_is_error_test() {
 pub fn send_padded_data_exceeding_stream_window_is_flow_control_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   // Set stream send_window_size to 10 bytes via peer SETTINGS
   let server = set_stream_send_window(server, 10)
   // 3 bytes data fits in the window alone, but with padding:
@@ -743,7 +833,12 @@ pub fn send_padded_data_exceeding_stream_window_is_flow_control_error_test() {
 pub fn send_padded_data_pad_length_field_counts_toward_flow_control_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   // Set stream send_window_size to exactly 13 bytes via peer SETTINGS
   let server = set_stream_send_window(server, 13)
   // 3 bytes data + 10 bytes padding = 13, which fits the window.
@@ -759,7 +854,12 @@ pub fn send_padded_data_pad_length_field_counts_toward_flow_control_test() {
 pub fn send_padded_data_exceeding_connection_window_is_flow_control_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   // Consume connection send window down to 10 by sending data,
   // then restore stream window via peer WINDOW_UPDATE
   let server = consume_send_window(server, 65_525)
@@ -777,7 +877,12 @@ pub fn send_padded_data_exceeding_connection_window_is_flow_control_error_test()
 pub fn send_data_exactly_at_window_boundary_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   // Consume 65530 bytes to bring both windows down to 5
   let server = consume_send_window(server, 65_530)
   let assert Ok(5) = h2_core.get_stream_send_window_size(server, 1)
@@ -797,7 +902,12 @@ pub fn send_data_exactly_at_window_boundary_test() {
 pub fn send_empty_data_with_end_stream_when_window_exhausted_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   // Consume all 65535 bytes to bring both windows down to 0
   let server = consume_send_window(server, 65_535)
   let assert Ok(0) = h2_core.get_stream_send_window_size(server, 1)
@@ -814,7 +924,12 @@ pub fn send_empty_data_with_end_stream_when_window_exhausted_test() {
 pub fn send_data_connection_window_smaller_than_stream_window_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   // Consume connection send window down to 5, then restore stream window
   let server = consume_send_window(server, 65_530)
   let server = restore_stream_send_window(server, 65_530)
@@ -1094,7 +1209,12 @@ pub fn send_data_on_half_closed_remote_succeeds_test() {
   let #(server, _client) = server_with_half_closed_remote_stream()
   // Stream 1 is half-closed (remote) — server can still send
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   let assert Ok(#(_server, _to_send)) =
     h2_core.send_data(server, 1, <<"response":utf8>>, False, None)
 }
@@ -1234,10 +1354,10 @@ pub fn receive_data_exceeding_content_length_is_malformed_test() {
     open_stream(
       client,
       [
-        Header(":method", "POST", WithIndexing),
-        Header(":scheme", "https", WithIndexing),
-        Header(":path", "/", WithIndexing),
-        Header("content-length", "5", WithIndexing),
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
+        Header("content-length", <<"5":utf8>>, WithIndexing),
       ],
       False,
     )
@@ -1273,10 +1393,10 @@ pub fn receive_data_less_than_content_length_with_end_stream_is_malformed_test()
     open_stream(
       client,
       [
-        Header(":method", "POST", WithIndexing),
-        Header(":scheme", "https", WithIndexing),
-        Header(":path", "/", WithIndexing),
-        Header("content-length", "10", WithIndexing),
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
+        Header("content-length", <<"10":utf8>>, WithIndexing),
       ],
       False,
     )
@@ -1310,10 +1430,10 @@ pub fn receive_data_matching_content_length_succeeds_test() {
     open_stream(
       client,
       [
-        Header(":method", "POST", WithIndexing),
-        Header(":scheme", "https", WithIndexing),
-        Header(":path", "/", WithIndexing),
-        Header("content-length", "5", WithIndexing),
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
+        Header("content-length", <<"5":utf8>>, WithIndexing),
       ],
       False,
     )
@@ -1339,10 +1459,10 @@ pub fn receive_multiple_data_matching_content_length_succeeds_test() {
     open_stream(
       client,
       [
-        Header(":method", "POST", WithIndexing),
-        Header(":scheme", "https", WithIndexing),
-        Header(":path", "/", WithIndexing),
-        Header("content-length", "10", WithIndexing),
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
+        Header("content-length", <<"10":utf8>>, WithIndexing),
       ],
       False,
     )
@@ -1379,10 +1499,10 @@ pub fn receive_content_length_zero_no_data_succeeds_test() {
     open_stream(
       client,
       [
-        Header(":method", "POST", WithIndexing),
-        Header(":scheme", "https", WithIndexing),
-        Header(":path", "/", WithIndexing),
-        Header("content-length", "0", WithIndexing),
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
+        Header("content-length", <<"0":utf8>>, WithIndexing),
       ],
       True,
     )
@@ -1399,10 +1519,10 @@ pub fn receive_headers_invalid_content_length_is_malformed_test() {
     open_stream(
       client,
       [
-        Header(":method", "POST", WithIndexing),
-        Header(":scheme", "https", WithIndexing),
-        Header(":path", "/", WithIndexing),
-        Header("content-length", "abc", WithIndexing),
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
+        Header("content-length", <<"abc":utf8>>, WithIndexing),
       ],
       False,
     )

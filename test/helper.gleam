@@ -7,14 +7,14 @@ import h2_frame
 
 pub fn request_headers() -> List(Header) {
   [
-    Header(":method", "GET", WithIndexing),
-    Header(":scheme", "https", WithIndexing),
-    Header(":path", "/", WithIndexing),
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/":utf8>>, WithIndexing),
   ]
 }
 
 pub fn response_headers() -> List(Header) {
-  [Header(":status", "200", WithIndexing)]
+  [Header(":status", <<"200":utf8>>, WithIndexing)]
 }
 
 /// Create a connected client+server pair by completing the full preface exchange.
@@ -88,9 +88,9 @@ pub fn server_with_closed_stream() -> #(Connection, Connection) {
 pub fn server_with_reserved_local_stream() -> #(Connection, Connection, Int) {
   let #(server, client) = server_with_open_stream()
   let push_headers = [
-    Header(":method", "GET", WithIndexing),
-    Header(":scheme", "https", WithIndexing),
-    Header(":path", "/pushed", WithIndexing),
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/pushed":utf8>>, WithIndexing),
   ]
   let assert Ok(#(server, _to_send, promised_id)) =
     h2_core.send_push_promise(server, 1, push_headers)
@@ -102,9 +102,9 @@ pub fn server_with_reserved_local_stream() -> #(Connection, Connection, Int) {
 pub fn client_with_reserved_remote_stream() -> #(Connection, Connection, Int) {
   let #(server, client) = server_with_open_stream()
   let push_headers = [
-    Header(":method", "GET", WithIndexing),
-    Header(":scheme", "https", WithIndexing),
-    Header(":path", "/pushed", WithIndexing),
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/pushed":utf8>>, WithIndexing),
   ]
   let assert Ok(#(server, push_bytes, promised_id)) =
     h2_core.send_push_promise(server, 1, push_headers)

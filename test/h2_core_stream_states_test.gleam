@@ -216,7 +216,12 @@ pub fn receive_rst_stream_on_half_closed_local_transitions_to_closed_test() {
   let #(server, _client) = server_with_open_stream()
   // Server sends headers with END_STREAM → half-closed (local)
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      True,
+    )
   let assert Ok(HalfClosedLocal) = h2_core.get_stream_state(server, 1)
 
   // Client sends RST_STREAM

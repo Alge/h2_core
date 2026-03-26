@@ -12,9 +12,9 @@ import helper
 pub fn open_stream_produces_encoded_frame_test() {
   let conn = helper.connected_connection(Client)
   let headers = [
-    Header(":method", "GET", WithIndexing),
-    Header(":path", "/", WithIndexing),
-    Header(":scheme", "https", WithIndexing),
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":path", <<"/":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
   ]
   let assert Ok(#(_conn, to_send, _stream_id)) =
     open_stream(conn, headers, False)
@@ -46,7 +46,7 @@ pub fn open_stream_increments_stream_id_test() {
 // Server uses even stream IDs
 pub fn open_stream_server_uses_even_stream_ids_test() {
   let conn = helper.connected_connection(Server)
-  let headers = [Header(":status", "200", WithIndexing)]
+  let headers = [Header(":status", <<"200":utf8>>, WithIndexing)]
   let assert Ok(#(conn, _to_send, stream_id)) =
     open_stream(conn, headers, False)
   assert stream_id == 2
@@ -103,7 +103,7 @@ pub fn open_stream_updates_hpack_encoder_test() {
   let conn = helper.connected_connection(Client)
   let headers =
     list.append(helper.request_headers(), [
-      Header("custom-header", "custom-value", WithIndexing),
+      Header("custom-header", <<"custom-value":utf8>>, WithIndexing),
     ])
   let assert Ok(#(conn, first_send, _stream_id)) =
     open_stream(conn, headers, False)
@@ -131,8 +131,8 @@ pub fn open_stream_missing_scheme_is_error_test() {
     open_stream(
       conn,
       [
-        Header(":method", "GET", WithIndexing),
-        Header(":path", "/", WithIndexing),
+        Header(":method", <<"GET":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
       ],
       False,
     )
@@ -145,8 +145,8 @@ pub fn open_stream_missing_path_is_error_test() {
     open_stream(
       conn,
       [
-        Header(":method", "GET", WithIndexing),
-        Header(":scheme", "https", WithIndexing),
+        Header(":method", <<"GET":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
       ],
       False,
     )
@@ -159,8 +159,8 @@ pub fn open_stream_missing_method_is_error_test() {
     open_stream(
       conn,
       [
-        Header(":scheme", "https", WithIndexing),
-        Header(":path", "/", WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
       ],
       False,
     )
@@ -174,10 +174,10 @@ pub fn open_stream_pseudo_after_regular_is_error_test() {
     open_stream(
       conn,
       [
-        Header(":method", "GET", WithIndexing),
-        Header("x-foo", "bar", WithIndexing),
-        Header(":scheme", "https", WithIndexing),
-        Header(":path", "/", WithIndexing),
+        Header(":method", <<"GET":utf8>>, WithIndexing),
+        Header("x-foo", <<"bar":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
       ],
       False,
     )
@@ -191,10 +191,10 @@ pub fn open_stream_duplicate_pseudo_is_error_test() {
     open_stream(
       conn,
       [
-        Header(":method", "GET", WithIndexing),
-        Header(":method", "POST", WithIndexing),
-        Header(":scheme", "https", WithIndexing),
-        Header(":path", "/", WithIndexing),
+        Header(":method", <<"GET":utf8>>, WithIndexing),
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
       ],
       False,
     )
@@ -208,10 +208,10 @@ pub fn open_stream_with_connection_header_is_error_test() {
     open_stream(
       conn,
       [
-        Header(":method", "GET", WithIndexing),
-        Header(":scheme", "https", WithIndexing),
-        Header(":path", "/", WithIndexing),
-        Header("connection", "close", WithIndexing),
+        Header(":method", <<"GET":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
+        Header("connection", <<"close":utf8>>, WithIndexing),
       ],
       False,
     )
@@ -224,10 +224,10 @@ pub fn open_stream_with_te_non_trailers_is_error_test() {
     open_stream(
       conn,
       [
-        Header(":method", "GET", WithIndexing),
-        Header(":scheme", "https", WithIndexing),
-        Header(":path", "/", WithIndexing),
-        Header("te", "chunked", WithIndexing),
+        Header(":method", <<"GET":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
+        Header("te", <<"chunked":utf8>>, WithIndexing),
       ],
       False,
     )
@@ -254,7 +254,7 @@ pub fn send_headers_response_missing_status_is_error_test() {
     send_headers(
       server,
       1,
-      [Header("content-type", "text/html", WithIndexing)],
+      [Header("content-type", <<"text/html":utf8>>, WithIndexing)],
       False,
     )
 }
@@ -268,5 +268,10 @@ pub fn send_headers_response_with_status_test() {
   let assert Ok(#(server, _events, _to_send)) =
     h2_core.receive_data(server, headers)
   let assert Ok(#(_server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
 }

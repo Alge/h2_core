@@ -31,7 +31,12 @@ fn server_with_half_closed_remote_stream() -> #(Connection, Connection) {
 pub fn send_headers_on_open_stream_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(_server, to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   assert to_send != <<>>
 }
 
@@ -40,7 +45,12 @@ pub fn send_headers_on_open_stream_test() {
 pub fn send_headers_with_end_stream_on_open_stream_transitions_to_half_closed_local_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      True,
+    )
   let assert Ok(HalfClosedLocal) = h2_core.get_stream_state(server, 1)
 }
 
@@ -49,7 +59,12 @@ pub fn send_headers_with_end_stream_on_open_stream_transitions_to_half_closed_lo
 pub fn send_headers_on_half_closed_remote_stream_test() {
   let #(server, _client) = server_with_half_closed_remote_stream()
   let assert Ok(#(_server, to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   assert to_send != <<>>
 }
 
@@ -59,7 +74,12 @@ pub fn send_headers_on_half_closed_remote_stream_test() {
 pub fn send_headers_with_end_stream_on_half_closed_remote_closes_stream_test() {
   let #(server, _client) = server_with_half_closed_remote_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      True,
+    )
   let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 }
 
@@ -72,7 +92,7 @@ pub fn send_headers_on_reserved_local_transitions_to_half_closed_remote_test() {
     send_headers(
       server,
       promised_id,
-      [Header(":status", "200", WithIndexing)],
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
       False,
     )
   let assert Ok(HalfClosedRemote) =
@@ -84,7 +104,12 @@ pub fn send_headers_on_reserved_local_transitions_to_half_closed_remote_test() {
 pub fn send_headers_interim_response_does_not_close_stream_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "100", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"100":utf8>>, WithIndexing)],
+      False,
+    )
   let assert Ok(Open) = h2_core.get_stream_state(server, 1)
 }
 
@@ -92,7 +117,12 @@ pub fn send_headers_interim_response_does_not_close_stream_test() {
 pub fn send_headers_without_end_stream_does_not_change_state_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   let assert Ok(Open) = h2_core.get_stream_state(server, 1)
 }
 
@@ -106,7 +136,12 @@ pub fn send_headers_without_end_stream_does_not_change_state_test() {
 pub fn send_headers_on_half_closed_local_is_stream_closed_error_test() {
   let #(server, _client) = helper.server_with_half_closed_local_stream()
   let assert Error(StreamError(1, StreamClosed)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
 }
 
 // RFC 9113 Section 5.1 - "An endpoint MUST NOT send frames other than PRIORITY
@@ -114,7 +149,12 @@ pub fn send_headers_on_half_closed_local_is_stream_closed_error_test() {
 pub fn send_headers_on_closed_stream_is_error_test() {
   let #(server, _client) = helper.server_with_closed_stream()
   let assert Error(StreamError(1, StreamClosed)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
 }
 
 // RFC 9113 Section 5.1 - "An endpoint MUST NOT send any type of frame other
@@ -127,7 +167,7 @@ pub fn send_headers_on_reserved_remote_is_protocol_error_test() {
     send_headers(
       client,
       promised_id,
-      [Header(":status", "200", WithIndexing)],
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
       False,
     )
 }
@@ -137,7 +177,12 @@ pub fn send_headers_on_reserved_remote_is_protocol_error_test() {
 pub fn send_headers_on_idle_stream_is_error_test() {
   let server = helper.connected_connection(Server)
   let assert Error(_) =
-    send_headers(server, 99, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      99,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
 }
 
 // RFC 9113 Section 6.2 - "HEADERS frames MUST be associated with a stream.
@@ -147,7 +192,12 @@ pub fn send_headers_on_idle_stream_is_error_test() {
 pub fn send_headers_on_stream_zero_is_protocol_error_test() {
   let server = helper.connected_connection(Server)
   let assert Error(ConnectionError(ProtocolError)) =
-    send_headers(server, 0, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      0,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
 }
 
 // =============================================================================
@@ -158,7 +208,12 @@ pub fn send_headers_on_stream_zero_is_protocol_error_test() {
 pub fn send_headers_encodes_correct_stream_id_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(_server, to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(frame) = h2_frame.decode_frame(frame_data)
   let assert h2_frame.Headers(stream_id: 1, ..) = frame
@@ -169,7 +224,12 @@ pub fn send_headers_encodes_correct_stream_id_test() {
 pub fn send_headers_end_stream_flag_set_in_frame_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(_server, to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], True)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      True,
+    )
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(frame) = h2_frame.decode_frame(frame_data)
   let assert h2_frame.Headers(end_stream: True, ..) = frame
@@ -180,7 +240,12 @@ pub fn send_headers_end_stream_flag_set_in_frame_test() {
 pub fn send_headers_end_stream_flag_not_set_when_false_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(_server, to_send)) =
-    send_headers(server, 1, [Header(":status", "200", WithIndexing)], False)
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(frame) = h2_frame.decode_frame(frame_data)
   let assert h2_frame.Headers(end_stream: False, ..) = frame
@@ -195,8 +260,8 @@ pub fn send_headers_updates_hpack_encoder_test() {
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, request2)
   let headers = [
-    Header(":status", "200", WithIndexing),
-    Header("content-type", "text/plain", WithIndexing),
+    Header(":status", <<"200":utf8>>, WithIndexing),
+    Header("content-type", <<"text/plain":utf8>>, WithIndexing),
   ]
   let assert Ok(#(server, first)) = send_headers(server, 1, headers, False)
   // Same headers on stream 3 — HPACK should produce smaller output
