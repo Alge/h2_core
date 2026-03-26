@@ -849,7 +849,7 @@ pub fn receive_trailers_with_pseudo_header_is_malformed_test() {
   // Open stream 1 with valid headers
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
-  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+  let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
 
   // Trailers with pseudo-header :method GET — invalid
   // END_STREAM=True marks this as trailers
@@ -866,6 +866,217 @@ pub fn receive_trailers_with_pseudo_header_is_malformed_test() {
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_server, events, to_send)) =
     receive_data(server, trailer_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+// RFC 9113 Section 8.3 - "Endpoints MUST treat a request or response that
+// contains undefined or invalid pseudo-header fields as malformed
+// (Section 8.1.1)."
+//
+// An unknown pseudo-header in a request must be a stream error.
+pub fn receive_request_with_unknown_pseudo_header_is_malformed_test() {
+  let server = helper.connected_connection(Server)
+  // :method GET, :scheme https, :path /, then unknown :foo: bar
+  let bad_hpack = <<
+    0x82, 0x87, 0x84, 0x40, 0x04, ":foo":utf8, 0x03, "bar":utf8,
+  >>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_server, events, to_send)) =
+    receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+// RFC 9113 Section 8.3 - "Endpoints MUST treat a request or response that
+// contains undefined or invalid pseudo-header fields as malformed
+// (Section 8.1.1)."
+//
+// An unknown pseudo-header in a response must be a stream error.
+pub fn receive_response_with_unknown_pseudo_header_is_malformed_test() {
+  let #(server, client) = helper.connected_pair()
+  let assert Ok(#(client, headers, _stream_id)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
+
+  // :status 200, then unknown :bar: baz
+  let bad_hpack = <<0x88, 0x40, 0x04, ":bar":utf8, 0x03, "baz":utf8>>
+  let assert Ok(response_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_client, events, to_send)) =
+    receive_data(client, response_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+// RFC 9113 Section 8.3 - "Pseudo-header fields defined for responses MUST
+// NOT appear in requests."
+//
+// :status is a response-only pseudo-header. Receiving it in a request
+// must be treated as a stream error.
+pub fn receive_request_with_status_pseudo_header_is_malformed_test() {
+  let server = helper.connected_connection(Server)
+  // :method GET, :scheme https, :path /, :status 200
+  let bad_hpack = <<0x82, 0x87, 0x84, 0x88>>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_server, events, to_send)) =
+    receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+// RFC 9113 Section 8.3 - "Pseudo-header fields defined for requests MUST
+// NOT appear in responses."
+//
+// :method, :scheme, :path, :authority, and :protocol are request-only
+// pseudo-headers. Each one appearing in a response must be a stream error.
+pub fn receive_response_with_method_pseudo_header_is_malformed_test() {
+  let #(server, client) = helper.connected_pair()
+  let assert Ok(#(client, headers, _stream_id)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
+  // :status 200, :method GET
+  let bad_hpack = <<0x88, 0x82>>
+  let assert Ok(response_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_client, events, to_send)) =
+    receive_data(client, response_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+pub fn receive_response_with_scheme_pseudo_header_is_malformed_test() {
+  let #(server, client) = helper.connected_pair()
+  let assert Ok(#(client, headers, _stream_id)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
+  // :status 200, :scheme https
+  let bad_hpack = <<0x88, 0x87>>
+  let assert Ok(response_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_client, events, to_send)) =
+    receive_data(client, response_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+pub fn receive_response_with_path_pseudo_header_is_malformed_test() {
+  let #(server, client) = helper.connected_pair()
+  let assert Ok(#(client, headers, _stream_id)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
+  // :status 200, :path /
+  let bad_hpack = <<0x88, 0x84>>
+  let assert Ok(response_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_client, events, to_send)) =
+    receive_data(client, response_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+pub fn receive_response_with_authority_pseudo_header_is_malformed_test() {
+  let #(server, client) = helper.connected_pair()
+  let assert Ok(#(client, headers, _stream_id)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
+  // :status 200, :authority example.com
+  let bad_hpack = <<
+    0x88, 0x40, 0x0a, ":authority":utf8, 0x0b, "example.com":utf8,
+  >>
+  let assert Ok(response_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_client, events, to_send)) =
+    receive_data(client, response_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
+pub fn receive_response_with_protocol_pseudo_header_is_malformed_test() {
+  let #(server, client) = helper.connected_pair()
+  let assert Ok(#(client, headers, _stream_id)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
+  // :status 200, :protocol websocket
+  let bad_hpack = <<0x88, 0x40, 0x09, ":protocol":utf8, 0x09, "websocket":utf8>>
+  let assert Ok(response_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_client, events, to_send)) =
+    receive_data(client, response_frame)
   assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
@@ -936,7 +1147,7 @@ pub fn receive_informational_response_with_end_stream_is_malformed_test() {
     let client = helper.connected_connection(Client)
     let assert Ok(#(client, headers, _stream_id)) =
       open_stream(client, helper.request_headers(), False)
-    let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+    let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
     #(server, client)
   }
   // 1xx status with END_STREAM — malformed
@@ -1044,7 +1255,7 @@ pub fn receive_response_missing_status_is_malformed_test() {
     let client = helper.connected_connection(Client)
     let assert Ok(#(client, headers, _stream_id)) =
       open_stream(client, helper.request_headers(), False)
-    let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+    let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
     #(server, client)
   }
   // Response HEADERS with no :status — just a regular header
@@ -1126,7 +1337,7 @@ pub fn receive_informational_response_after_final_is_malformed_test() {
     let client = helper.connected_connection(Client)
     let assert Ok(#(client, headers, _stream_id)) =
       open_stream(client, helper.request_headers(), False)
-    let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+    let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
     #(server, client)
   }
   // Final response: 200 OK (0x88 = :status 200 indexed)
@@ -1168,7 +1379,7 @@ pub fn receive_multiple_informational_responses_before_final_test() {
     let client = helper.connected_connection(Client)
     let assert Ok(#(client, headers, _stream_id)) =
       open_stream(client, helper.request_headers(), False)
-    let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+    let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
     #(server, client)
   }
   let assert Ok(info1) =

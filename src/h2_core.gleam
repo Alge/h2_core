@@ -598,15 +598,17 @@ fn do_validate_headers(
 
       use _ <- result.try(validate_header_value(header))
 
-      // TODO: Enable this when non-valid headers are allowed through alpacki
-      // use <- bool.guard(
-      //   is_pseudo
-      //     && !list.contains(
-      //     [":method", ":scheme", ":path", ":authority", ":status", ":protocol"],
-      //     header.name,
-      //   ),
-      //   Error(Nil),
-      // )
+      use <- bool.guard(
+        is_pseudo
+          && !list.contains(
+          case role {
+            Server -> [":method", ":scheme", ":path", ":authority", ":protocol"]
+            Client -> [":status"]
+          },
+          header.name,
+        ),
+        Error(Nil),
+      )
 
       use <- bool.guard(
         !is_pseudo
