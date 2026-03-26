@@ -295,14 +295,6 @@ pub fn send_data_on_closed_stream_is_error_test() {
 
 // RFC 9113 Section 5.1 (closed):
 // "An endpoint MUST NOT send frames other than PRIORITY on a closed stream."
-pub fn send_on_closed_stream_is_error_test() {
-  let #(server, _client) = server_with_closed_stream()
-  let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
-  let assert Error(_) = h2_core.send_data(server, 1, <<>>, True, None)
-}
-
-// RFC 9113 Section 5.1 (closed):
-// "An endpoint MUST NOT send frames other than PRIORITY on a closed stream."
 //
 // Test: send_rst_stream on a closed stream should be an error.
 pub fn send_rst_stream_on_closed_stream_is_error_test() {
