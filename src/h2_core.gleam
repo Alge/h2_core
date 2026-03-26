@@ -821,6 +821,7 @@ fn encode_header_continuations(
 fn decode_headers(
   conn conn: Connection,
   encoded_headers encoded_headers: BitArray,
+  stream_id stream_id: Int,
 ) -> Result(#(Connection, List(Header)), H2Error) {
   use #(decoded_headers, new_table) <- result.try(
     alpacki.decode_header_block(encoded_headers, conn.hpack_decoder)
@@ -829,7 +830,7 @@ fn decode_headers(
 
   use decoded_headers <- result.try(
     list.try_map(decoded_headers, from_alpacki_header)
-    |> result.replace_error(ConnectionError(ProtocolError)),
+    |> result.replace_error(StreamError(stream_id, ProtocolError)),
   )
   let conn = Connection(..conn, hpack_decoder: new_table)
 
@@ -1843,27 +1844,34 @@ fn parse_loop(
 
                         // Last continuation block
                         True -> {
-                          use #(conn, decoded_headers) <- result.try(
-                            decode_headers(conn, combined),
-                          )
+                          case decode_headers(conn, combined, stream_id) {
+                            Error(ConnectionError(_) as err) -> Error(err)
+                            Error(StreamError(sid, code)) -> {
+                              use #(conn, events, to_send) <- result.try(
+                                handle_rst_stream(conn, sid, code, 0, events, to_send),
+                              )
+                              parse_loop(conn, events, to_send)
+                            }
+                            Ok(#(conn, decoded_headers)) -> {
+                              let conn =
+                                Connection(
+                                  ..conn,
+                                  pending_header_blocks: option.None,
+                                )
 
-                          let conn =
-                            Connection(
-                              ..conn,
-                              pending_header_blocks: option.None,
-                            )
-
-                          use #(conn, events, to_send) <- result.try(
-                            handle_decoded_headers(
-                              conn,
-                              stream_id,
-                              end_stream,
-                              decoded_headers,
-                              events,
-                              to_send,
-                            ),
-                          )
-                          parse_loop(conn, events, to_send)
+                              use #(conn, events, to_send) <- result.try(
+                                handle_decoded_headers(
+                                  conn,
+                                  stream_id,
+                                  end_stream,
+                                  decoded_headers,
+                                  events,
+                                  to_send,
+                                ),
+                              )
+                              parse_loop(conn, events, to_send)
+                            }
+                          }
                         }
                       }
                     }
@@ -1902,27 +1910,34 @@ fn parse_loop(
 
                         // Last continuation block
                         True -> {
-                          use #(conn, decoded_headers) <- result.try(
-                            decode_headers(conn, combined),
-                          )
+                          case decode_headers(conn, combined, stream_id) {
+                            Error(ConnectionError(_) as err) -> Error(err)
+                            Error(StreamError(sid, code)) -> {
+                              use #(conn, events, to_send) <- result.try(
+                                handle_rst_stream(conn, sid, code, 0, events, to_send),
+                              )
+                              parse_loop(conn, events, to_send)
+                            }
+                            Ok(#(conn, decoded_headers)) -> {
+                              let conn =
+                                Connection(
+                                  ..conn,
+                                  pending_header_blocks: option.None,
+                                )
 
-                          let conn =
-                            Connection(
-                              ..conn,
-                              pending_header_blocks: option.None,
-                            )
-
-                          use #(conn, events, to_send) <- result.try(
-                            handle_decoded_push_promise(
-                              conn,
-                              stream_id,
-                              promised_stream_id,
-                              decoded_headers,
-                              events,
-                              to_send,
-                            ),
-                          )
-                          parse_loop(conn, events, to_send)
+                              use #(conn, events, to_send) <- result.try(
+                                handle_decoded_push_promise(
+                                  conn,
+                                  stream_id,
+                                  promised_stream_id,
+                                  decoded_headers,
+                                  events,
+                                  to_send,
+                                ),
+                              )
+                              parse_loop(conn, events, to_send)
+                            }
+                          }
                         }
                       }
                     }
@@ -2187,22 +2202,28 @@ fn parse_loop(
                   parse_loop(conn, events, to_send)
                 }
                 True -> {
-                  use #(conn, decoded_headers) <- result.try(decode_headers(
-                    conn,
-                    field_block_fragment,
-                  ))
-
-                  use #(conn, events, to_send) <- result.try(
-                    handle_decoded_headers(
-                      conn,
-                      stream_id,
-                      end_stream,
-                      decoded_headers,
-                      events,
-                      to_send,
-                    ),
-                  )
-                  parse_loop(conn, events, to_send)
+                  case decode_headers(conn, field_block_fragment, stream_id) {
+                    Error(ConnectionError(_) as err) -> Error(err)
+                    Error(StreamError(sid, code)) -> {
+                      use #(conn, events, to_send) <- result.try(
+                        handle_rst_stream(conn, sid, code, 0, events, to_send),
+                      )
+                      parse_loop(conn, events, to_send)
+                    }
+                    Ok(#(conn, decoded_headers)) -> {
+                      use #(conn, events, to_send) <- result.try(
+                        handle_decoded_headers(
+                          conn,
+                          stream_id,
+                          end_stream,
+                          decoded_headers,
+                          events,
+                          to_send,
+                        ),
+                      )
+                      parse_loop(conn, events, to_send)
+                    }
+                  }
                 }
               }
             }
@@ -2400,22 +2421,28 @@ fn parse_loop(
                   parse_loop(conn, events, to_send)
                 }
                 True -> {
-                  use #(conn, decoded_headers) <- result.try(decode_headers(
-                    conn,
-                    field_block_fragment,
-                  ))
-
-                  use #(conn, events, to_send) <- result.try(
-                    handle_decoded_push_promise(
-                      conn,
-                      stream_id,
-                      promised_stream_id,
-                      decoded_headers,
-                      events,
-                      to_send,
-                    ),
-                  )
-                  parse_loop(conn, events, to_send)
+                  case decode_headers(conn, field_block_fragment, stream_id) {
+                    Error(ConnectionError(_) as err) -> Error(err)
+                    Error(StreamError(sid, code)) -> {
+                      use #(conn, events, to_send) <- result.try(
+                        handle_rst_stream(conn, sid, code, 0, events, to_send),
+                      )
+                      parse_loop(conn, events, to_send)
+                    }
+                    Ok(#(conn, decoded_headers)) -> {
+                      use #(conn, events, to_send) <- result.try(
+                        handle_decoded_push_promise(
+                          conn,
+                          stream_id,
+                          promised_stream_id,
+                          decoded_headers,
+                          events,
+                          to_send,
+                        ),
+                      )
+                      parse_loop(conn, events, to_send)
+                    }
+                  }
                 }
               }
             }
