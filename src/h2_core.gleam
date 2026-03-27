@@ -675,7 +675,7 @@ fn from_alpacki_header(header: alpacki.HeaderField) -> Result(Header, Nil) {
 
 pub type Setting {
   HeaderTableSize(Int)
-  EnablePush(Int)
+  EnablePush(Bool)
   MaxConcurrentStreams(Int)
   InitialWindowSize(Int)
   MaxFrameSize(Int)
@@ -685,7 +685,7 @@ pub type Setting {
 fn to_frame_setting(setting: Setting) -> h2_frame.Setting {
   case setting {
     HeaderTableSize(v) -> h2_frame.HeaderTableSize(v)
-    EnablePush(v) -> h2_frame.EnablePush(v)
+    EnablePush(v) -> h2_frame.EnablePush(case v { True -> 1  False -> 0 })
     MaxConcurrentStreams(v) -> h2_frame.MaxConcurrentStreams(v)
     InitialWindowSize(v) -> h2_frame.InitialWindowSize(v)
     MaxFrameSize(v) -> h2_frame.MaxFrameSize(v)
