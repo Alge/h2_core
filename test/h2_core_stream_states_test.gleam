@@ -332,13 +332,13 @@ pub fn send_rst_stream_on_closed_stream_is_error_test() {
 // RFC 9113 Section 5.1 (closed):
 // "An endpoint MUST NOT send frames other than PRIORITY on a closed stream."
 //
-// Test: send_window_update on a closed stream should be an error.
-pub fn send_window_update_on_closed_stream_is_error_test() {
+// Test: acknowledge_data on a closed stream should be an error.
+pub fn acknowledge_data_on_closed_stream_is_error_test() {
   let #(server, _client) = server_with_closed_stream()
   let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 
   let assert Error(ConnectionError(ProtocolError)) =
-    h2_core.send_window_update(server, 1, 1024)
+    h2_core.acknowledge_data(server, 1, 1024)
 }
 
 // =============================================================================

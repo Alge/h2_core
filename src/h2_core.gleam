@@ -1664,68 +1664,69 @@ pub fn send_goaway(
   Ok(#(Connection(..conn, state: Draining), encoded_frame))
 }
 
-pub fn send_window_update(
+pub fn acknowledge_data(
   conn conn: Connection,
   stream_id stream_id: Int,
   window_size_increment window_size_increment: Int,
 ) -> Result(#(Connection, BitArray), H2Error) {
-  // Update the connection
+  use stream <- result.try(
+    dict.get(conn.streams, stream_id)
+    |> result.replace_error(ConnectionError(ProtocolError)),
+  )
 
-  use conn <- result.try(case stream_id {
-    // updating window size on the connection
-    0 -> {
-      let conn =
-        Connection(
-          ..conn,
-          recv_window_size: conn.recv_window_size + window_size_increment,
-        )
-      use <- bool.guard(
-        conn.recv_window_size > 2_147_483_647,
-        Error(ConnectionError(FlowControlError)),
-      )
+  use <- bool.guard(
+    window_size_increment <= 0 || window_size_increment > 2_147_483_647,
+    Error(ConnectionError(ProtocolError)),
+  )
 
-      Ok(conn)
-    }
-    // updating window size on stream
-    _ -> {
-      case dict.get(conn.streams, stream_id) {
-        Ok(stream) -> {
-          let stream =
-            Stream(
-              ..stream,
-              recv_window_size: stream.recv_window_size + window_size_increment,
-            )
+  use <- bool.guard(
+    stream.state == Closed
+      || stream.state == ReservedRemote
+      || stream.state == ReservedLocal,
+    Error(ConnectionError(ProtocolError)),
+  )
 
-          use <- bool.guard(
-            stream.state == Closed,
-            Error(ConnectionError(ProtocolError)),
-          )
-          use <- bool.guard(
-            stream.recv_window_size > 2_147_483_647,
-            Error(ConnectionError(FlowControlError)),
-          )
-          Ok(
-            Connection(
-              ..conn,
-              streams: dict.insert(conn.streams, stream_id, stream),
-            ),
-          )
-        }
-        // Stream doesn't exist
-        Error(_) -> Error(ConnectionError(ProtocolError))
-      }
-    }
-  })
+  let stream =
+    Stream(
+      ..stream,
+      recv_window_size: stream.recv_window_size + window_size_increment,
+    )
 
-  case
+  use <- bool.guard(
+    stream.recv_window_size > 2_147_483_647,
+    Error(ConnectionError(FlowControlError)),
+  )
+
+  let conn =
+    Connection(
+      ..conn,
+      streams: dict.insert(conn.streams, stream_id, stream),
+      recv_window_size: conn.recv_window_size + window_size_increment,
+    )
+
+  use <- bool.guard(
+    conn.recv_window_size > 2_147_483_647,
+    Error(ConnectionError(FlowControlError)),
+  )
+
+  // Generate both the connection level and stream level stream update
+  use connection_update_frame <- result.try(
+    h2_frame.encode_window_update(
+      stream_id: 0,
+      window_size_increment: window_size_increment,
+    )
+    |> result.map_error(map_frame_error),
+  )
+
+  use stream_update_frame <- result.try(
     h2_frame.encode_window_update(
       stream_id: stream_id,
       window_size_increment: window_size_increment,
     )
-  {
-    Ok(encoded_frame) -> Ok(#(conn, encoded_frame))
-    Error(error) -> Error(map_frame_error(error))
-  }
+    |> result.map_error(map_frame_error),
+  )
+
+  Ok(#(conn, <<connection_update_frame:bits, stream_update_frame:bits>>))
 }
 
 pub fn send_rst_stream(

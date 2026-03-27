@@ -463,11 +463,11 @@ pub fn receive_data_exceeding_stream_window_is_flow_control_error_test() {
 // connection error of type FLOW_CONTROL_ERROR.
 pub fn receive_data_exceeding_connection_window_is_flow_control_error_test() {
   let #(server, _client) = server_with_open_stream()
-  // Consume 65530 bytes of the connection recv window by receiving DATA,
-  // then restore the stream recv window so only the connection window is small.
+  // Consume 65530 bytes of both windows by receiving DATA,
+  // then restore only the stream recv window via SETTINGS so only the
+  // connection window is small.
   let server = consume_recv_window(server, 65_530)
-  let assert Ok(#(server, _to_send)) =
-    h2_core.send_window_update(server, 1, 65_530)
+  let server = set_stream_recv_window(server, 65_535)
   // Now: connection recv_window = 5, stream recv_window = 65535
   let assert Ok(data_frame) =
     h2_frame.encode_data(
