@@ -2544,6 +2544,17 @@ fn parse_loop(
 
 const client_preface_magic = <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8>>
 
+/// Process incoming bytes from the peer.
+///
+/// Returns the updated connection, a list of events describing what was
+/// received, and a `BitArray` of bytes that **must be sent to the peer**
+/// before any other data. The bytes-to-send contain protocol-level responses
+/// that h2_core generates automatically, such as SETTINGS ACKs and PING ACKs.
+/// Failing to forward them will cause the peer to consider the connection
+/// broken.
+///
+/// The events list is in the order the frames were received. A single call may
+/// produce multiple events.
 pub fn receive_data(
   conn conn: Connection,
   data data: BitArray,
