@@ -75,10 +75,7 @@ fn to_settings_list(
     MaxFrameSize(settings.max_frame_size),
   ]
   let settings_list = case role {
-    Client -> [
-      EnablePush(settings.enable_push),
-      ..settings_list
-    ]
+    Client -> [EnablePush(settings.enable_push), ..settings_list]
     Server -> settings_list
   }
 
@@ -143,15 +140,17 @@ fn apply_recv_new_window_size(
   Ok(Connection(..conn, streams: dict.from_list(streams)))
 }
 
-fn from_frame_setting(setting: h2_frame.Setting) -> Result(option.Option(Setting), Nil) {
-
+fn from_frame_setting(
+  setting: h2_frame.Setting,
+) -> Result(option.Option(Setting), Nil) {
   case setting {
     h2_frame.HeaderTableSize(v) -> Ok(option.Some(HeaderTableSize(v)))
-    h2_frame.EnablePush(v) -> case v {
-      0 -> Ok(option.Some(EnablePush(False)))
-      1 -> Ok(option.Some(EnablePush(True)))
-      _ -> Error(Nil)
-    }
+    h2_frame.EnablePush(v) ->
+      case v {
+        0 -> Ok(option.Some(EnablePush(False)))
+        1 -> Ok(option.Some(EnablePush(True)))
+        _ -> Error(Nil)
+      }
     h2_frame.MaxConcurrentStreams(v) -> Ok(option.Some(MaxConcurrentStreams(v)))
     h2_frame.InitialWindowSize(v) -> Ok(option.Some(InitialWindowSize(v)))
     h2_frame.MaxFrameSize(v) -> Ok(option.Some(MaxFrameSize(v)))
@@ -160,7 +159,9 @@ fn from_frame_setting(setting: h2_frame.Setting) -> Result(option.Option(Setting
   }
 }
 
-fn from_frame_settings(settings: List(h2_frame.Setting)) -> Result(List(Setting), Nil) {
+fn from_frame_settings(
+  settings: List(h2_frame.Setting),
+) -> Result(List(Setting), Nil) {
   case list.try_map(settings, from_frame_setting) {
     Ok(settings_list) -> {
       // Filter out unknown settings, which is option.None
@@ -692,7 +693,11 @@ pub type Setting {
 fn to_frame_setting(setting: Setting) -> h2_frame.Setting {
   case setting {
     HeaderTableSize(v) -> h2_frame.HeaderTableSize(v)
-    EnablePush(v) -> h2_frame.EnablePush(case v { True -> 1  False -> 0 })
+    EnablePush(v) ->
+      h2_frame.EnablePush(case v {
+        True -> 1
+        False -> 0
+      })
     MaxConcurrentStreams(v) -> h2_frame.MaxConcurrentStreams(v)
     InitialWindowSize(v) -> h2_frame.InitialWindowSize(v)
     MaxFrameSize(v) -> h2_frame.MaxFrameSize(v)
@@ -2004,7 +2009,10 @@ fn parse_loop(
             // Settings
             h2_frame.Settings(ack: False, settings: frame_settings) -> {
               // Apply these settings to the remote settings
-              use settings <- result.try(from_frame_settings(frame_settings) |> result.replace_error(ConnectionError(ProtocolError)))
+              use settings <- result.try(
+                from_frame_settings(frame_settings)
+                |> result.replace_error(ConnectionError(ProtocolError)),
+              )
               case
                 apply_settings(
                   conn.role,
