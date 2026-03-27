@@ -1,10 +1,11 @@
 import gleam/option.{None, Some}
 import h2_core.{
-  Client, CompressionError, ConnectionError, FlowControlError, FrameSizeError,
-  HeaderTableSize, InitialWindowSize, MaxConcurrentStreams, MaxFrameSize,
-  ProtocolError, RemoteSettingsChanged, Server, SettingsAcknowledged,
-  get_local_settings, get_pending_settings, get_remote_settings, open_stream,
-  receive_data, send_data, send_headers, send_settings,
+  Client, CompressionError, ConnectionError, EnablePush, FlowControlError,
+  FrameSizeError, HeaderTableSize, InitialWindowSize, MaxConcurrentStreams,
+  MaxFrameSize, ProtocolError, RemoteSettingsChanged, Server,
+  SettingsAcknowledged, get_local_settings, get_pending_settings,
+  get_remote_settings, open_stream, receive_data, send_data, send_headers,
+  send_settings,
 }
 import h2_frame
 import helper
@@ -52,6 +53,24 @@ pub fn send_settings_multiple_values_test() {
       h2_frame.InitialWindowSize(32_768),
       h2_frame.MaxFrameSize(32_768),
     ])
+  assert to_send == expected
+}
+
+// EnablePush(False) encodes as 0 on the wire
+pub fn send_settings_enable_push_false_encodes_as_zero_test() {
+  let conn = helper.connected_connection(Client)
+  let assert Ok(#(_conn, to_send)) = send_settings(conn, [EnablePush(False)])
+  let assert Ok(expected) =
+    h2_frame.encode_settings(ack: False, settings: [h2_frame.EnablePush(0)])
+  assert to_send == expected
+}
+
+// EnablePush(True) encodes as 1 on the wire
+pub fn send_settings_enable_push_true_encodes_as_one_test() {
+  let conn = helper.connected_connection(Client)
+  let assert Ok(#(_conn, to_send)) = send_settings(conn, [EnablePush(True)])
+  let assert Ok(expected) =
+    h2_frame.encode_settings(ack: False, settings: [h2_frame.EnablePush(1)])
   assert to_send == expected
 }
 
