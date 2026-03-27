@@ -2,7 +2,7 @@ import gleam/option.{None, Some}
 import h2_core.{
   type Connection, Client, ConnectionError, DataReceived, FlowControlError,
   FrameSizeError, Header, HeadersReceived, NoError, ProtocolError, Server,
-  StreamClosed, StreamError, StreamReset, WithIndexing,
+  StreamClosed, StreamEnded, StreamError, StreamReset, WithIndexing,
   get_connection_recv_window_size, get_connection_send_window_size, open_stream,
   receive_data, send_headers,
 }
@@ -169,6 +169,8 @@ pub fn receive_data_with_end_stream_test() {
       padding: None,
     )
   let assert Ok(#(server, events, _to_send)) = receive_data(server, data_frame)
+  // RFC 9113 Section 5.1: "the END_STREAM flag is processed as a separate
+  // event to the frame that bears it" — StreamEnded follows DataReceived.
   assert events
     == [
       DataReceived(
@@ -177,6 +179,7 @@ pub fn receive_data_with_end_stream_test() {
         end_stream: True,
         flow_controlled_length: 7,
       ),
+      StreamEnded(stream_id: 1),
     ]
   let assert Ok(HalfClosedRemote) = h2_core.get_stream_state(server, 1)
 }
@@ -361,6 +364,8 @@ pub fn receive_empty_data_frame_with_end_stream_test() {
       padding: None,
     )
   let assert Ok(#(server, events, _to_send)) = receive_data(server, data_frame)
+  // RFC 9113 Section 5.1: "the END_STREAM flag is processed as a separate
+  // event to the frame that bears it" — StreamEnded follows DataReceived.
   assert events
     == [
       DataReceived(
@@ -369,6 +374,7 @@ pub fn receive_empty_data_frame_with_end_stream_test() {
         end_stream: True,
         flow_controlled_length: 0,
       ),
+      StreamEnded(stream_id: 1),
     ]
   let assert Ok(HalfClosedRemote) = h2_core.get_stream_state(server, 1)
 }
@@ -1121,6 +1127,9 @@ pub fn receive_multiple_data_frames_test() {
     )
   let assert Ok(#(server, events, _to_send)) =
     receive_data(server, <<frame1:bits, frame2:bits>>)
+  // RFC 9113 Section 5.1: "the END_STREAM flag is processed as a separate
+  // event to the frame that bears it" — StreamEnded follows the final
+  // DataReceived. The first DATA (without END_STREAM) has no StreamEnded.
   assert events
     == [
       DataReceived(
@@ -1135,6 +1144,7 @@ pub fn receive_multiple_data_frames_test() {
         end_stream: True,
         flow_controlled_length: 5,
       ),
+      StreamEnded(stream_id: 1),
     ]
   let assert Ok(HalfClosedRemote) = h2_core.get_stream_state(server, 1)
 }
@@ -1482,7 +1492,10 @@ pub fn receive_data_matching_content_length_succeeds_test() {
       padding: None,
     )
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, data_frame)
-  let assert [DataReceived(stream_id: 1, data: <<"hello":utf8>>, ..)] = events
+  let assert [
+    DataReceived(stream_id: 1, data: <<"hello":utf8>>, ..),
+    StreamEnded(stream_id: 1),
+  ] = events
 }
 
 // RFC 9113 Section 8.1.1 - Multiple DATA frames totaling the correct
@@ -1522,7 +1535,10 @@ pub fn receive_multiple_data_matching_content_length_succeeds_test() {
       padding: None,
     )
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, frame2)
-  let assert [DataReceived(stream_id: 1, data: <<"world":utf8>>, ..)] = events
+  let assert [
+    DataReceived(stream_id: 1, data: <<"world":utf8>>, ..),
+    StreamEnded(stream_id: 1),
+  ] = events
 }
 
 // RFC 9113 Section 8.1.1 - Content-length of 0 with no DATA and
@@ -1542,7 +1558,8 @@ pub fn receive_content_length_zero_no_data_succeeds_test() {
       True,
     )
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, headers)
-  let assert [HeadersReceived(stream_id: 1, ..)] = events
+  let assert [HeadersReceived(stream_id: 1, ..), StreamEnded(stream_id: 1)] =
+    events
 }
 
 // RFC 9113 Section 8.1.1 - A non-numeric content-length value is

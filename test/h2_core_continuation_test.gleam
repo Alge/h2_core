@@ -4,7 +4,7 @@ import gleam/list
 import gleam/string
 import h2_core.{
   Client, CompressionError, ConnectionError, Header, HeadersReceived,
-  ProtocolError, Server, StreamClosed, StreamReset, WithIndexing,
+  ProtocolError, Server, StreamClosed, StreamEnded, StreamReset, WithIndexing,
   get_stream_state, open_stream, receive_data,
 }
 import h2_core/internal/stream.{Closed, HalfClosedLocal, HalfClosedRemote, Open}
@@ -430,8 +430,12 @@ pub fn receive_continuation_preserves_end_stream_test() {
 
   let server = helper.connected_connection(Server)
   let assert Ok(#(server, events, _to_send)) = receive_data(server, to_send)
-  let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: True)] =
-    events
+  // RFC 9113 Section 5.1: END_STREAM is processed as a separate event —
+  // StreamEnded must follow HeadersReceived even when split across CONTINUATION.
+  let assert [
+    HeadersReceived(stream_id: 1, headers: _, end_stream: True),
+    StreamEnded(stream_id: 1),
+  ] = events
   // Stream should be HalfClosedRemote since end_stream was True
   let assert Ok(HalfClosedRemote) = get_stream_state(server, 1)
 }

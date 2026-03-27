@@ -201,6 +201,7 @@ pub fn client_receives_response_with_end_stream_test() {
     receive_data(client, response_bytes)
   let assert [
     h2_core.HeadersReceived(stream_id: 1, headers: _, end_stream: True),
+    h2_core.StreamEnded(stream_id: 1),
   ] = events
   let assert Ok(HalfClosedRemote) = h2_core.get_stream_state(client, 1)
 }

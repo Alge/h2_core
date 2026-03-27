@@ -4,8 +4,8 @@ import gleam/option
 import h2_core.{
   Client, CompressionError, ConnectionError, Header, HeadersReceived,
   MaxConcurrentStreams, NeverIndexed, ProtocolError, RefusedStream, Server,
-  StreamClosed, StreamReset, WithIndexing, WithoutIndexing, get_stream_state,
-  open_stream, receive_data, send_headers, send_settings,
+  StreamClosed, StreamEnded, StreamReset, WithIndexing, WithoutIndexing,
+  get_stream_state, open_stream, receive_data, send_headers, send_settings,
 }
 import h2_core/internal/stream.{Closed, HalfClosedLocal, HalfClosedRemote, Open}
 import h2_frame
@@ -55,8 +55,10 @@ pub fn receive_headers_end_stream_test() {
   let server = helper.connected_connection(Server)
   let assert Ok(#(server, events, _to_send)) = receive_data(server, encoded)
   let assert Ok(HalfClosedRemote) = get_stream_state(server, 1)
-  let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: True)] =
-    events
+  let assert [
+    HeadersReceived(stream_id: 1, headers: _, end_stream: True),
+    StreamEnded(stream_id: 1),
+  ] = events
 }
 
 // Receiving HEADERS updates the HPACK decoder state
@@ -358,8 +360,10 @@ pub fn receive_headers_end_stream_on_open_stream_transitions_state_test() {
   let assert Ok(Open) = get_stream_state(server, 1)
 
   let assert Ok(#(server, events, _to_send)) = receive_data(server, encoded2)
-  let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: True)] =
-    events
+  let assert [
+    HeadersReceived(stream_id: 1, headers: _, end_stream: True),
+    StreamEnded(stream_id: 1),
+  ] = events
   let assert Ok(HalfClosedRemote) = get_stream_state(server, 1)
 }
 
@@ -385,8 +389,10 @@ pub fn receive_headers_end_stream_on_half_closed_local_transitions_to_closed_tes
     h2_core.send_headers(server, 1, helper.response_headers(), True)
 
   let assert Ok(#(server, events, _to_send)) = receive_data(server, encoded2)
-  let assert [HeadersReceived(stream_id: 1, headers: _, end_stream: True)] =
-    events
+  let assert [
+    HeadersReceived(stream_id: 1, headers: _, end_stream: True),
+    StreamEnded(stream_id: 1),
+  ] = events
   let assert Ok(Closed) = get_stream_state(server, 1)
 }
 

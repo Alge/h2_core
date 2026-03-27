@@ -117,8 +117,7 @@ pub fn send_headers_end_stream_on_reserved_local_transitions_to_closed_test() {
       [Header(":status", <<"200":utf8>>, WithIndexing)],
       True,
     )
-  let assert Ok(Closed) =
-    h2_core.get_stream_state(server, promised_id)
+  let assert Ok(Closed) = h2_core.get_stream_state(server, promised_id)
 }
 
 // RFC 9113 Section 8.1 - A server MAY send interim (1xx) responses before the

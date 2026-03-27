@@ -117,6 +117,33 @@ pub fn trailers_end_stream_emits_stream_ended_test() {
   ] = events
 }
 
+// --- HEADERS + END_STREAM on a push promise (reserved remote) stream ---
+
+// Receiving HEADERS+END_STREAM on a reserved (remote) stream (server push
+// with no body) emits HeadersReceived then StreamEnded.
+// RFC 9113 Section 5.1: reserved (remote) --recv H--> half-closed (local)
+// --recv ES--> closed, with END_STREAM as a separate event.
+pub fn push_promise_headers_end_stream_emits_stream_ended_test() {
+  let #(server, client, promised_id) =
+    helper.client_with_reserved_remote_stream()
+
+  // Server sends HEADERS+END_STREAM on the promised stream
+  let assert Ok(#(_server, push_response_bytes)) =
+    send_headers(
+      server,
+      promised_id,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      True,
+    )
+
+  let assert Ok(#(_client, events, _to_send)) =
+    receive_data(client, push_response_bytes)
+  let assert [
+    HeadersReceived(stream_id: _, headers: _, end_stream: True),
+    StreamEnded(stream_id: _),
+  ] = events
+}
+
 // --- HEADERS without END_STREAM must NOT emit StreamEnded ---
 
 // Opening a stream without END_STREAM must not produce StreamEnded.

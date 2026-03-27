@@ -1054,18 +1054,20 @@ fn handle_headers_on_existing_stream(
               ),
             )
 
-          Ok(#(
-            conn,
-            [
-              HeadersReceived(
-                stream_id: stream_id,
-                headers: decoded_headers,
-                end_stream: end_stream,
-              ),
-              ..events
-            ],
-            to_send,
-          ))
+          let new_events = [
+            HeadersReceived(
+              stream_id: stream_id,
+              headers: decoded_headers,
+              end_stream: end_stream,
+            ),
+          ]
+
+          let new_events = case end_stream {
+            True -> [StreamEnded(stream_id:), ..new_events]
+            False -> new_events
+          }
+
+          Ok(#(conn, list.flatten([new_events, events]), to_send))
         }
 
         // RFC 9113 Section 5.1 (half-closed remote)
@@ -1098,18 +1100,20 @@ fn handle_headers_on_existing_stream(
                 Stream(..existing_stream, state: new_state),
               ),
             )
-          Ok(#(
-            conn,
-            [
-              HeadersReceived(
-                stream_id: stream_id,
-                headers: decoded_headers,
-                end_stream: end_stream,
-              ),
-              ..events
-            ],
-            to_send,
-          ))
+
+          let new_events = [
+            HeadersReceived(
+              stream_id: stream_id,
+              headers: decoded_headers,
+              end_stream: end_stream,
+            ),
+          ]
+
+          let new_events = case end_stream {
+            True -> [StreamEnded(stream_id), ..new_events]
+            False -> new_events
+          }
+          Ok(#(conn, list.flatten([new_events, events]), to_send))
         }
 
         Idle | ReservedLocal -> Error(ConnectionError(ProtocolError))
@@ -1198,18 +1202,20 @@ fn handle_headers_on_new_stream(
       streams: dict.insert(conn.streams, stream_id, stream),
     )
 
-  Ok(#(
-    conn,
-    [
-      HeadersReceived(
-        stream_id: stream_id,
-        headers: decoded_headers,
-        end_stream: end_stream,
-      ),
-      ..events
-    ],
-    to_send,
-  ))
+  let new_events = [
+    HeadersReceived(
+      stream_id: stream_id,
+      headers: decoded_headers,
+      end_stream: end_stream,
+    ),
+  ]
+
+  let new_events = case end_stream {
+    True -> [StreamEnded(stream_id:), ..new_events]
+    False -> new_events
+  }
+
+  Ok(#(conn, list.flatten([new_events, events]), to_send))
 }
 
 pub fn open_stream(
@@ -1281,7 +1287,11 @@ pub fn send_headers(
         False -> stream.state
       }
     }
-    ReservedLocal -> HalfClosedRemote
+    ReservedLocal ->
+      case end_stream {
+        True -> Closed
+        False -> HalfClosedRemote
+      }
     _ ->
       case end_stream {
         True -> HalfClosedLocal
@@ -2389,19 +2399,21 @@ fn parse_loop(
                 ),
               )
 
-              parse_loop(
-                conn,
-                [
-                  DataReceived(
-                    stream_id: stream_id,
-                    data: data,
-                    end_stream: end_stream,
-                    flow_controlled_length: payload_length,
-                  ),
-                  ..events
-                ],
-                to_send,
-              )
+              let new_events = [
+                DataReceived(
+                  stream_id: stream_id,
+                  data: data,
+                  end_stream: end_stream,
+                  flow_controlled_length: payload_length,
+                ),
+              ]
+
+              let new_events = case end_stream {
+                False -> new_events
+                True -> [StreamEnded(stream_id:), ..new_events]
+              }
+
+              parse_loop(conn, list.flatten([new_events, events]), to_send)
             }
 
             h2_frame.PushPromise(
