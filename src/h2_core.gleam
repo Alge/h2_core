@@ -75,13 +75,7 @@ fn to_settings_list(
     MaxFrameSize(settings.max_frame_size),
   ]
   let settings_list = case role {
-    Client -> [
-      EnablePush(case settings.enable_push {
-        True -> 1
-        False -> 0
-      }),
-      ..settings_list
-    ]
+    Client -> [EnablePush(settings.enable_push), ..settings_list]
     Server -> settings_list
   }
 
@@ -146,20 +140,35 @@ fn apply_recv_new_window_size(
   Ok(Connection(..conn, streams: dict.from_list(streams)))
 }
 
-fn from_frame_setting(setting: h2_frame.Setting) -> Result(Setting, Nil) {
+fn from_frame_setting(
+  setting: h2_frame.Setting,
+) -> Result(option.Option(Setting), Nil) {
   case setting {
-    h2_frame.HeaderTableSize(v) -> Ok(HeaderTableSize(v))
-    h2_frame.EnablePush(v) -> Ok(EnablePush(v))
-    h2_frame.MaxConcurrentStreams(v) -> Ok(MaxConcurrentStreams(v))
-    h2_frame.InitialWindowSize(v) -> Ok(InitialWindowSize(v))
-    h2_frame.MaxFrameSize(v) -> Ok(MaxFrameSize(v))
-    h2_frame.MaxHeaderListSize(v) -> Ok(MaxHeaderListSize(v))
-    h2_frame.UnknownSetting(_, _) -> Error(Nil)
+    h2_frame.HeaderTableSize(v) -> Ok(option.Some(HeaderTableSize(v)))
+    h2_frame.EnablePush(v) ->
+      case v {
+        0 -> Ok(option.Some(EnablePush(False)))
+        1 -> Ok(option.Some(EnablePush(True)))
+        _ -> Error(Nil)
+      }
+    h2_frame.MaxConcurrentStreams(v) -> Ok(option.Some(MaxConcurrentStreams(v)))
+    h2_frame.InitialWindowSize(v) -> Ok(option.Some(InitialWindowSize(v)))
+    h2_frame.MaxFrameSize(v) -> Ok(option.Some(MaxFrameSize(v)))
+    h2_frame.MaxHeaderListSize(v) -> Ok(option.Some(MaxHeaderListSize(v)))
+    h2_frame.UnknownSetting(_, _) -> Ok(option.None)
   }
 }
 
-fn from_frame_settings(settings: List(h2_frame.Setting)) -> List(Setting) {
-  list.filter_map(settings, from_frame_setting)
+fn from_frame_settings(
+  settings: List(h2_frame.Setting),
+) -> Result(List(Setting), Nil) {
+  case list.try_map(settings, from_frame_setting) {
+    Ok(settings_list) -> {
+      // Filter out unknown settings, which is option.None
+      Ok(list.filter_map(settings_list, option.to_result(_, Nil)))
+    }
+    Error(e) -> Error(e)
+  }
 }
 
 fn apply_settings(
@@ -179,14 +188,14 @@ fn apply_settings(
       )
     [EnablePush(value), ..rest] -> {
       case value {
-        0 ->
+        False ->
           apply_settings(
             role,
             Settings(..settings, enable_push: False),
             rest,
             remote:,
           )
-        1 -> {
+        True -> {
           // RFC 9113 Section 6.5.2: "A client MUST treat receipt of a
           // SETTINGS frame with SETTINGS_ENABLE_PUSH set to 1 as a
           // connection error of type PROTOCOL_ERROR."
@@ -202,7 +211,6 @@ fn apply_settings(
               )
           }
         }
-        _ -> Error(ConnectionError(ProtocolError))
       }
     }
     [MaxConcurrentStreams(value), ..rest] ->
@@ -675,7 +683,7 @@ fn from_alpacki_header(header: alpacki.HeaderField) -> Result(Header, Nil) {
 
 pub type Setting {
   HeaderTableSize(Int)
-  EnablePush(Int)
+  EnablePush(Bool)
   MaxConcurrentStreams(Int)
   InitialWindowSize(Int)
   MaxFrameSize(Int)
@@ -685,7 +693,11 @@ pub type Setting {
 fn to_frame_setting(setting: Setting) -> h2_frame.Setting {
   case setting {
     HeaderTableSize(v) -> h2_frame.HeaderTableSize(v)
-    EnablePush(v) -> h2_frame.EnablePush(v)
+    EnablePush(v) ->
+      h2_frame.EnablePush(case v {
+        True -> 1
+        False -> 0
+      })
     MaxConcurrentStreams(v) -> h2_frame.MaxConcurrentStreams(v)
     InitialWindowSize(v) -> h2_frame.InitialWindowSize(v)
     MaxFrameSize(v) -> h2_frame.MaxFrameSize(v)
@@ -1997,7 +2009,10 @@ fn parse_loop(
             // Settings
             h2_frame.Settings(ack: False, settings: frame_settings) -> {
               // Apply these settings to the remote settings
-              let settings = from_frame_settings(frame_settings)
+              use settings <- result.try(
+                from_frame_settings(frame_settings)
+                |> result.replace_error(ConnectionError(ProtocolError)),
+              )
               case
                 apply_settings(
                   conn.role,
