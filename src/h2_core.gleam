@@ -395,8 +395,18 @@ pub type Indexing {
   NeverIndexed
 }
 
+/// An HTTP/2 header field, as defined by
+/// [RFC 9113 Section 8.2](https://www.rfc-editor.org/rfc/rfc9113#section-8.2).
 pub type Header {
-  Header(name: String, value: BitArray, indexing: Indexing)
+  Header(
+    /// The field name. Must be lowercase ASCII per RFC 9113 Section 8.2.
+    name: String,
+    /// The field value. Represented as a `BitArray` because RFC 9113 Section
+    /// 8.2 permits any octet except NUL, CR, and LF — which may not be valid
+    /// UTF-8.
+    value: BitArray,
+    indexing: Indexing,
+  )
 }
 
 fn extract_status_code(headers: List(Header)) -> Result(Int, Nil) {
