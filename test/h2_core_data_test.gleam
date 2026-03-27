@@ -215,6 +215,41 @@ pub fn receive_data_with_end_stream_on_half_closed_local_closes_stream_test() {
   let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 }
 
+// RFC 9113 Section 5.1: A stream in "half-closed (local)" can still receive
+// DATA from the remote peer. Receiving DATA without END_STREAM must keep the
+// stream in HalfClosedLocal.
+pub fn receive_data_without_end_stream_on_half_closed_local_stays_half_closed_test() {
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
+  // Client opens stream 1
+  let assert Ok(#(client, headers, _stream_id)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  // Server sends headers with END_STREAM, making it half-closed (local)
+  let assert Ok(#(server, response_headers)) =
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      True,
+    )
+  let assert Ok(#(_client, _events, _to_send)) =
+    receive_data(client, response_headers)
+  let assert Ok(HalfClosedLocal) = h2_core.get_stream_state(server, 1)
+
+  // Client sends DATA without END_STREAM
+  let assert Ok(data_frame) =
+    h2_frame.encode_data(
+      stream_id: 1,
+      end_stream: False,
+      data: <<"partial":utf8>>,
+      padding: None,
+    )
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
+  let assert Ok(HalfClosedLocal) = h2_core.get_stream_state(server, 1)
+}
+
 // RFC 9113 Section 6.1 - "If a DATA frame is received whose stream is not
 // in the 'open' or 'half-closed (local)' state, the recipient MUST respond
 // with a stream error (Section 5.4.2) of type STREAM_CLOSED."

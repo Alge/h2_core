@@ -160,6 +160,29 @@ pub fn receive_headers_on_reserved_remote_transitions_to_half_closed_local_test(
   let assert Ok(HalfClosedLocal) = h2_core.get_stream_state(client, promised_id)
 }
 
+// RFC 9113 Section 5.1: "the END_STREAM flag is processed as a separate event
+// to the frame that bears it; a HEADERS frame with the END_STREAM flag set can
+// cause two state transitions."
+// reserved (remote) --recv H--> half-closed (local) --recv ES--> closed
+pub fn receive_headers_end_stream_on_reserved_remote_transitions_to_closed_test() {
+  let #(client, promised_id) = client_with_reserved_remote_stream()
+  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, promised_id)
+
+  // Server sends HEADERS+END_STREAM on promised stream
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: promised_id,
+      end_stream: True,
+      end_headers: True,
+      priority: None,
+      field_block_fragment: <<0x88>>,
+      padding: None,
+    )
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, headers_frame)
+  let assert Ok(Closed) = h2_core.get_stream_state(client, promised_id)
+}
+
 // RFC 9113 Section 5.1 (reserved remote):
 // "Either endpoint can send a RST_STREAM frame to cause the stream
 // to become 'closed'. This releases the stream reservation."

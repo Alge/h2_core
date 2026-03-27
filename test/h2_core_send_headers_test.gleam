@@ -103,6 +103,24 @@ pub fn send_headers_on_reserved_local_transitions_to_half_closed_remote_test() {
     h2_core.get_stream_state(server, promised_id)
 }
 
+// RFC 9113 Section 5.1: "the END_STREAM flag is processed as a separate event
+// to the frame that bears it; a HEADERS frame with the END_STREAM flag set can
+// cause two state transitions."
+// reserved (local) --send H--> half-closed (remote) --send ES--> closed
+pub fn send_headers_end_stream_on_reserved_local_transitions_to_closed_test() {
+  let #(server, _client, promised_id) =
+    helper.server_with_reserved_local_stream()
+  let assert Ok(#(server, _to_send)) =
+    send_headers(
+      server,
+      promised_id,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      True,
+    )
+  let assert Ok(Closed) =
+    h2_core.get_stream_state(server, promised_id)
+}
+
 // RFC 9113 Section 8.1 - A server MAY send interim (1xx) responses before the
 // final response. Interim responses are HEADERS without END_STREAM.
 pub fn send_headers_interim_response_does_not_close_stream_test() {

@@ -63,6 +63,21 @@ pub fn data_end_stream_emits_stream_ended_test() {
   ] = events
 }
 
+// Receiving DATA+END_STREAM from a client (e.g. POST body) emits DataReceived
+// followed by StreamEnded on the server side.
+pub fn client_data_end_stream_emits_stream_ended_test() {
+  let #(server, client) = helper.server_with_open_stream()
+
+  let assert Ok(#(_client, data_bytes)) =
+    send_data(client, 1, <<"body":utf8>>, True, None)
+
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, data_bytes)
+  let assert [
+    DataReceived(stream_id: 1, data: <<"body":utf8>>, end_stream: True, ..),
+    StreamEnded(stream_id: 1),
+  ] = events
+}
+
 // DATA without END_STREAM must NOT emit StreamEnded.
 pub fn data_without_end_stream_does_not_emit_stream_ended_test() {
   let #(server, client) = helper.server_with_open_stream()
