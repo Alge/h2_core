@@ -22,11 +22,14 @@ pub type Stream {
   )
 }
 
-pub fn new_stream() -> Stream {
+pub fn new_stream(
+  send_window_size send_window_size: Int,
+  recv_window_size recv_window_size: Int,
+) -> Stream {
   Stream(
     state: Idle,
-    send_window_size: 65_535,
-    recv_window_size: 65_535,
+    send_window_size: send_window_size,
+    recv_window_size: recv_window_size,
     headers_sent: False,
     final_response_received: False,
     expected_content_length: option.None,

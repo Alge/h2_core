@@ -895,7 +895,14 @@ fn handle_decoded_push_promise(
     ),
   )
 
-  let promised_stream = Stream(..new_stream(), state: ReservedRemote)
+  let promised_stream =
+    Stream(
+      ..new_stream(
+        send_window_size: conn.remote_settings.initial_window_size,
+        recv_window_size: conn.local_settings.initial_window_size,
+      ),
+      state: ReservedRemote,
+    )
 
   let conn =
     Connection(
@@ -1183,13 +1190,19 @@ fn handle_headers_on_new_stream(
   let stream = case end_stream {
     False ->
       Stream(
-        ..new_stream(),
+        ..new_stream(
+          send_window_size: conn.remote_settings.initial_window_size,
+          recv_window_size: conn.local_settings.initial_window_size,
+        ),
         state: Open,
         expected_content_length: content_length,
       )
     True ->
       Stream(
-        ..new_stream(),
+        ..new_stream(
+          send_window_size: conn.remote_settings.initial_window_size,
+          recv_window_size: conn.local_settings.initial_window_size,
+        ),
         state: HalfClosedRemote,
         expected_content_length: content_length,
       )
@@ -1229,7 +1242,11 @@ pub fn open_stream(
     Error(ConnectionError(ProtocolError)),
   )
 
-  let stream = new_stream()
+  let stream =
+    new_stream(
+      send_window_size: conn.remote_settings.initial_window_size,
+      recv_window_size: conn.local_settings.initial_window_size,
+    )
   let #(conn, stream_id) = add_stream(conn, stream)
 
   // Send initial headers
@@ -1374,7 +1391,16 @@ pub fn send_push_promise(
   )
 
   let #(conn, promised_stream_id) =
-    add_stream(conn, Stream(..new_stream(), state: ReservedLocal))
+    add_stream(
+      conn,
+      Stream(
+        ..new_stream(
+          send_window_size: conn.remote_settings.initial_window_size,
+          recv_window_size: conn.local_settings.initial_window_size,
+        ),
+        state: ReservedLocal,
+      ),
+    )
 
   use #(conn, encoded_headers) <- result.try(encode_headers(
     conn: conn,

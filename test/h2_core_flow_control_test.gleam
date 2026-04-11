@@ -1,9 +1,10 @@
 import gleam/option.{None}
 import h2_core.{
   Client, ConnectionError, FlowControlError, FrameSizeError, Header,
-  HeadersReceived, ProtocolError, Server, StreamReset, WithIndexing,
-  acknowledge_data, get_connection_recv_window_size,
+  HeadersReceived, InitialWindowSize, ProtocolError, Server, StreamReset,
+  WithIndexing, acknowledge_data, get_connection_recv_window_size,
   get_connection_send_window_size, get_stream_state, open_stream, receive_data,
+  send_settings,
 }
 import h2_core/internal/stream.{HalfClosedLocal, HalfClosedRemote, Open}
 import h2_frame
@@ -26,6 +27,191 @@ pub fn new_stream_default_window_sizes_test() {
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   let assert Ok(65_535) = h2_core.get_stream_send_window_size(server, 1)
   let assert Ok(65_535) = h2_core.get_stream_recv_window_size(server, 1)
+}
+
+// =============================================================================
+// New streams MUST use current SETTINGS_INITIAL_WINDOW_SIZE, not hardcoded 65535
+// =============================================================================
+
+// RFC 9113 Section 6.9.2 - "Prior to receiving a SETTINGS frame that
+// sets a value for SETTINGS_INITIAL_WINDOW_SIZE, an endpoint can only
+// use the default initial window size when sending flow-controlled
+// frames."
+//
+// After the peer changes SETTINGS_INITIAL_WINDOW_SIZE, outbound streams
+// opened via open_stream must use the peer's current initial window size
+// for send_window_size (the peer controls how much we may send).
+pub fn open_stream_uses_negotiated_send_window_size_test() {
+  let #(_server, client) = helper.connected_pair()
+
+  // Server (peer) sends SETTINGS with INITIAL_WINDOW_SIZE=32768
+  let assert Ok(settings_frame) =
+    h2_frame.encode_settings(ack: False, settings: [
+      h2_frame.InitialWindowSize(32_768),
+    ])
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, settings_frame)
+
+  // Client opens a new stream — its send window should reflect the
+  // peer's advertised initial window size, not the default 65535.
+  let assert Ok(#(client, _headers, stream_id)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(32_768) = h2_core.get_stream_send_window_size(client, stream_id)
+}
+
+// RFC 9113 Section 6.9.2 - After we change our own
+// SETTINGS_INITIAL_WINDOW_SIZE and the peer acknowledges, outbound
+// streams opened via open_stream must use our new initial window size
+// for recv_window_size (we control how much the peer may send us).
+pub fn open_stream_uses_negotiated_recv_window_size_test() {
+  let #(server, client) = helper.connected_pair()
+
+  // Client sends SETTINGS with INITIAL_WINDOW_SIZE=16384
+  let assert Ok(#(client, settings_bytes)) =
+    send_settings(client, [InitialWindowSize(16_384)])
+
+  // Server receives settings and sends back ACK
+  let assert Ok(#(_server, _events, server_to_send)) =
+    receive_data(server, settings_bytes)
+
+  // Client receives the ACK — local settings now take effect
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, server_to_send)
+
+  // Client opens a new stream — its recv window should be 16384
+  let assert Ok(#(client, _headers, stream_id)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(16_384) = h2_core.get_stream_recv_window_size(client, stream_id)
+}
+
+// RFC 9113 Section 6.9.2 - When the peer changes
+// SETTINGS_INITIAL_WINDOW_SIZE, new inbound streams (opened by the peer
+// sending HEADERS) must use our local initial window size for
+// recv_window_size and the peer's remote initial window size for
+// send_window_size.
+pub fn inbound_stream_uses_negotiated_send_window_size_test() {
+  let #(server, client) = helper.connected_pair()
+
+  // Client sends SETTINGS with INITIAL_WINDOW_SIZE=32768
+  let assert Ok(#(client, settings_bytes)) =
+    send_settings(client, [InitialWindowSize(32_768)])
+
+  // Server receives client's SETTINGS — remote_settings updated, sends ACK
+  let assert Ok(#(server, _events, server_to_send)) =
+    receive_data(server, settings_bytes)
+
+  // Client receives the ACK
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, server_to_send)
+
+  // Client opens stream 1 — server receives it
+  let assert Ok(#(_client, headers, _stream_id)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  // Server's send window for stream 1 should be 32768 (peer's setting)
+  let assert Ok(32_768) = h2_core.get_stream_send_window_size(server, 1)
+}
+
+// RFC 9113 Section 6.9.2 - When we change our own
+// SETTINGS_INITIAL_WINDOW_SIZE (and it's acknowledged), new inbound
+// streams must use the new value for recv_window_size.
+pub fn inbound_stream_uses_negotiated_recv_window_size_test() {
+  let #(server, client) = helper.connected_pair()
+
+  // Server sends SETTINGS with INITIAL_WINDOW_SIZE=16384
+  let assert Ok(#(server, settings_bytes)) =
+    send_settings(server, [InitialWindowSize(16_384)])
+
+  // Client receives settings and sends back ACK
+  let assert Ok(#(client, _events, client_to_send)) =
+    receive_data(client, settings_bytes)
+
+  // Server receives the ACK — local settings now take effect
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, client_to_send)
+
+  // Client opens stream 1 — server receives it
+  let assert Ok(#(_client, headers, _stream_id)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  // Server's recv window for stream 1 should be 16384 (our setting)
+  let assert Ok(16_384) = h2_core.get_stream_recv_window_size(server, 1)
+}
+
+// RFC 9113 Section 6.9.2 - Push promise streams must also use the
+// current negotiated initial window sizes, not the default 65535.
+pub fn push_promise_stream_uses_negotiated_send_window_size_test() {
+  let #(server, client) = helper.connected_pair()
+
+  // Client sends SETTINGS with INITIAL_WINDOW_SIZE=32768
+  let assert Ok(#(client, settings_bytes)) =
+    send_settings(client, [InitialWindowSize(32_768)])
+
+  // Server receives client's SETTINGS — remote_settings updated, sends ACK
+  let assert Ok(#(server, _events, server_to_send)) =
+    receive_data(server, settings_bytes)
+
+  // Client receives the ACK
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, server_to_send)
+
+  // Client opens stream 1 so server has a stream to push on
+  let assert Ok(#(_client, headers, _stream_id)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  // Server sends PUSH_PROMISE — the promised stream should have
+  // send_window_size=32768 (the peer's setting)
+  let push_headers = [
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/pushed":utf8>>, WithIndexing),
+  ]
+  let assert Ok(#(server, _to_send, promised_id)) =
+    h2_core.send_push_promise(server, 1, push_headers)
+  let assert Ok(32_768) =
+    h2_core.get_stream_send_window_size(server, promised_id)
+}
+
+// RFC 9113 Section 6.9.2 - Push promise streams opened by the peer
+// (received PUSH_PROMISE on client) must use the current negotiated
+// initial window sizes.
+pub fn received_push_promise_stream_uses_negotiated_recv_window_size_test() {
+  let #(server, client) = helper.connected_pair()
+
+  // Client sends SETTINGS with INITIAL_WINDOW_SIZE=16384
+  let assert Ok(#(client, settings_bytes)) =
+    send_settings(client, [InitialWindowSize(16_384)])
+
+  // Server receives settings and sends back ACK
+  let assert Ok(#(server, _events, server_to_send)) =
+    receive_data(server, settings_bytes)
+
+  // Client receives the ACK — local settings now take effect
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, server_to_send)
+
+  // Client opens stream 1 so server has a stream to push on
+  let assert Ok(#(client, headers, _stream_id)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
+
+  // Server sends PUSH_PROMISE
+  let push_headers = [
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/pushed":utf8>>, WithIndexing),
+  ]
+  let assert Ok(#(_server, push_bytes, promised_id)) =
+    h2_core.send_push_promise(server, 1, push_headers)
+
+  // Client receives the PUSH_PROMISE — the promised stream's recv
+  // window should reflect the client's own initial window size setting.
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, push_bytes)
+  let assert Ok(16_384) =
+    h2_core.get_stream_recv_window_size(client, promised_id)
 }
 
 // =============================================================================
