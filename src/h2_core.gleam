@@ -1290,6 +1290,7 @@ fn handle_headers_on_new_stream(
 ///
 /// Errors:
 /// - `ConnectionDraining` - a GOAWAY has been received; no new streams may be opened
+/// - `InvalidRole` - Only clients are allowed to open new streams, servers needs to use send_push_promise
 /// - `InvalidHeaders` - the headers fail RFC 9113 validation
 /// - `FrameEncodingError` - frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn open_stream(
@@ -1297,6 +1298,8 @@ pub fn open_stream(
   headers headers: List(Header),
   end_stream end_stream: Bool,
 ) -> Result(#(Connection, BitArray, Int), SendError) {
+  // Only clients are allowed to open streams
+  use <- bool.guard(conn.role == Server, Error(InvalidRole))
   // Not allowed to open streams while in Draining state (we have received a GOAWAY)
   use <- bool.guard(conn.state == Draining, Error(ConnectionDraining))
 

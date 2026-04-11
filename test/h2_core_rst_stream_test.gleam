@@ -21,12 +21,10 @@ pub fn send_rst_stream_returns_encoded_frame_test() {
 }
 
 pub fn send_rst_stream_with_different_error_codes_test() {
-  let conn = helper.connected_connection(Server)
-  let assert Ok(#(conn, _to_send, _stream_id)) =
-    open_stream(conn, helper.response_headers(), False)
-  let assert Ok(#(_conn, to_send)) = send_rst_stream(conn, 2, InternalError)
+  let #(server, _client) = helper.server_with_open_stream()
+  let assert Ok(#(_conn, to_send)) = send_rst_stream(server, 1, InternalError)
   let assert Ok(expected) =
-    h2_frame.encode_rst_stream(stream_id: 2, error_code: h2_frame.InternalError)
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.InternalError)
   assert to_send == expected
 }
 

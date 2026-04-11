@@ -737,14 +737,18 @@ pub fn receive_headers_on_even_stream_id_is_protocol_error_test() {
 // A client receiving HEADERS on an odd stream ID (which is reserved
 // for client-initiated streams) must reject it.
 pub fn client_receive_headers_on_odd_stream_id_is_protocol_error_test() {
-  let server = helper.connected_connection(Server)
-  let assert Ok(#(_server, encoded, _stream_id)) =
-    open_stream(
-      server,
-      [Header(":status", <<"200":utf8>>, WithIndexing)],
-      False,
+  // Build a raw HEADERS frame on stream 2 (even/server-initiated), then patch
+  // the stream ID to 1 (odd/client-reserved) to simulate a misbehaving peer.
+  let assert Ok(encoded) =
+    h2_frame.encode_headers(
+      stream_id: 2,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: <<0x88>>,
+      padding: option.None,
     )
-  // Patch stream ID from 2 (even/server) to 1 (odd/client)
+  // Patch stream ID from 2 to 1
   let patched = helper.patch_stream_id(encoded, 1)
 
   let client = helper.connected_connection(Client)

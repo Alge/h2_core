@@ -2,7 +2,7 @@ import gleam/bit_array
 import gleam/list
 import gleam/option.{None}
 import h2_core.{
-  Client, Header, InvalidHeaders, Server, WithIndexing, open_stream,
+  Client, Header, InvalidHeaders, InvalidRole, Server, WithIndexing, open_stream,
   send_headers,
 }
 import h2_core/internal/stream.{HalfClosedLocal, Open}
@@ -48,14 +48,24 @@ pub fn open_stream_increments_stream_id_test() {
   assert stream_id == 3
 }
 
-// Server uses even stream IDs
-pub fn open_stream_server_uses_even_stream_ids_test() {
+// RFC 9113 Section 5.1.1 - "A HEADERS frame will transition the
+// client-initiated stream identified by the stream identifier in the
+// frame header from 'idle' to 'open'. A PUSH_PROMISE frame will
+// transition the server-initiated stream."
+// Servers must not open streams via HEADERS; open_stream is client-only.
+pub fn open_stream_on_server_is_invalid_role_test() {
   let conn = helper.connected_connection(Server)
-  let headers = [Header(":status", <<"200":utf8>>, WithIndexing)]
-  let assert Ok(#(conn, _to_send, stream_id)) =
-    open_stream(conn, headers, False)
-  assert stream_id == 2
-  let assert Ok(Open) = h2_core.get_stream_state(conn, 2)
+  let assert Error(InvalidRole) =
+    open_stream(conn, [Header(":status", <<"200":utf8>>, WithIndexing)], False)
+}
+
+// RFC 9113 Section 5.1.1 - Server-initiated streams use even-numbered
+// identifiers, allocated via PUSH_PROMISE.
+pub fn send_push_promise_server_uses_even_stream_ids_test() {
+  let #(server, _client) = helper.server_with_open_stream()
+  let assert Ok(#(_server, _to_send, promised_id)) =
+    h2_core.send_push_promise(server, 1, helper.request_headers())
+  assert promised_id == 2
 }
 
 // RFC 9113 Section 6.2 - END_STREAM flag transitions stream to half-closed (local)
