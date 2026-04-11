@@ -4,10 +4,10 @@ import gleam/list
 import gleam/option.{None}
 import gleam/string
 import h2_core.{
-  type Connection, Cancel, Client, ConnectionError, Header, InvalidRole,
-  InvalidStreamState, ProtocolError, PushDisabled, PushPromiseReceived, Server,
-  StreamReset, UnknownStream, WithIndexing, open_stream, receive_data,
-  send_headers, send_rst_stream,
+  type Connection, Cancel, Client, ConnectionError, Header, InvalidHeaders,
+  InvalidRole, InvalidStreamState, ProtocolError, PushDisabled,
+  PushPromiseReceived, Server, StreamReset, UnknownStream, WithIndexing,
+  open_stream, receive_data, send_headers, send_rst_stream,
 }
 import h2_core/internal/stream.{Closed, ReservedLocal, ReservedRemote}
 import h2_frame
@@ -387,9 +387,7 @@ pub fn send_push_promise_on_open_peer_stream_test() {
   let #(server, _client) = server_with_open_stream()
   // Server pushes on stream 1 (client-initiated, open)
   let assert Ok(#(server, _to_send, promised_id)) =
-    h2_core.send_push_promise(server, 1, [
-      Header(":method", <<"GET":utf8>>, WithIndexing),
-    ])
+    h2_core.send_push_promise(server, 1, helper.request_headers())
   // Promised stream should be even and in reserved (local) on server side
   assert promised_id % 2 == 0
   let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, promised_id)
@@ -404,9 +402,7 @@ pub fn send_push_promise_on_half_closed_remote_test() {
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
   // Stream 1 is half-closed (remote) on server - push should work
   let assert Ok(#(server, _to_send, promised_id)) =
-    h2_core.send_push_promise(server, 1, [
-      Header(":method", <<"GET":utf8>>, WithIndexing),
-    ])
+    h2_core.send_push_promise(server, 1, helper.request_headers())
   let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, promised_id)
 }
 
@@ -425,13 +421,9 @@ pub fn send_push_promise_on_idle_stream_is_error_test() {
 pub fn send_push_promise_auto_allocates_increasing_even_ids_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send, id1)) =
-    h2_core.send_push_promise(server, 1, [
-      Header(":method", <<"GET":utf8>>, WithIndexing),
-    ])
+    h2_core.send_push_promise(server, 1, helper.request_headers())
   let assert Ok(#(_server, _to_send, id2)) =
-    h2_core.send_push_promise(server, 1, [
-      Header(":method", <<"GET":utf8>>, WithIndexing),
-    ])
+    h2_core.send_push_promise(server, 1, helper.request_headers())
   assert id1 % 2 == 0
   assert id2 % 2 == 0
   assert id2 > id1
@@ -593,6 +585,117 @@ pub fn receive_push_promise_nonzero_padding_bytes_accepted_by_default_test() {
 }
 
 // =============================================================================
+// Header validation - RFC 9113 Section 8.4.1
+//
+// "The header fields in PUSH_PROMISE... MUST be a valid and complete set of
+// request header fields (Section 8.3.1)."
+// =============================================================================
+
+// RFC 9113 Section 8.4.1 - Empty headers are missing all required pseudo-headers.
+pub fn send_push_promise_empty_headers_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Error(InvalidHeaders) = h2_core.send_push_promise(server, 1, [])
+}
+
+// RFC 9113 Section 8.3.1 - Missing :scheme is malformed.
+pub fn send_push_promise_missing_scheme_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Error(InvalidHeaders) =
+    h2_core.send_push_promise(server, 1, [
+      Header(":method", <<"GET":utf8>>, WithIndexing),
+      Header(":path", <<"/":utf8>>, WithIndexing),
+    ])
+}
+
+// RFC 9113 Section 8.3.1 - Missing :path is malformed.
+pub fn send_push_promise_missing_path_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Error(InvalidHeaders) =
+    h2_core.send_push_promise(server, 1, [
+      Header(":method", <<"GET":utf8>>, WithIndexing),
+      Header(":scheme", <<"https":utf8>>, WithIndexing),
+    ])
+}
+
+// RFC 9113 Section 8.3.1 - Missing :method is malformed.
+pub fn send_push_promise_missing_method_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Error(InvalidHeaders) =
+    h2_core.send_push_promise(server, 1, [
+      Header(":scheme", <<"https":utf8>>, WithIndexing),
+      Header(":path", <<"/":utf8>>, WithIndexing),
+    ])
+}
+
+// RFC 9113 Section 8.3 - Pseudo-headers must appear before regular fields.
+pub fn send_push_promise_pseudo_after_regular_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Error(InvalidHeaders) =
+    h2_core.send_push_promise(server, 1, [
+      Header(":method", <<"GET":utf8>>, WithIndexing),
+      Header("x-foo", <<"bar":utf8>>, WithIndexing),
+      Header(":scheme", <<"https":utf8>>, WithIndexing),
+      Header(":path", <<"/":utf8>>, WithIndexing),
+    ])
+}
+
+// RFC 9113 Section 8.3 - Duplicate pseudo-headers are malformed.
+pub fn send_push_promise_duplicate_pseudo_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Error(InvalidHeaders) =
+    h2_core.send_push_promise(server, 1, [
+      Header(":method", <<"GET":utf8>>, WithIndexing),
+      Header(":method", <<"POST":utf8>>, WithIndexing),
+      Header(":scheme", <<"https":utf8>>, WithIndexing),
+      Header(":path", <<"/":utf8>>, WithIndexing),
+    ])
+}
+
+// RFC 9113 Section 8.2.2 - Connection-specific headers are forbidden.
+pub fn send_push_promise_with_connection_header_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Error(InvalidHeaders) =
+    h2_core.send_push_promise(server, 1, [
+      Header(":method", <<"GET":utf8>>, WithIndexing),
+      Header(":scheme", <<"https":utf8>>, WithIndexing),
+      Header(":path", <<"/":utf8>>, WithIndexing),
+      Header("connection", <<"close":utf8>>, WithIndexing),
+    ])
+}
+
+// RFC 9113 Section 8.4.1 - push promise headers must be request headers;
+// response pseudo-headers like :status are not valid.
+pub fn send_push_promise_with_status_pseudo_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Error(InvalidHeaders) =
+    h2_core.send_push_promise(server, 1, [
+      Header(":method", <<"GET":utf8>>, WithIndexing),
+      Header(":scheme", <<"https":utf8>>, WithIndexing),
+      Header(":path", <<"/":utf8>>, WithIndexing),
+      Header(":status", <<"200":utf8>>, WithIndexing),
+    ])
+}
+
+// RFC 9113 Section 8.2.2 - TE header must only have value "trailers".
+pub fn send_push_promise_with_te_non_trailers_is_error_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Error(InvalidHeaders) =
+    h2_core.send_push_promise(server, 1, [
+      Header(":method", <<"GET":utf8>>, WithIndexing),
+      Header(":scheme", <<"https":utf8>>, WithIndexing),
+      Header(":path", <<"/":utf8>>, WithIndexing),
+      Header("te", <<"chunked":utf8>>, WithIndexing),
+    ])
+}
+
+// Valid push promise headers should succeed.
+pub fn send_push_promise_with_valid_headers_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Ok(#(_server, _to_send, _promised_id)) =
+    h2_core.send_push_promise(server, 1, helper.request_headers())
+}
+
+// =============================================================================
 // Section 6.6 - "However, an endpoint that has sent RST_STREAM on the
 // associated stream MUST handle PUSH_PROMISE frames that might have been
 // created before the RST_STREAM frame is received and processed."
@@ -706,31 +809,25 @@ pub fn send_push_promise_minimal_valid_headers_test() {
   assert to_send == expected
 }
 
-// Verify that send_push_promise with multiple headers encodes them all.
+// Verify that send_push_promise encodes all headers correctly by round-tripping
+// through a client that decodes the frame and emits a PushPromiseReceived event.
 pub fn send_push_promise_multiple_headers_test() {
-  let #(server, _client) = server_with_open_stream()
-  let assert Ok(#(server, to_send, promised_id)) =
-    h2_core.send_push_promise(server, 1, [
-      Header(":method", <<"GET":utf8>>, WithIndexing),
-      Header(":path", <<"/":utf8>>, WithIndexing),
-    ])
-  // :method GET = 0x82, :path / = 0x84 (HPACK static table indices)
-  let assert Ok(expected) =
-    h2_frame.encode_push_promise(
-      stream_id: 1,
-      end_headers: True,
-      promised_stream_id: promised_id,
-      field_block_fragment: <<0x82, 0x84>>,
-      padding: None,
-    )
-  assert to_send == expected
-  // HPACK encoder state should be updated on the connection
-  // Verify by sending a second push - the encoder should still work
-  let assert Ok(#(_server, _to_send, id2)) =
-    h2_core.send_push_promise(server, 1, [
-      Header(":method", <<"GET":utf8>>, WithIndexing),
-    ])
-  assert id2 > promised_id
+  let #(server, client) = server_with_open_stream()
+  let headers = [
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/resource":utf8>>, WithIndexing),
+    Header("x-custom", <<"value":utf8>>, WithIndexing),
+  ]
+  let assert Ok(#(_server, to_send, promised_id)) =
+    h2_core.send_push_promise(server, 1, headers)
+  // Client decodes the frame - all four headers must be present
+  let assert Ok(#(_client, events, _)) = receive_data(client, to_send)
+  let assert [
+    PushPromiseReceived(stream_id: 1, promised_stream_id: pid, headers: decoded),
+  ] = events
+  assert pid == promised_id
+  assert list.length(decoded) == 4
 }
 
 // =============================================================================

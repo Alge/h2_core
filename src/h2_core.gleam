@@ -1441,6 +1441,7 @@ pub fn send_headers(
 /// - `UnknownStream` - the stream does not exist
 /// - `InvalidStreamState` - stream is not in Open or HalfClosedRemote state
 /// - `PushDisabled` - the peer has disabled push via SETTINGS
+/// - `InvalidHeaders` - the headers fail RFC 9113 Section 8.4.1 validation (must be a valid request field block with `:method`, `:scheme`, and `:path`)
 /// - `FrameEncodingError` - frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn send_push_promise(
   conn conn: Connection,
@@ -1468,6 +1469,11 @@ pub fn send_push_promise(
   )
 
   use <- bool.guard(!conn.remote_settings.enable_push, Error(PushDisabled))
+
+  use <- bool.guard(
+    validate_headers(Server, headers, False) == Error(Nil),
+    Error(InvalidHeaders),
+  )
 
   let #(conn, promised_stream_id) =
     add_stream(
