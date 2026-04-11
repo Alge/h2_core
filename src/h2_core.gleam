@@ -1749,14 +1749,11 @@ pub fn send_settings(
     _ -> conn
   }
 
-  case
+  use encoded <- result.try(
     h2_frame.encode_settings(ack: False, settings: to_frame_settings(settings))
-  {
-    Ok(encoded) -> {
-      Ok(#(conn, encoded))
-    }
-    Error(_) -> Error(FrameEncodingError)
-  }
+    |> result.replace_error(FrameEncodingError),
+  )
+  Ok(#(conn, encoded))
 }
 
 /// Sends a PING frame with the given 8-byte opaque data.
@@ -1771,12 +1768,11 @@ pub fn send_ping(
 ) -> Result(#(Connection, BitArray), SendError) {
   use <- bool.guard(bit_array.byte_size(data) != 8, Error(InvalidPingPayload))
 
-  case h2_frame.encode_ping(ack: False, data: data) {
-    Ok(encoded) -> {
-      Ok(#(conn, encoded))
-    }
-    Error(_) -> Error(FrameEncodingError)
-  }
+  use encoded <- result.try(
+    h2_frame.encode_ping(ack: False, data: data)
+    |> result.replace_error(FrameEncodingError),
+  )
+  Ok(#(conn, encoded))
 }
 
 /// Sends a GOAWAY frame to initiate a graceful connection shutdown.
