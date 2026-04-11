@@ -16,11 +16,17 @@ import h2_core/internal/stream.{
 }
 import h2_frame
 
+/// The role of an HTTP/2 endpoint, passed to `new_connection`.
+/// Determines stream ID parity and which protocol rules apply.
 pub type Role {
   Client
   Server
 }
 
+/// The full set of HTTP/2 connection settings
+/// ([RFC 9113 Section 6.5.2](https://www.rfc-editor.org/rfc/rfc9113#section-6.5.2)).
+/// Passed to `new_connection` to configure the initial local settings.
+/// Use `default_settings` as a starting point.
 pub type Settings {
   Settings(
     header_table_size: Int,
@@ -255,6 +261,8 @@ fn apply_settings(
   }
 }
 
+/// Returns the default HTTP/2 settings as defined in
+/// [RFC 9113 Section 6.5.2](https://www.rfc-editor.org/rfc/rfc9113#section-6.5.2).
 pub fn default_settings() -> Settings {
   Settings(
     header_table_size: 4096,
@@ -266,6 +274,8 @@ pub fn default_settings() -> Settings {
   )
 }
 
+/// Events returned by `receive_data` describing what was received from the peer.
+/// Multiple events may be produced from a single `receive_data` call.
 pub type Event {
   HeadersReceived(stream_id: Int, headers: List(Header), end_stream: Bool)
   DataReceived(
@@ -300,6 +310,8 @@ type PendingHeaderBlock {
   )
 }
 
+/// An opaque HTTP/2 connection state machine. Created with `new_connection`
+/// and threaded through the `send_*` and `receive_data` functions.
 pub opaque type Connection {
   Connection(
     state: ConnectionState,
@@ -397,6 +409,10 @@ fn add_stream(conn: Connection, stream: Stream) -> #(Connection, Int) {
   )
 }
 
+/// Controls how a header field is represented in the HPACK dynamic table.
+/// `WithIndexing` adds the field to the table, `WithoutIndexing` does not,
+/// and `NeverIndexed` signals that the value is sensitive and must never be
+/// indexed (e.g. authentication tokens).
 pub type Indexing {
   WithIndexing
   WithoutIndexing
@@ -681,6 +697,7 @@ fn from_alpacki_header(header: alpacki.HeaderField) -> Result(Header, Nil) {
   Ok(Header(name: name, value: header.value, indexing: indexing))
 }
 
+/// A single settings parameter to send to the peer via `send_settings`.
 pub type Setting {
   HeaderTableSize(Int)
   EnablePush(Bool)
@@ -709,6 +726,8 @@ fn to_frame_settings(settings: List(Setting)) -> List(h2_frame.Setting) {
   list.map(settings, to_frame_setting)
 }
 
+/// HTTP/2 error codes as defined in
+/// [RFC 9113 Section 7](https://www.rfc-editor.org/rfc/rfc9113#section-7).
 pub type ErrorCode {
   NoError
   ProtocolError
@@ -767,6 +786,10 @@ fn to_frame_error_code(code: ErrorCode) -> h2_frame.ErrorCode {
   }
 }
 
+/// Errors returned by the `send_*` and `receive_data` functions.
+/// A `ConnectionError` affects the entire connection — the caller should
+/// respond with `send_goaway` and close the connection.
+/// A `StreamError` affects only the given stream.
 pub type H2Error {
   ConnectionError(error_code: ErrorCode)
   StreamError(stream_id: Int, error_code: ErrorCode)
@@ -1233,6 +1256,9 @@ fn handle_headers_on_new_stream(
   Ok(#(conn, list.flatten([new_events, events]), to_send))
 }
 
+/// Opens a new stream by sending a HEADERS frame. Returns the updated
+/// connection, the bytes to send to the peer, and the new stream ID.
+/// Set `end_stream` to `True` to half-close the stream immediately.
 pub fn open_stream(
   conn conn: Connection,
   headers headers: List(Header),
@@ -1258,6 +1284,9 @@ pub fn open_stream(
   }
 }
 
+/// Sends a HEADERS frame (and CONTINUATION frames if needed) on an existing
+/// stream. Use `open_stream` instead to create a new stream.
+/// Set `end_stream` to `True` to half-close the local side of the stream.
 pub fn send_headers(
   conn conn: Connection,
   stream_id stream_id: Int,
@@ -1366,6 +1395,9 @@ pub fn send_headers(
   }
 }
 
+/// Sends a PUSH_PROMISE frame on an existing stream (server only).
+/// Returns the updated connection, the bytes to send, and the promised
+/// stream ID. The promised stream is created in the reserved (local) state.
 pub fn send_push_promise(
   conn conn: Connection,
   stream_id stream_id: Int,
@@ -1461,6 +1493,10 @@ pub fn send_push_promise(
   }
 }
 
+/// Sends a DATA frame on an open stream. The data must fit within both the
+/// stream and connection flow control windows — use `get_send_window_size`
+/// to check available capacity before calling.
+/// Set `end_stream` to `True` to half-close the local side of the stream.
 pub fn send_data(
   conn conn: Connection,
   stream_id stream_id: Int,
@@ -1551,6 +1587,9 @@ pub fn send_data(
   Ok(#(conn, encoded_frame))
 }
 
+/// Returns the number of bytes that can be sent on the given stream,
+/// accounting for both the stream and connection flow control windows.
+/// Returns `Error(Nil)` if the stream does not exist.
 pub fn get_send_window_size(
   conn conn: Connection,
   stream_id stream_id: Int,
@@ -1640,6 +1679,8 @@ pub fn get_recv_buffer(conn conn: Connection) -> BitArray {
   conn.recv_buffer
 }
 
+/// Sends a SETTINGS frame with the given parameters to the peer.
+/// The settings take effect once the peer acknowledges them.
 pub fn send_settings(
   conn conn: Connection,
   settings settings: List(Setting),
@@ -1680,6 +1721,8 @@ pub fn send_settings(
   }
 }
 
+/// Sends a PING frame with the given 8-byte opaque data.
+/// The peer will respond with a PING ACK containing the same data.
 pub fn send_ping(
   conn conn: Connection,
   data data: BitArray,
@@ -1692,6 +1735,9 @@ pub fn send_ping(
   }
 }
 
+/// Sends a GOAWAY frame to initiate a graceful connection shutdown.
+/// The last stream ID is set automatically based on the highest
+/// peer-initiated stream the connection has seen.
 pub fn send_goaway(
   conn conn: Connection,
   error_code error_code: ErrorCode,
@@ -1706,6 +1752,9 @@ pub fn send_goaway(
   Ok(#(Connection(..conn, state: Draining), encoded_frame))
 }
 
+/// Sends WINDOW_UPDATE frames to replenish the flow control windows for
+/// both the given stream and the connection by `window_size_increment` bytes.
+/// Call this after consuming received DATA to allow the peer to send more.
 pub fn acknowledge_data(
   conn conn: Connection,
   stream_id stream_id: Int,
@@ -1771,6 +1820,8 @@ pub fn acknowledge_data(
   Ok(#(conn, <<connection_update_frame:bits, stream_update_frame:bits>>))
 }
 
+/// Sends a RST_STREAM frame to immediately terminate the given stream.
+/// The stream transitions to the closed state.
 pub fn send_rst_stream(
   conn conn: Connection,
   stream_id stream_id: Int,
