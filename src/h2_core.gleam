@@ -786,14 +786,15 @@ fn map_frame_error(error: h2_frame.FrameError) -> H2Error {
 
 fn chunk_bytes(
   bytes: BitArray,
-  chunk_size: Int,
+  first_chunk_size: Int,
+  rest_chunk_size: Int,
   chunks: List(BitArray),
 ) -> List(BitArray) {
   case bytes {
     <<>> -> list.reverse(chunks)
-    <<b:bytes-size(chunk_size), rest:bits>> ->
-      chunk_bytes(rest, chunk_size, [b, ..chunks])
-    <<b:bits>> -> chunk_bytes(<<>>, chunk_size, [b, ..chunks])
+    <<b:bytes-size(first_chunk_size), rest:bits>> ->
+      chunk_bytes(rest, rest_chunk_size, rest_chunk_size, [b, ..chunks])
+    <<b:bits>> -> chunk_bytes(<<>>, rest_chunk_size, rest_chunk_size, [b, ..chunks])
   }
 }
 
@@ -1321,7 +1322,7 @@ pub fn send_headers(
   let conn =
     Connection(..conn, streams: dict.insert(conn.streams, stream_id, stream))
 
-  case chunk_bytes(encoded_headers, conn.remote_settings.max_frame_size, []) {
+  case chunk_bytes(encoded_headers, conn.remote_settings.max_frame_size, conn.remote_settings.max_frame_size, []) {
     [] -> {
       use frame <- result.try(
         h2_frame.encode_headers(
@@ -1407,7 +1408,7 @@ pub fn send_push_promise(
     headers: headers,
   ))
 
-  case chunk_bytes(encoded_headers, conn.remote_settings.max_frame_size, []) {
+  case chunk_bytes(encoded_headers, conn.remote_settings.max_frame_size - 4, conn.remote_settings.max_frame_size, []) {
     [] -> {
       use push_promise_frame <- result.try(
         h2_frame.encode_push_promise(
@@ -1427,7 +1428,7 @@ pub fn send_push_promise(
         h2_frame.encode_push_promise(
           stream_id: stream_id,
           promised_stream_id: promised_stream_id,
-          end_headers: True,
+          end_headers: rest == [],
           field_block_fragment: header_chunk,
           padding: option.None,
         )

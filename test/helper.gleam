@@ -143,10 +143,19 @@ pub fn parse_all_frames(
   data: BitArray,
   acc: List(h2_frame.Frame),
 ) -> List(h2_frame.Frame) {
-  case h2_frame.extract_frame(data, 16_384) {
+  parse_all_frames_with_limit(data, acc, 16_384)
+}
+
+/// Parse all frames with a custom max_frame_size limit.
+pub fn parse_all_frames_with_limit(
+  data: BitArray,
+  acc: List(h2_frame.Frame),
+  max_frame_size: Int,
+) -> List(h2_frame.Frame) {
+  case h2_frame.extract_frame(data, max_frame_size) {
     Ok(#(frame_data, rest)) -> {
       let assert Ok(frame) = h2_frame.decode_frame(frame_data)
-      parse_all_frames(rest, list.append(acc, [frame]))
+      parse_all_frames_with_limit(rest, list.append(acc, [frame]), max_frame_size)
     }
     Error(_) -> acc
   }

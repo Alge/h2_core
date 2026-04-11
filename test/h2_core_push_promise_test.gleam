@@ -1,4 +1,8 @@
+import gleam/bit_array
+import gleam/int
+import gleam/list
 import gleam/option.{None}
+import gleam/string
 import h2_core.{
   type Connection, Cancel, Client, ConnectionError, Header, ProtocolError,
   PushPromiseReceived, Server, StreamReset, WithIndexing, open_stream,
@@ -816,4 +820,178 @@ pub fn receive_push_promise_pseudo_after_regular_is_malformed_test() {
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
+}
+
+// =============================================================================
+// Sending PUSH_PROMISE with CONTINUATION frames
+// =============================================================================
+
+// Helper: generate a large list of request headers that will exceed
+// the default max_frame_size (16384 bytes) when HPACK-encoded.
+fn large_push_headers(count: Int) -> List(h2_core.Header) {
+  let pseudo = [
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/pushed":utf8>>, WithIndexing),
+  ]
+  let custom =
+    int.range(1, count + 1, [], fn(acc, i) {
+      let name = "x-push-" <> string.pad_start(int.to_string(i), 4, "0")
+      let value = string.repeat("p", 64)
+      [Header(name, <<value:utf8>>, h2_core.NeverIndexed), ..acc]
+    })
+    |> list.reverse
+  list.append(pseudo, custom)
+}
+
+// RFC 9113 Section 6.6/6.10 - When the header block exceeds
+// max_frame_size, send_push_promise should produce PUSH_PROMISE +
+// CONTINUATION frames.
+//
+// The initial PUSH_PROMISE frame MUST have end_headers=False when
+// there are CONTINUATION frames following it.
+pub fn send_push_promise_large_block_produces_continuation_test() {
+  let #(server, _client) = server_with_open_stream()
+  let headers = large_push_headers(500)
+  let assert Ok(#(_server, to_send, _promised_id)) =
+    h2_core.send_push_promise(server, 1, headers)
+
+  // First frame should be PUSH_PROMISE with end_headers=False
+  let assert Ok(#(frame_data, rest)) = h2_frame.extract_frame(to_send, 65_535)
+  let assert Ok(frame) = h2_frame.decode_frame(frame_data)
+  let assert h2_frame.PushPromise(
+    stream_id: 1,
+    end_headers: False,
+    promised_stream_id: _,
+    field_block_fragment: _,
+  ) = frame
+  // There should be remaining data (CONTINUATION frames)
+  assert rest != <<>>
+}
+
+// The last CONTINUATION frame must have end_headers=True.
+pub fn send_push_promise_continuation_last_has_end_headers_test() {
+  let #(server, _client) = server_with_open_stream()
+  let headers = large_push_headers(500)
+  let assert Ok(#(_server, to_send, _promised_id)) =
+    h2_core.send_push_promise(server, 1, headers)
+
+  // Use 65535 limit because PUSH_PROMISE payload includes the 4-byte
+  // promised_stream_id, making the first frame exceed 16384.
+  let frames = helper.parse_all_frames_with_limit(to_send, [], 65_535)
+  let assert Ok(last) = list.last(frames)
+  case last {
+    h2_frame.Continuation(end_headers: True, ..) -> Nil
+    h2_frame.PushPromise(end_headers: True, ..) -> Nil
+    _ -> panic as "Last frame should have end_headers=True"
+  }
+}
+
+// The round-trip must work: client receives the PUSH_PROMISE +
+// CONTINUATION sequence and correctly reassembles the headers.
+pub fn send_push_promise_continuation_round_trip_test() {
+  let #(server, _client) = server_with_open_stream()
+  let headers = large_push_headers(500)
+  let assert Ok(#(_server, to_send, _promised_id)) =
+    h2_core.send_push_promise(server, 1, headers)
+
+  // Verify it was actually split
+  let frames = helper.parse_all_frames_with_limit(to_send, [], 65_535)
+  assert list.length(frames) >= 2
+
+  // Client receives the full sequence — the client's max_frame_size
+  // is still 16384 so it will reject oversized frames. We need to
+  // increase the client's setting too.
+  // For now, verify the frame structure is correct.
+  let assert [h2_frame.PushPromise(end_headers: False, ..), ..rest] = frames
+  assert rest != []
+  let assert Ok(h2_frame.Continuation(end_headers: True, ..)) =
+    list.last(rest)
+}
+
+// =============================================================================
+// RFC 9113 Section 4.2 - "An endpoint MUST send an error code of
+// FRAME_SIZE_ERROR if a frame exceeds the size defined in
+// SETTINGS_MAX_FRAME_SIZE"
+//
+// The PUSH_PROMISE frame payload includes a 4-byte promised_stream_id
+// field in addition to the header block fragment. When chunking the
+// encoded header block, this 4-byte overhead must be subtracted from
+// max_frame_size so that the first frame's total payload does not
+// exceed max_frame_size.
+// =============================================================================
+
+// Every frame produced by send_push_promise must have a payload that
+// fits within max_frame_size (default 16384). The first PUSH_PROMISE
+// frame has 4 bytes of overhead for the promised_stream_id.
+pub fn send_push_promise_first_frame_payload_within_max_frame_size_test() {
+  let #(server, _client) = server_with_open_stream()
+  let headers = large_push_headers(500)
+  let assert Ok(#(_server, to_send, _promised_id)) =
+    h2_core.send_push_promise(server, 1, headers)
+
+  // Parse every frame at the standard limit. If any frame exceeds
+  // 16384, extract_frame will return an error and we'll get fewer
+  // frames than expected.
+  let frames_standard = helper.parse_all_frames(to_send, [])
+  assert list.length(frames_standard) >= 2
+
+  // Also verify the raw payload length of the first frame directly.
+  // The frame header is 9 bytes: 3 (length) + 1 (type) + 1 (flags) + 4 (stream id).
+  // The first 3 bytes encode the payload length.
+  let assert <<payload_length:size(24), _rest:bits>> = to_send
+  assert payload_length <= 16_384
+}
+
+// The round-trip should work at the standard max_frame_size: the
+// client should be able to receive and decode all frames without
+// hitting a FRAME_SIZE_ERROR.
+pub fn send_push_promise_round_trip_at_standard_max_frame_size_test() {
+  let #(server, client) = server_with_open_stream()
+  let headers = large_push_headers(500)
+  let assert Ok(#(_server, to_send, _promised_id)) =
+    h2_core.send_push_promise(server, 1, headers)
+
+  // Client receives the full frame sequence. If the first PUSH_PROMISE
+  // frame exceeds 16384 bytes, receive_data will return
+  // Error(ConnectionError(FrameSizeError)).
+  let assert Ok(#(_client, events, _to_send)) = receive_data(client, to_send)
+
+  // Should produce a PushPromiseReceived event
+  let assert [PushPromiseReceived(stream_id: 1, ..)] = events
+}
+
+// RFC 9113 Section 6.10 - CONTINUATION frames carry only the field
+// block fragment with no additional overhead fields. Their payload
+// can use the full max_frame_size, unlike the first PUSH_PROMISE
+// frame which has a 4-byte promised_stream_id. A naive fix that
+// subtracts 4 from all chunks (not just the first) would produce
+// CONTINUATION frames that are 4 bytes smaller than necessary.
+pub fn send_push_promise_continuation_uses_full_max_frame_size_test() {
+  let #(server, _client) = server_with_open_stream()
+  let headers = large_push_headers(1000)
+  let assert Ok(#(_server, to_send, _promised_id)) =
+    h2_core.send_push_promise(server, 1, headers)
+
+  // Parse all frames at 16384 limit (must succeed for all frames).
+  let frames = helper.parse_all_frames(to_send, [])
+  assert list.length(frames) >= 3
+
+  // Get only the middle CONTINUATION frames (not the last one, which
+  // holds the remainder and can be smaller). Every non-last
+  // CONTINUATION must have a fragment of exactly max_frame_size (16384).
+  let continuations =
+    list.filter(frames, fn(f) {
+      case f {
+        h2_frame.Continuation(end_headers: False, ..) -> True
+        _ -> False
+      }
+    })
+  // There must be at least one non-last CONTINUATION frame for this
+  // test to be meaningful.
+  assert continuations != []
+  list.each(continuations, fn(f) {
+    let assert h2_frame.Continuation(field_block_fragment: frag, ..) = f
+    assert bit_array.byte_size(frag) == 16_384
+  })
 }
