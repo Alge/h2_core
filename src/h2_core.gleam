@@ -794,7 +794,8 @@ fn chunk_bytes(
     <<>> -> list.reverse(chunks)
     <<b:bytes-size(first_chunk_size), rest:bits>> ->
       chunk_bytes(rest, rest_chunk_size, rest_chunk_size, [b, ..chunks])
-    <<b:bits>> -> chunk_bytes(<<>>, rest_chunk_size, rest_chunk_size, [b, ..chunks])
+    <<b:bits>> ->
+      chunk_bytes(<<>>, rest_chunk_size, rest_chunk_size, [b, ..chunks])
   }
 }
 
@@ -1322,7 +1323,14 @@ pub fn send_headers(
   let conn =
     Connection(..conn, streams: dict.insert(conn.streams, stream_id, stream))
 
-  case chunk_bytes(encoded_headers, conn.remote_settings.max_frame_size, conn.remote_settings.max_frame_size, []) {
+  case
+    chunk_bytes(
+      encoded_headers,
+      conn.remote_settings.max_frame_size,
+      conn.remote_settings.max_frame_size,
+      [],
+    )
+  {
     [] -> {
       use frame <- result.try(
         h2_frame.encode_headers(
@@ -1408,7 +1416,14 @@ pub fn send_push_promise(
     headers: headers,
   ))
 
-  case chunk_bytes(encoded_headers, conn.remote_settings.max_frame_size - 4, conn.remote_settings.max_frame_size, []) {
+  case
+    chunk_bytes(
+      encoded_headers,
+      conn.remote_settings.max_frame_size - 4,
+      conn.remote_settings.max_frame_size,
+      [],
+    )
+  {
     [] -> {
       use push_promise_frame <- result.try(
         h2_frame.encode_push_promise(
@@ -1807,6 +1822,21 @@ fn handle_rst_stream(
     )
     |> result.map_error(map_frame_error),
   )
+
+  // Set stream state to closed if it is tracked locally
+  let conn = case dict.get(conn.streams, stream_id) {
+    Ok(stream) -> {
+      Connection(
+        ..conn,
+        streams: dict.insert(
+          conn.streams,
+          stream_id,
+          Stream(..stream, state: Closed),
+        ),
+      )
+    }
+    Error(Nil) -> conn
+  }
 
   // If flow_controlled_length is not 0, add a WindowReset frame
   case flow_controlled_length {

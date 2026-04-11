@@ -155,7 +155,11 @@ pub fn parse_all_frames_with_limit(
   case h2_frame.extract_frame(data, max_frame_size) {
     Ok(#(frame_data, rest)) -> {
       let assert Ok(frame) = h2_frame.decode_frame(frame_data)
-      parse_all_frames_with_limit(rest, list.append(acc, [frame]), max_frame_size)
+      parse_all_frames_with_limit(
+        rest,
+        list.append(acc, [frame]),
+        max_frame_size,
+      )
     }
     Error(_) -> acc
   }

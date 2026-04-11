@@ -905,8 +905,7 @@ pub fn send_push_promise_continuation_round_trip_test() {
   // For now, verify the frame structure is correct.
   let assert [h2_frame.PushPromise(end_headers: False, ..), ..rest] = frames
   assert rest != []
-  let assert Ok(h2_frame.Continuation(end_headers: True, ..)) =
-    list.last(rest)
+  let assert Ok(h2_frame.Continuation(end_headers: True, ..)) = list.last(rest)
 }
 
 // =============================================================================
