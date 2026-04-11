@@ -1,8 +1,9 @@
 import gleam/option.{None}
 import h2_core.{
   Client, ConnectionError, FlowControlError, FrameSizeError, Header,
-  HeadersReceived, InitialWindowSize, ProtocolError, Server, StreamReset,
-  WithIndexing, acknowledge_data, get_connection_recv_window_size,
+  HeadersReceived, InitialWindowSize, InvalidStreamState, InvalidWindowIncrement,
+  ProtocolError, Server, StreamReset, UnknownStream, WithIndexing,
+  acknowledge_data, get_connection_recv_window_size,
   get_connection_send_window_size, get_stream_state, open_stream, receive_data,
   send_settings,
 }
@@ -287,8 +288,7 @@ pub fn acknowledge_data_max_increment_test() {
 // the connection itself and is not a valid stream. It must be rejected.
 pub fn acknowledge_data_rejects_stream_id_zero_test() {
   let conn = helper.connected_connection(Client)
-  let assert Error(ConnectionError(ProtocolError)) =
-    acknowledge_data(conn, 0, 1000)
+  let assert Error(UnknownStream) = acknowledge_data(conn, 0, 1000)
 }
 
 // --- Stream existence validation ---
@@ -297,8 +297,7 @@ pub fn acknowledge_data_rejects_stream_id_zero_test() {
 // stream_id that was never opened must be rejected.
 pub fn acknowledge_data_rejects_nonexistent_stream_test() {
   let server = helper.connected_connection(Server)
-  let assert Error(ConnectionError(ProtocolError)) =
-    acknowledge_data(server, 99, 1000)
+  let assert Error(UnknownStream) = acknowledge_data(server, 99, 1000)
 }
 
 // --- Overflow protection ---
@@ -310,7 +309,7 @@ pub fn acknowledge_data_rejects_nonexistent_stream_test() {
 pub fn acknowledge_data_stream_overflow_is_flow_control_error_test() {
   let #(server, _client) = helper.server_with_open_stream()
   // Default stream recv window is 65_535. An increment of 2^31-1 would overflow.
-  let assert Error(ConnectionError(FlowControlError)) =
+  let assert Error(InvalidWindowIncrement) =
     acknowledge_data(server, 1, 2_147_483_647)
 }
 
@@ -349,8 +348,7 @@ pub fn acknowledge_data_connection_overflow_is_flow_control_error_test() {
 
   // Now try to acknowledge on stream 3 — stream 3 has room but connection
   // would overflow past 2^31-1
-  let assert Error(ConnectionError(FlowControlError)) =
-    acknowledge_data(server, 3, 1)
+  let assert Error(InvalidWindowIncrement) = acknowledge_data(server, 3, 1)
 }
 
 // --- Closed stream ---
@@ -362,8 +360,7 @@ pub fn acknowledge_data_on_closed_stream_is_error_test() {
   let #(server, _client) = helper.server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
     h2_core.send_rst_stream(server, 1, h2_core.NoError)
-  let assert Error(ConnectionError(ProtocolError)) =
-    acknowledge_data(server, 1, 1024)
+  let assert Error(InvalidStreamState) = acknowledge_data(server, 1, 1024)
 }
 
 // --- Stream state: half-closed (remote) ---
@@ -411,8 +408,7 @@ pub fn acknowledge_data_on_half_closed_local_stream_test() {
 // forbidden — the peer would reject it.
 pub fn acknowledge_data_zero_increment_is_error_test() {
   let #(server, _client) = helper.server_with_open_stream()
-  let assert Error(ConnectionError(ProtocolError)) =
-    acknowledge_data(server, 1, 0)
+  let assert Error(InvalidWindowIncrement) = acknowledge_data(server, 1, 0)
 }
 
 // RFC 9113 Section 6.9 - "The legal range for the increment to the
@@ -420,8 +416,7 @@ pub fn acknowledge_data_zero_increment_is_error_test() {
 // Negative increments are outside this range and must be rejected.
 pub fn acknowledge_data_negative_increment_is_error_test() {
   let #(server, _client) = helper.server_with_open_stream()
-  let assert Error(ConnectionError(ProtocolError)) =
-    acknowledge_data(server, 1, -1)
+  let assert Error(InvalidWindowIncrement) = acknowledge_data(server, 1, -1)
 }
 
 // RFC 9113 Section 6.9.2 - "A change to SETTINGS_INITIAL_WINDOW_SIZE can
@@ -453,7 +448,7 @@ pub fn acknowledge_data_oversized_increment_with_negative_window_is_error_test()
   let assert Ok(#(server, _events, _to_send)) =
     receive_data(server, settings_ack)
   // 2^31-1 + 1 = 2_147_483_648 exceeds the RFC maximum increment.
-  let assert Error(ConnectionError(ProtocolError)) =
+  let assert Error(InvalidWindowIncrement) =
     acknowledge_data(server, 1, 2_147_483_648)
 }
 
@@ -464,14 +459,14 @@ pub fn acknowledge_data_oversized_increment_with_negative_window_is_error_test()
 pub fn acknowledge_data_on_reserved_local_stream_is_error_test() {
   let #(server, _client, promised_id) =
     helper.server_with_reserved_local_stream()
-  let assert Error(ConnectionError(ProtocolError)) =
+  let assert Error(InvalidStreamState) =
     acknowledge_data(server, promised_id, 1000)
 }
 
 pub fn acknowledge_data_on_reserved_remote_stream_is_error_test() {
   let #(_server, client, promised_id) =
     helper.client_with_reserved_remote_stream()
-  let assert Error(ConnectionError(ProtocolError)) =
+  let assert Error(InvalidStreamState) =
     acknowledge_data(client, promised_id, 1000)
 }
 

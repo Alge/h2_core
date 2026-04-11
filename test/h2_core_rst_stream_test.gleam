@@ -1,8 +1,8 @@
 import gleam/option
 import h2_core.{
   Cancel, Client, ConnectionError, FlowControlError, FrameSizeError, Header,
-  InternalError, ProtocolError, Server, StreamClosed, StreamReset, WithIndexing,
-  open_stream, receive_data, send_rst_stream,
+  InternalError, ProtocolError, Server, StreamClosed, StreamReset, UnknownStream,
+  WithIndexing, open_stream, receive_data, send_rst_stream,
 }
 import h2_core/internal/stream.{Closed, HalfClosedRemote, Open}
 import h2_frame
@@ -33,8 +33,7 @@ pub fn send_rst_stream_with_different_error_codes_test() {
 // RFC 9113 Section 6.4 - RST_STREAM on stream 0 is PROTOCOL_ERROR
 pub fn send_rst_stream_on_stream_zero_is_error_test() {
   let conn = helper.connected_connection(Client)
-  let assert Error(ConnectionError(ProtocolError)) =
-    send_rst_stream(conn, 0, Cancel)
+  let assert Error(UnknownStream) = send_rst_stream(conn, 0, Cancel)
 }
 
 // RFC 9113 Section 5.1 - "Either endpoint can send a RST_STREAM frame
@@ -52,8 +51,7 @@ pub fn send_rst_stream_transitions_to_closed_test() {
 pub fn send_rst_stream_on_idle_stream_is_error_test() {
   let conn = helper.connected_connection(Client)
   // Stream 1 was never opened, so it's idle
-  let assert Error(ConnectionError(ProtocolError)) =
-    send_rst_stream(conn, 1, Cancel)
+  let assert Error(UnknownStream) = send_rst_stream(conn, 1, Cancel)
 }
 
 // RFC 9113 Section 6.4 - Receiving RST_STREAM

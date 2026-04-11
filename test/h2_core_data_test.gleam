@@ -1,10 +1,10 @@
 import gleam/option.{None, Some}
 import h2_core.{
-  type Connection, Client, ConnectionError, DataReceived, FlowControlError,
-  FrameSizeError, Header, HeadersReceived, NoError, ProtocolError, Server,
-  StreamClosed, StreamEnded, StreamError, StreamReset, WithIndexing,
-  get_connection_recv_window_size, get_connection_send_window_size, open_stream,
-  receive_data, send_headers,
+  type Connection, Client, ConnectionError, DataReceived, FlowControlBlocked,
+  FlowControlError, FrameSizeError, FrameTooLarge, Header, HeadersReceived,
+  InvalidStreamState, NoError, ProtocolError, Server, StreamClosed, StreamEnded,
+  StreamReset, UnknownStream, WithIndexing, get_connection_recv_window_size,
+  get_connection_send_window_size, open_stream, receive_data, send_headers,
 }
 import h2_core/internal/stream.{Closed, HalfClosedLocal, HalfClosedRemote}
 import h2_frame
@@ -537,7 +537,7 @@ pub fn send_data_exceeding_stream_window_is_error_test() {
     )
   // Set stream send_window_size to 5 via peer SETTINGS
   let server = set_stream_send_window(server, 5)
-  let assert Error(ConnectionError(FlowControlError)) =
+  let assert Error(FlowControlBlocked) =
     h2_core.send_data(server, 1, <<"too much data":utf8>>, False, None)
 }
 
@@ -555,14 +555,14 @@ pub fn send_data_exceeding_connection_window_is_error_test() {
   let server = consume_send_window(server, 65_530)
   let server = restore_stream_send_window(server, 65_530)
   // Now: connection send_window = 5, stream send_window = 65535
-  let assert Error(ConnectionError(FlowControlError)) =
+  let assert Error(FlowControlBlocked) =
     h2_core.send_data(server, 1, <<"too much data":utf8>>, False, None)
 }
 
 // send_data on stream 0 should error
 pub fn send_data_on_stream_zero_is_error_test() {
   let #(server, _client) = server_with_open_stream()
-  let assert Error(ConnectionError(ProtocolError)) =
+  let assert Error(UnknownStream) =
     h2_core.send_data(server, 0, <<"bad":utf8>>, False, None)
 }
 
@@ -571,7 +571,7 @@ pub fn send_data_on_stream_zero_is_error_test() {
 pub fn send_data_on_idle_stream_is_error_test() {
   let server = helper.connected_connection(Server)
   // Stream 99 was never opened — it is in idle state
-  let assert Error(StreamError(99, StreamClosed)) =
+  let assert Error(UnknownStream) =
     h2_core.send_data(server, 99, <<"bad":utf8>>, False, None)
 }
 
@@ -587,7 +587,7 @@ pub fn send_data_on_half_closed_local_is_error_test() {
       True,
     )
   let assert Ok(HalfClosedLocal) = h2_core.get_stream_state(server, 1)
-  let assert Error(StreamError(1, StreamClosed)) =
+  let assert Error(InvalidStreamState) =
     h2_core.send_data(server, 1, <<"bad":utf8>>, False, None)
 }
 
@@ -597,7 +597,7 @@ pub fn send_data_on_closed_stream_is_error_test() {
   let #(server, _client) = server_with_open_stream()
   let assert Ok(#(server, _to_send)) =
     h2_core.send_rst_stream(server, 1, NoError)
-  let assert Error(StreamError(1, StreamClosed)) =
+  let assert Error(InvalidStreamState) =
     h2_core.send_data(server, 1, <<"bad":utf8>>, False, None)
 }
 
@@ -606,7 +606,7 @@ pub fn send_data_on_closed_stream_is_error_test() {
 pub fn send_data_on_reserved_local_stream_is_error_test() {
   let #(server, _client, promised_id) =
     helper.server_with_reserved_local_stream()
-  let assert Error(ConnectionError(ProtocolError)) =
+  let assert Error(InvalidStreamState) =
     h2_core.send_data(server, promised_id, <<"bad":utf8>>, False, None)
 }
 
@@ -616,7 +616,7 @@ pub fn send_data_on_reserved_local_stream_is_error_test() {
 pub fn send_data_on_reserved_remote_stream_is_error_test() {
   let #(_server, client, promised_id) =
     helper.client_with_reserved_remote_stream()
-  let assert Error(ConnectionError(ProtocolError)) =
+  let assert Error(InvalidStreamState) =
     h2_core.send_data(client, promised_id, <<"bad":utf8>>, False, None)
 }
 
@@ -727,7 +727,7 @@ pub fn send_data_with_negative_window_is_error_test() {
   let server = consume_send_window(server, 100)
   let server = set_stream_send_window(server, 0)
   let assert Ok(-100) = h2_core.get_stream_send_window_size(server, 1)
-  let assert Error(ConnectionError(FlowControlError)) =
+  let assert Error(FlowControlBlocked) =
     h2_core.send_data(server, 1, <<"hello":utf8>>, False, None)
 }
 
@@ -817,7 +817,7 @@ pub fn send_data_exceeding_max_frame_size_is_error_test() {
     )
   // Default max frame size is 16384. Send 16385 bytes — one over the limit.
   let big_data = <<0:size(16_385)-unit(8)>>
-  let assert Error(ConnectionError(FrameSizeError)) =
+  let assert Error(FrameTooLarge) =
     h2_core.send_data(server, 1, big_data, False, None)
 }
 
@@ -841,7 +841,7 @@ pub fn send_padded_data_exceeding_max_frame_size_is_error_test() {
   // Send 16380 bytes of data with 10 bytes of padding:
   // payload = 1 (pad_length) + 16380 (data) + 10 (padding) = 16391 > 16384
   let big_data = <<0:size(16_380)-unit(8)>>
-  let assert Error(ConnectionError(FrameSizeError)) =
+  let assert Error(FrameTooLarge) =
     h2_core.send_data(server, 1, big_data, False, Some(10))
 }
 
@@ -862,7 +862,7 @@ pub fn send_padded_data_exceeding_stream_window_is_flow_control_error_test() {
   let server = set_stream_send_window(server, 10)
   // 3 bytes data fits in the window alone, but with padding:
   // payload = 1 (pad_length) + 3 (data) + 10 (padding) = 14 > 10
-  let assert Error(ConnectionError(FlowControlError)) =
+  let assert Error(FlowControlBlocked) =
     h2_core.send_data(server, 1, <<"hey":utf8>>, False, Some(10))
 }
 
@@ -884,7 +884,7 @@ pub fn send_padded_data_pad_length_field_counts_toward_flow_control_test() {
   let server = set_stream_send_window(server, 13)
   // 3 bytes data + 10 bytes padding = 13, which fits the window.
   // But the full payload is 1 (pad_length) + 3 (data) + 10 (padding) = 14 > 13.
-  let assert Error(ConnectionError(FlowControlError)) =
+  let assert Error(FlowControlBlocked) =
     h2_core.send_data(server, 1, <<"hey":utf8>>, False, Some(10))
 }
 
@@ -908,7 +908,7 @@ pub fn send_padded_data_exceeding_connection_window_is_flow_control_error_test()
   // Now: connection send_window = 10, stream send_window = 65535
   // 3 bytes data fits in the window alone, but with padding:
   // payload = 1 (pad_length) + 3 (data) + 10 (padding) = 14 > 10
-  let assert Error(ConnectionError(FlowControlError)) =
+  let assert Error(FlowControlBlocked) =
     h2_core.send_data(server, 1, <<"hey":utf8>>, False, Some(10))
 }
 
@@ -976,7 +976,7 @@ pub fn send_data_connection_window_smaller_than_stream_window_is_error_test() {
   let server = restore_stream_send_window(server, 65_530)
   // Now: connection send_window = 5, stream send_window = 65535
   // 13 bytes > 5 byte connection window
-  let assert Error(ConnectionError(FlowControlError)) =
+  let assert Error(FlowControlBlocked) =
     h2_core.send_data(server, 1, <<"too much data":utf8>>, False, None)
 }
 

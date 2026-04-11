@@ -1,7 +1,7 @@
 import gleam/bit_array
 import h2_core.{
-  type Connection, ConnectionError, Header, ProtocolError, Server, StreamClosed,
-  StreamError, WithIndexing, open_stream, receive_data, send_headers,
+  type Connection, Header, InvalidHeaders, InvalidStreamState, Server,
+  UnknownStream, WithIndexing, open_stream, receive_data, send_headers,
 }
 import h2_core/internal/stream.{Closed, HalfClosedLocal, HalfClosedRemote, Open}
 import h2_frame
@@ -165,7 +165,7 @@ pub fn send_trailers_with_pseudo_header_is_malformed_test() {
       False,
     )
   // Sending trailers containing a pseudo-header field must be rejected
-  let assert Error(StreamError(1, ProtocolError)) =
+  let assert Error(InvalidHeaders) =
     send_headers(
       server,
       1,
@@ -183,7 +183,7 @@ pub fn send_trailers_with_pseudo_header_is_malformed_test() {
 // RST_STREAM."
 pub fn send_headers_on_half_closed_local_is_stream_closed_error_test() {
   let #(server, _client) = helper.server_with_half_closed_local_stream()
-  let assert Error(StreamError(1, StreamClosed)) =
+  let assert Error(InvalidStreamState) =
     send_headers(
       server,
       1,
@@ -196,7 +196,7 @@ pub fn send_headers_on_half_closed_local_is_stream_closed_error_test() {
 // on a closed stream."
 pub fn send_headers_on_closed_stream_is_error_test() {
   let #(server, _client) = helper.server_with_closed_stream()
-  let assert Error(StreamError(1, StreamClosed)) =
+  let assert Error(InvalidStreamState) =
     send_headers(
       server,
       1,
@@ -211,7 +211,7 @@ pub fn send_headers_on_closed_stream_is_error_test() {
 pub fn send_headers_on_reserved_remote_is_protocol_error_test() {
   let #(_server, client, promised_id) =
     helper.client_with_reserved_remote_stream()
-  let assert Error(ConnectionError(ProtocolError)) =
+  let assert Error(InvalidStreamState) =
     send_headers(
       client,
       promised_id,
@@ -224,7 +224,7 @@ pub fn send_headers_on_reserved_remote_is_protocol_error_test() {
 // use open_stream to initiate new streams instead.
 pub fn send_headers_on_idle_stream_is_error_test() {
   let server = helper.connected_connection(Server)
-  let assert Error(StreamError(99, StreamClosed)) =
+  let assert Error(UnknownStream) =
     send_headers(
       server,
       99,
@@ -239,7 +239,7 @@ pub fn send_headers_on_idle_stream_is_error_test() {
 // The same applies when sending.
 pub fn send_headers_on_stream_zero_is_protocol_error_test() {
   let server = helper.connected_connection(Server)
-  let assert Error(ConnectionError(ProtocolError)) =
+  let assert Error(UnknownStream) =
     send_headers(
       server,
       0,

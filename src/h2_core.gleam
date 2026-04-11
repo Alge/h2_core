@@ -38,33 +38,30 @@ pub type Settings {
   )
 }
 
-fn validate_settings(settings: Settings) -> Result(Nil, H2Error) {
+fn validate_settings(settings: Settings) -> Result(Nil, SendError) {
   use <- bool.guard(
     settings.initial_window_size < 0
       || settings.initial_window_size > 2_147_483_647,
-    Error(ConnectionError(FlowControlError)),
+    Error(InvalidSettings),
   )
   use <- bool.guard(
     settings.max_frame_size < 16_384 || settings.max_frame_size > 16_777_215,
-    Error(ConnectionError(ProtocolError)),
+    Error(InvalidSettings),
   )
 
-  use <- bool.guard(
-    settings.header_table_size < 0,
-    Error(ConnectionError(ProtocolError)),
-  )
+  use <- bool.guard(settings.header_table_size < 0, Error(InvalidSettings))
 
   use <- bool.guard(
     settings.max_concurrent_streams
       |> option.map(fn(v) { v < 0 })
       |> option.unwrap(False),
-    Error(ConnectionError(ProtocolError)),
+    Error(InvalidSettings),
   )
   use <- bool.guard(
     settings.max_header_list_size
       |> option.map(fn(v) { v < 0 })
       |> option.unwrap(False),
-    Error(ConnectionError(ProtocolError)),
+    Error(InvalidSettings),
   )
   Ok(Nil)
 }
@@ -337,10 +334,14 @@ pub opaque type Connection {
 /// before any other data. The provided settings are advertised to the peer in
 /// the preface SETTINGS frame but do not take effect locally until a
 /// `SettingsAcknowledged` event is received.
+///
+/// Errors:
+/// - `InvalidSettings` — a settings value is outside the allowed range
+/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn new_connection(
   role role: Role,
   settings settings: Settings,
-) -> Result(#(Connection, BitArray), H2Error) {
+) -> Result(#(Connection, BitArray), SendError) {
   let next_stream_id = case role {
     Client -> 1
     Server -> 2
@@ -807,6 +808,33 @@ fn map_frame_error(error: h2_frame.FrameError) -> H2Error {
   }
 }
 
+pub type SendError {
+  // send window exhausted — wait for WINDOW_UPDATE
+  FlowControlBlocked
+  // data exceeds max_frame_size — split the frame
+  FrameTooLarge
+  // GOAWAY received — cannot open new streams
+  ConnectionDraining
+  // stream is in wrong state for this operation
+  InvalidStreamState
+  // operation not valid for this connection's role
+  InvalidRole
+  // peer disabled push via SETTINGS
+  PushDisabled
+  // pseudoheader validation failed
+  InvalidHeaders
+  // stream does not exist (may have been closed by peer)
+  UnknownStream
+  // settings values out of allowed range
+  InvalidSettings
+  // ping payload must be exactly 8 bytes
+  InvalidPingPayload
+  // window increment must be > 0 and ≤ 2^31-1
+  InvalidWindowIncrement
+  // frame encoding failed unexpectedly; if you encounter this, please open an issue
+  FrameEncodingError
+}
+
 fn chunk_bytes(
   bytes: BitArray,
   first_chunk_size: Int,
@@ -826,7 +854,7 @@ fn encode_header_continuations(
   chunks: List(BitArray),
   stream_id: Int,
   processed: BitArray,
-) -> Result(BitArray, H2Error) {
+) -> Result(BitArray, SendError) {
   case chunks {
     [] -> Ok(processed)
     [chunk] -> {
@@ -840,7 +868,7 @@ fn encode_header_continuations(
         Ok(encoded_frame) -> {
           Ok(<<processed:bits, encoded_frame:bits>>)
         }
-        Error(error) -> Error(map_frame_error(error))
+        Error(_) -> Error(FrameEncodingError)
       }
     }
     [chunk, ..rest] -> {
@@ -857,7 +885,7 @@ fn encode_header_continuations(
             encoded_frame:bits,
           >>)
         }
-        Error(error) -> Error(map_frame_error(error))
+        Error(_) -> Error(FrameEncodingError)
       }
     }
   }
@@ -887,7 +915,7 @@ fn decode_headers(
 fn encode_headers(
   conn conn: Connection,
   headers headers: List(Header),
-) -> Result(#(Connection, BitArray), H2Error) {
+) -> #(Connection, BitArray) {
   // Map headers to alpacki headers for encoding
   let headers = list.map(headers, to_alpacki_header)
 
@@ -897,7 +925,7 @@ fn encode_headers(
   // Add the new table to the conn
   let conn = Connection(..conn, hpack_encoder: new_table)
 
-  Ok(#(conn, encoded_headers))
+  #(conn, encoded_headers)
 }
 
 fn handle_decoded_push_promise(
@@ -1259,16 +1287,18 @@ fn handle_headers_on_new_stream(
 /// Opens a new stream by sending a HEADERS frame. Returns the updated
 /// connection, the bytes to send to the peer, and the new stream ID.
 /// Set `end_stream` to `True` to half-close the stream immediately.
+///
+/// Errors:
+/// - `ConnectionDraining` — a GOAWAY has been received; no new streams may be opened
+/// - `InvalidHeaders` — the headers fail RFC 9113 validation
+/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn open_stream(
   conn conn: Connection,
   headers headers: List(Header),
   end_stream end_stream: Bool,
-) -> Result(#(Connection, BitArray, Int), H2Error) {
+) -> Result(#(Connection, BitArray, Int), SendError) {
   // Not allowed to open streams while in Draining state (we have received a GOAWAY)
-  use <- bool.guard(
-    conn.state == Draining,
-    Error(ConnectionError(ProtocolError)),
-  )
+  use <- bool.guard(conn.state == Draining, Error(ConnectionDraining))
 
   let stream =
     new_stream(
@@ -1287,31 +1317,34 @@ pub fn open_stream(
 /// Sends a HEADERS frame (and CONTINUATION frames if needed) on an existing
 /// stream. Use `open_stream` instead to create a new stream.
 /// Set `end_stream` to `True` to half-close the local side of the stream.
+///
+/// Errors:
+/// - `UnknownStream` — the stream does not exist
+/// - `InvalidStreamState` — stream is in ReservedRemote, HalfClosedLocal, or Closed state
+/// - `InvalidHeaders` — the headers fail RFC 9113 validation
+/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn send_headers(
   conn conn: Connection,
   stream_id stream_id: Int,
   headers headers: List(Header),
   end_stream end_stream: Bool,
-) -> Result(#(Connection, BitArray), H2Error) {
+) -> Result(#(Connection, BitArray), SendError) {
   // headers cannot be sent on the connection level, it must be on a stream
-  use <- bool.guard(stream_id == 0, Error(ConnectionError(ProtocolError)))
+  use <- bool.guard(stream_id == 0, Error(UnknownStream))
 
   // headers must be sent on a existing stream
   use stream <- result.try(
     dict.get(conn.streams, stream_id)
-    |> result.replace_error(StreamError(stream_id, StreamClosed)),
+    |> result.replace_error(UnknownStream),
   )
 
   // headers cannot be sent on a ReservedRemote stream, those are initiated by the other party!
-  use <- bool.guard(
-    stream.state == ReservedRemote,
-    Error(ConnectionError(ProtocolError)),
-  )
+  use <- bool.guard(stream.state == ReservedRemote, Error(InvalidStreamState))
 
   // Headers must not be sent on a stream we have initiated closing of or a closed stream
   use <- bool.guard(
     stream.state == HalfClosedLocal || stream.state == Closed,
-    Error(StreamError(stream_id, StreamClosed)),
+    Error(InvalidStreamState),
   )
 
   // Validate outbound headers — clients send requests (validate with
@@ -1323,10 +1356,10 @@ pub fn send_headers(
   }
   use <- bool.guard(
     validate_headers(outbound_role, headers, stream.headers_sent) == Error(Nil),
-    Error(StreamError(stream_id, ProtocolError)),
+    Error(InvalidHeaders),
   )
 
-  use #(conn, encoded_headers) <- result.try(encode_headers(conn, headers))
+  let #(conn, encoded_headers) = encode_headers(conn, headers)
 
   let new_state = case stream.state {
     HalfClosedRemote -> {
@@ -1370,7 +1403,7 @@ pub fn send_headers(
           field_block_fragment: <<>>,
           padding: option.None,
         )
-        |> result.map_error(map_frame_error),
+        |> result.replace_error(FrameEncodingError),
       )
       Ok(#(conn, frame))
     }
@@ -1385,7 +1418,7 @@ pub fn send_headers(
           field_block_fragment: header_chunk,
           padding: option.None,
         )
-        |> result.map_error(map_frame_error),
+        |> result.replace_error(FrameEncodingError),
       )
       use continuation_frames <- result.try(
         encode_header_continuations(rest, stream_id, <<>>),
@@ -1398,38 +1431,40 @@ pub fn send_headers(
 /// Sends a PUSH_PROMISE frame on an existing stream (server only).
 /// Returns the updated connection, the bytes to send, and the promised
 /// stream ID. The promised stream is created in the reserved (local) state.
+///
+/// Errors:
+/// - `ConnectionDraining` — a GOAWAY has been received; no new streams may be opened
+/// - `InvalidRole` — called on a client connection; only servers may send PUSH_PROMISE
+/// - `UnknownStream` — the stream does not exist
+/// - `InvalidStreamState` — stream is not in Open or HalfClosedRemote state
+/// - `PushDisabled` — the peer has disabled push via SETTINGS
+/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn send_push_promise(
   conn conn: Connection,
   stream_id stream_id: Int,
   headers headers: List(Header),
-) -> Result(#(Connection, BitArray, Int), H2Error) {
+) -> Result(#(Connection, BitArray, Int), SendError) {
   // Not allowed to open streams while in Draining state (we have received a GOAWAY)
-  use <- bool.guard(
-    conn.state == Draining,
-    Error(ConnectionError(ProtocolError)),
-  )
+  use <- bool.guard(conn.state == Draining, Error(ConnectionDraining))
 
   // Must only be sent by server
-  use <- bool.guard(conn.role == Client, Error(ConnectionError(ProtocolError)))
+  use <- bool.guard(conn.role == Client, Error(InvalidRole))
 
   // Must not be sent on stream 0 (the connection level)
-  use <- bool.guard(stream_id == 0, Error(ConnectionError(ProtocolError)))
+  use <- bool.guard(stream_id == 0, Error(UnknownStream))
 
   // Stream must exist
   use stream <- result.try(
     dict.get(conn.streams, stream_id)
-    |> result.replace_error(ConnectionError(ProtocolError)),
+    |> result.replace_error(UnknownStream),
   )
 
   use <- bool.guard(
     stream.state != Open && stream.state != HalfClosedRemote,
-    Error(ConnectionError(ProtocolError)),
+    Error(InvalidStreamState),
   )
 
-  use <- bool.guard(
-    !conn.remote_settings.enable_push,
-    Error(ConnectionError(ProtocolError)),
-  )
+  use <- bool.guard(!conn.remote_settings.enable_push, Error(PushDisabled))
 
   let #(conn, promised_stream_id) =
     add_stream(
@@ -1443,10 +1478,7 @@ pub fn send_push_promise(
       ),
     )
 
-  use #(conn, encoded_headers) <- result.try(encode_headers(
-    conn: conn,
-    headers: headers,
-  ))
+  let #(conn, encoded_headers) = encode_headers(conn: conn, headers: headers)
 
   case
     chunk_bytes(
@@ -1465,7 +1497,7 @@ pub fn send_push_promise(
           field_block_fragment: <<>>,
           padding: option.None,
         )
-        |> result.map_error(map_frame_error),
+        |> result.replace_error(FrameEncodingError),
       )
       Ok(#(conn, push_promise_frame, promised_stream_id))
     }
@@ -1479,7 +1511,7 @@ pub fn send_push_promise(
           field_block_fragment: header_chunk,
           padding: option.None,
         )
-        |> result.map_error(map_frame_error),
+        |> result.replace_error(FrameEncodingError),
       )
       use continuation_frames <- result.try(
         encode_header_continuations(rest, stream_id, <<>>),
@@ -1497,37 +1529,40 @@ pub fn send_push_promise(
 /// stream and connection flow control windows — use `get_send_window_size`
 /// to check available capacity before calling.
 /// Set `end_stream` to `True` to half-close the local side of the stream.
+///
+/// Errors:
+/// - `UnknownStream` — the stream does not exist
+/// - `InvalidStreamState` — stream is in HalfClosedLocal, Closed, ReservedLocal, or ReservedRemote state
+/// - `FrameTooLarge` — payload exceeds the peer's max_frame_size; split the data and retry
+/// - `FlowControlBlocked` — payload exceeds the available send window; wait for a WINDOW_UPDATE
+/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn send_data(
   conn conn: Connection,
   stream_id stream_id: Int,
   data data: BitArray,
   end_stream end_stream: Bool,
   padding padding: option.Option(Int),
-) -> Result(#(Connection, BitArray), H2Error) {
-  use <- bool.guard(stream_id == 0, Error(ConnectionError(ProtocolError)))
+) -> Result(#(Connection, BitArray), SendError) {
+  use <- bool.guard(stream_id == 0, Error(UnknownStream))
 
   use stream <- result.try(case dict.get(conn.streams, stream_id) {
     Ok(stream) -> {
       use <- bool.guard(
         stream.state == HalfClosedLocal || stream.state == Closed,
-        Error(StreamError(stream_id, StreamClosed)),
+        Error(InvalidStreamState),
       )
       use <- bool.guard(
         stream.state == ReservedLocal || stream.state == ReservedRemote,
-        Error(ConnectionError(ProtocolError)),
+        Error(InvalidStreamState),
       )
       Ok(stream)
     }
-    Error(Nil) ->
-      Error(StreamError(stream_id: stream_id, error_code: StreamClosed))
+    Error(Nil) -> Error(UnknownStream)
   })
 
   use max_allowed_window_size <- result.try(
     get_send_window_size(conn: conn, stream_id: stream_id)
-    |> result.replace_error(StreamError(
-      stream_id: stream_id,
-      error_code: StreamClosed,
-    )),
+    |> result.replace_error(InvalidStreamState),
   )
 
   let padding_length = case padding {
@@ -1541,12 +1576,12 @@ pub fn send_data(
 
   use <- bool.guard(
     payload_length > conn.remote_settings.max_frame_size,
-    Error(ConnectionError(FrameSizeError)),
+    Error(FrameTooLarge),
   )
 
   use <- bool.guard(
     payload_length > max_allowed_window_size,
-    Error(ConnectionError(FlowControlError)),
+    Error(FlowControlBlocked),
   )
 
   use encoded_frame <- result.try(
@@ -1556,7 +1591,7 @@ pub fn send_data(
       data: data,
       padding: padding,
     )
-    |> result.map_error(map_frame_error),
+    |> result.replace_error(FrameEncodingError),
   )
 
   let new_stream_state = case end_stream {
@@ -1681,10 +1716,13 @@ pub fn get_recv_buffer(conn conn: Connection) -> BitArray {
 
 /// Sends a SETTINGS frame with the given parameters to the peer.
 /// The settings take effect once the peer acknowledges them.
+///
+/// Errors:
+/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn send_settings(
   conn conn: Connection,
   settings settings: List(Setting),
-) -> Result(#(Connection, BitArray), H2Error) {
+) -> Result(#(Connection, BitArray), SendError) {
   let conn =
     Connection(
       ..conn,
@@ -1717,21 +1755,27 @@ pub fn send_settings(
     Ok(encoded) -> {
       Ok(#(conn, encoded))
     }
-    Error(error) -> Error(map_frame_error(error))
+    Error(_) -> Error(FrameEncodingError)
   }
 }
 
 /// Sends a PING frame with the given 8-byte opaque data.
 /// The peer will respond with a PING ACK containing the same data.
+///
+/// Errors:
+/// - `InvalidPingPayload` — data must be exactly 8 bytes
+/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn send_ping(
   conn conn: Connection,
   data data: BitArray,
-) -> Result(#(Connection, BitArray), H2Error) {
+) -> Result(#(Connection, BitArray), SendError) {
+  use <- bool.guard(bit_array.byte_size(data) != 8, Error(InvalidPingPayload))
+
   case h2_frame.encode_ping(ack: False, data: data) {
     Ok(encoded) -> {
       Ok(#(conn, encoded))
     }
-    Error(error) -> Error(map_frame_error(error))
+    Error(_) -> Error(FrameEncodingError)
   }
 }
 
@@ -1742,39 +1786,45 @@ pub fn send_goaway(
   conn conn: Connection,
   error_code error_code: ErrorCode,
   debug_data debug_data: BitArray,
-) -> Result(#(Connection, BitArray), H2Error) {
+) -> #(Connection, BitArray) {
   let encoded_frame =
     h2_frame.encode_goaway(
       last_stream_id: conn.last_remote_stream_id,
       error_code: to_frame_error_code(error_code),
       debug_data: debug_data,
     )
-  Ok(#(Connection(..conn, state: Draining), encoded_frame))
+  #(Connection(..conn, state: Draining), encoded_frame)
 }
 
 /// Sends WINDOW_UPDATE frames to replenish the flow control windows for
 /// both the given stream and the connection by `window_size_increment` bytes.
 /// Call this after consuming received DATA to allow the peer to send more.
+///
+/// Errors:
+/// - `UnknownStream` — the stream does not exist
+/// - `InvalidStreamState` — stream is in Closed, ReservedRemote, or ReservedLocal state
+/// - `InvalidWindowIncrement` — increment must be > 0, and must not cause the receive window to exceed 2^31-1
+/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn acknowledge_data(
   conn conn: Connection,
   stream_id stream_id: Int,
   window_size_increment window_size_increment: Int,
-) -> Result(#(Connection, BitArray), H2Error) {
+) -> Result(#(Connection, BitArray), SendError) {
   use stream <- result.try(
     dict.get(conn.streams, stream_id)
-    |> result.replace_error(ConnectionError(ProtocolError)),
+    |> result.replace_error(UnknownStream),
   )
 
   use <- bool.guard(
     window_size_increment <= 0 || window_size_increment > 2_147_483_647,
-    Error(ConnectionError(ProtocolError)),
+    Error(InvalidWindowIncrement),
   )
 
   use <- bool.guard(
     stream.state == Closed
       || stream.state == ReservedRemote
       || stream.state == ReservedLocal,
-    Error(ConnectionError(ProtocolError)),
+    Error(InvalidStreamState),
   )
 
   let stream =
@@ -1785,7 +1835,7 @@ pub fn acknowledge_data(
 
   use <- bool.guard(
     stream.recv_window_size > 2_147_483_647,
-    Error(ConnectionError(FlowControlError)),
+    Error(InvalidWindowIncrement),
   )
 
   let conn =
@@ -1797,7 +1847,7 @@ pub fn acknowledge_data(
 
   use <- bool.guard(
     conn.recv_window_size > 2_147_483_647,
-    Error(ConnectionError(FlowControlError)),
+    Error(InvalidWindowIncrement),
   )
 
   // Generate both the connection level and stream level stream update
@@ -1806,7 +1856,7 @@ pub fn acknowledge_data(
       stream_id: 0,
       window_size_increment: window_size_increment,
     )
-    |> result.map_error(map_frame_error),
+    |> result.replace_error(FrameEncodingError),
   )
 
   use stream_update_frame <- result.try(
@@ -1814,7 +1864,7 @@ pub fn acknowledge_data(
       stream_id: stream_id,
       window_size_increment: window_size_increment,
     )
-    |> result.map_error(map_frame_error),
+    |> result.replace_error(FrameEncodingError),
   )
 
   Ok(#(conn, <<connection_update_frame:bits, stream_update_frame:bits>>))
@@ -1822,24 +1872,26 @@ pub fn acknowledge_data(
 
 /// Sends a RST_STREAM frame to immediately terminate the given stream.
 /// The stream transitions to the closed state.
+///
+/// Errors:
+/// - `UnknownStream` — the stream does not exist
+/// - `InvalidStreamState` — stream is in Idle or Closed state
+/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn send_rst_stream(
   conn conn: Connection,
   stream_id stream_id: Int,
   error_code error_code: ErrorCode,
-) -> Result(#(Connection, BitArray), H2Error) {
+) -> Result(#(Connection, BitArray), SendError) {
   // Must be sent on a existing stream
   use stream <- result.try(
     dict.get(conn.streams, stream_id)
-    |> result.replace_error(ConnectionError(ProtocolError)),
+    |> result.replace_error(UnknownStream),
   )
 
   // Must not be sent on a idle stream
-  use <- bool.guard(stream.state == Idle, Error(ConnectionError(ProtocolError)))
+  use <- bool.guard(stream.state == Idle, Error(InvalidStreamState))
 
-  use <- bool.guard(
-    stream.state == Closed,
-    Error(ConnectionError(ProtocolError)),
-  )
+  use <- bool.guard(stream.state == Closed, Error(InvalidStreamState))
 
   // Close the stream
   let stream = Stream(..stream, state: Closed)
@@ -1854,7 +1906,7 @@ pub fn send_rst_stream(
     )
   {
     Ok(encoded_frame) -> Ok(#(conn, encoded_frame))
-    Error(error) -> Error(map_frame_error(error))
+    Error(_) -> Error(FrameEncodingError)
   }
 }
 

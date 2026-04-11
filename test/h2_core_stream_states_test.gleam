@@ -1,8 +1,7 @@
 import gleam/option.{None}
 import h2_core.{
-  type Connection, Cancel, ConnectionError, Header, NoError, ProtocolError,
-  StreamClosed, StreamError, StreamReset, WithIndexing, receive_data,
-  send_headers, send_rst_stream,
+  type Connection, Cancel, Header, InvalidStreamState, NoError, ProtocolError,
+  StreamReset, WithIndexing, receive_data, send_headers, send_rst_stream,
 }
 import h2_core/internal/stream.{
   Closed, HalfClosedLocal, HalfClosedRemote, ReservedLocal, ReservedRemote,
@@ -60,7 +59,7 @@ pub fn send_data_on_reserved_local_stream_is_error_test() {
   let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, promised_id)
 
   // Attempt to send DATA on reserved (local) stream 2 — should fail
-  let assert Error(ConnectionError(ProtocolError)) =
+  let assert Error(InvalidStreamState) =
     h2_core.send_data(server, promised_id, <<"illegal":utf8>>, False, None)
 }
 
@@ -83,7 +82,7 @@ pub fn send_data_on_reserved_remote_stream_is_error_test() {
   let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, promised_id)
 
   // Attempt to send DATA on reserved (remote) stream 2 — should fail
-  let assert Error(ConnectionError(ProtocolError)) =
+  let assert Error(InvalidStreamState) =
     h2_core.send_data(client, promised_id, <<"illegal":utf8>>, False, None)
 }
 
@@ -313,7 +312,7 @@ pub fn send_data_on_closed_stream_is_error_test() {
   let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 
   // Attempt to send DATA on closed stream 1 — should fail
-  let assert Error(StreamError(1, StreamClosed)) =
+  let assert Error(InvalidStreamState) =
     h2_core.send_data(server, 1, <<"illegal":utf8>>, False, None)
 }
 
@@ -325,8 +324,7 @@ pub fn send_rst_stream_on_closed_stream_is_error_test() {
   let #(server, _client) = server_with_closed_stream()
   let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 
-  let assert Error(ConnectionError(ProtocolError)) =
-    send_rst_stream(server, 1, Cancel)
+  let assert Error(InvalidStreamState) = send_rst_stream(server, 1, Cancel)
 }
 
 // RFC 9113 Section 5.1 (closed):
@@ -337,7 +335,7 @@ pub fn acknowledge_data_on_closed_stream_is_error_test() {
   let #(server, _client) = server_with_closed_stream()
   let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 
-  let assert Error(ConnectionError(ProtocolError)) =
+  let assert Error(InvalidStreamState) =
     h2_core.acknowledge_data(server, 1, 1024)
 }
 

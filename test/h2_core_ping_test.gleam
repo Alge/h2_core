@@ -1,6 +1,6 @@
 import h2_core.{
-  Client, ConnectionError, FrameSizeError, PingAcknowledged, ProtocolError,
-  receive_data, send_ping,
+  Client, ConnectionError, FrameSizeError, InvalidPingPayload, PingAcknowledged,
+  ProtocolError, receive_data, send_ping,
 }
 import h2_frame
 import helper
@@ -76,6 +76,27 @@ pub fn send_ping_returns_encoded_frame_test() {
   let assert Ok(#(_conn, to_send)) = send_ping(conn, ping_data)
   let assert Ok(expected) = h2_frame.encode_ping(ack: False, data: ping_data)
   assert to_send == expected
+}
+
+// RFC 9113 Section 6.7 - "PING frames are not associated with any individual
+// stream. If a PING frame is received with a stream identifier field value
+// other than 0x00, the recipient MUST respond with a connection error."
+// The opaque data field is always 8 octets in length.
+// send_ping must reject payloads that are not exactly 8 bytes.
+pub fn send_ping_with_wrong_payload_size_is_error_test() {
+  let conn = helper.connected_connection(Client)
+  let assert Error(InvalidPingPayload) = send_ping(conn, <<1, 2, 3, 4>>)
+}
+
+pub fn send_ping_with_empty_payload_is_error_test() {
+  let conn = helper.connected_connection(Client)
+  let assert Error(InvalidPingPayload) = send_ping(conn, <<>>)
+}
+
+pub fn send_ping_with_too_long_payload_is_error_test() {
+  let conn = helper.connected_connection(Client)
+  let assert Error(InvalidPingPayload) =
+    send_ping(conn, <<1, 2, 3, 4, 5, 6, 7, 8, 9>>)
 }
 
 // PING round-trip: send ping, receive ack, verify event

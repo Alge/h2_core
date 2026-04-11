@@ -1,9 +1,9 @@
 import gleam/list
 import gleam/option
 import h2_core.{
-  Client, ConnectionError, FrameSizeError, ProtocolError, RemoteSettingsChanged,
-  Server, SettingsAcknowledged, default_settings, get_connection_state,
-  get_remote_settings, new_connection, receive_data,
+  Client, ConnectionError, FrameSizeError, InvalidSettings, ProtocolError,
+  RemoteSettingsChanged, Server, SettingsAcknowledged, default_settings,
+  get_connection_state, get_remote_settings, new_connection, receive_data,
 }
 import h2_core/internal.{AwaitingPreface, AwaitingSettings, Connected}
 import h2_frame
@@ -96,8 +96,7 @@ pub fn new_connection_custom_settings_test() {
 // must return an error.
 pub fn new_connection_invalid_settings_returns_error_test() {
   let settings = h2_core.Settings(..default_settings(), max_frame_size: 1000)
-  let assert Error(ConnectionError(ProtocolError)) =
-    new_connection(Client, settings)
+  let assert Error(InvalidSettings) = new_connection(Client, settings)
 }
 
 // Round-trip: a server can receive_data the bytes from new_connection(Client).
