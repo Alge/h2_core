@@ -196,7 +196,7 @@ pub fn open_stream_continuation_hpack_state_persists_test() {
   let assert Ok(#(_conn, second_send, _stream_id)) =
     open_stream(conn, headers, False)
 
-  // Second send must be no larger in bytes — the encoder state accumulated
+  // Second send must be no larger in bytes - the encoder state accumulated
   // during the first send (including CONTINUATION frames) must be preserved.
   // With 250 large unique headers the dynamic table offers no reuse, so byte
   // sizes are equal; this assertion confirms the encoder did not reset.
@@ -430,7 +430,7 @@ pub fn receive_continuation_preserves_end_stream_test() {
 
   let server = helper.connected_connection(Server)
   let assert Ok(#(server, events, _to_send)) = receive_data(server, to_send)
-  // RFC 9113 Section 5.1: END_STREAM is processed as a separate event —
+  // RFC 9113 Section 5.1: END_STREAM is processed as a separate event -
   // StreamEnded must follow HeadersReceived even when split across CONTINUATION.
   let assert [
     HeadersReceived(stream_id: 1, headers: _, end_stream: True),
@@ -586,7 +586,7 @@ pub fn receive_continuation_on_closed_stream_is_discarded_test() {
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, rst)
   let assert Ok(Closed) = get_stream_state(server, 1)
 
-  // Silently discarded — no events, no response
+  // Silently discarded - no events, no response
   let assert Ok(#(_server, events, to_send)) = receive_data(server, patched)
   assert events == []
   assert to_send == <<>>
@@ -649,11 +649,11 @@ pub fn receive_continuation_rejected_preserves_hpack_state_test() {
   let patched2 = helper.patch_all_frames_stream_id(encoded2, 1)
 
   let server = helper.connected_connection(Server)
-  // Receive block 1 — stream 1 becomes HalfClosedRemote
+  // Receive block 1 - stream 1 becomes HalfClosedRemote
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
   let assert Ok(HalfClosedRemote) = get_stream_state(server, 1)
 
-  // Receive patched block 2 — rejected, but HPACK must still be decoded
+  // Receive patched block 2 - rejected, but HPACK must still be decoded
   let assert Ok(#(server, events, _to_send)) = receive_data(server, patched2)
   let assert [StreamReset(stream_id: 1, error_code: StreamClosed)] = events
 

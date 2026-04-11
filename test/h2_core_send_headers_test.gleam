@@ -156,7 +156,7 @@ pub fn send_headers_without_end_stream_does_not_change_state_test() {
 // MUST treat the request or response as malformed (Section 8.1.1)."
 pub fn send_trailers_with_pseudo_header_is_malformed_test() {
   let #(server, _client) = server_with_open_stream()
-  // Send initial response — marks headers_sent: True on the stream
+  // Send initial response - marks headers_sent: True on the stream
   let assert Ok(#(server, _)) =
     send_headers(
       server,
@@ -303,7 +303,7 @@ pub fn send_headers_end_stream_flag_not_set_when_false_test() {
 // on the same connection; the HPACK encoder must be updated after sending.
 pub fn send_headers_updates_hpack_encoder_test() {
   let #(server, client) = server_with_open_stream()
-  // Open a second stream on the same client — will use stream 3
+  // Open a second stream on the same client - will use stream 3
   let assert Ok(#(_client, request2, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, request2)
@@ -312,7 +312,7 @@ pub fn send_headers_updates_hpack_encoder_test() {
     Header("content-type", <<"text/plain":utf8>>, WithIndexing),
   ]
   let assert Ok(#(server, first)) = send_headers(server, 1, headers, False)
-  // Same headers on stream 3 — HPACK should produce smaller output
+  // Same headers on stream 3 - HPACK should produce smaller output
   let assert Ok(#(_server, second)) = send_headers(server, 3, headers, False)
   // Second encoding should be smaller due to HPACK dynamic table
   let assert Ok(#(first_frame, _)) = h2_frame.extract_frame(first, 16_384)

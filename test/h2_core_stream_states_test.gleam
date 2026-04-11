@@ -46,7 +46,7 @@ fn server_with_closed_stream() -> #(Connection, Connection) {
 }
 
 // =============================================================================
-// Reserved (local) state — RFC 9113 Section 5.1
+// Reserved (local) state - RFC 9113 Section 5.1
 // =============================================================================
 
 // RFC 9113 Section 5.1 (reserved local):
@@ -58,13 +58,13 @@ pub fn send_data_on_reserved_local_stream_is_error_test() {
   let #(server, promised_id) = server_with_reserved_local_stream()
   let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, promised_id)
 
-  // Attempt to send DATA on reserved (local) stream 2 — should fail
+  // Attempt to send DATA on reserved (local) stream 2 - should fail
   let assert Error(InvalidStreamState) =
     h2_core.send_data(server, promised_id, <<"illegal":utf8>>, False, None)
 }
 
 // =============================================================================
-// Reserved (remote) state — RFC 9113 Section 5.1
+// Reserved (remote) state - RFC 9113 Section 5.1
 // =============================================================================
 
 // RFC 9113 Section 5.1 (reserved remote):
@@ -81,7 +81,7 @@ pub fn send_data_on_reserved_remote_stream_is_error_test() {
   let #(client, promised_id) = client_with_reserved_remote_stream()
   let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, promised_id)
 
-  // Attempt to send DATA on reserved (remote) stream 2 — should fail
+  // Attempt to send DATA on reserved (remote) stream 2 - should fail
   let assert Error(InvalidStreamState) =
     h2_core.send_data(client, promised_id, <<"illegal":utf8>>, False, None)
 }
@@ -106,7 +106,7 @@ pub fn receive_window_update_on_reserved_remote_is_protocol_error_test() {
 }
 
 // =============================================================================
-// Reserved (local) state — receiving restrictions — RFC 9113 Section 5.1
+// Reserved (local) state - receiving restrictions - RFC 9113 Section 5.1
 // =============================================================================
 
 // RFC 9113 Section 5.1 (reserved local):
@@ -131,7 +131,7 @@ pub fn receive_headers_on_reserved_local_is_protocol_error_test() {
 }
 
 // =============================================================================
-// Reserved (remote) state — transitions — RFC 9113 Section 5.1
+// Reserved (remote) state - transitions - RFC 9113 Section 5.1
 // =============================================================================
 
 // RFC 9113 Section 5.1 (reserved remote):
@@ -201,7 +201,7 @@ pub fn receive_rst_stream_on_reserved_remote_transitions_to_closed_test() {
 }
 
 // =============================================================================
-// Reserved (local) state — transitions — RFC 9113 Section 5.1
+// Reserved (local) state - transitions - RFC 9113 Section 5.1
 // =============================================================================
 
 // RFC 9113 Section 5.1 (reserved local):
@@ -225,7 +225,7 @@ pub fn receive_rst_stream_on_reserved_local_transitions_to_closed_test() {
 }
 
 // =============================================================================
-// Half-closed (local) state — RFC 9113 Section 5.1
+// Half-closed (local) state - RFC 9113 Section 5.1
 // =============================================================================
 
 // RFC 9113 Section 5.1 (half-closed local):
@@ -256,7 +256,7 @@ pub fn receive_rst_stream_on_half_closed_local_transitions_to_closed_test() {
 }
 
 // =============================================================================
-// Half-closed (remote) state — RFC 9113 Section 5.1
+// Half-closed (remote) state - RFC 9113 Section 5.1
 // =============================================================================
 
 // RFC 9113 Section 5.1 (half-closed remote):
@@ -270,7 +270,7 @@ pub fn receive_window_update_on_half_closed_remote_is_accepted_test() {
   let #(server, _client) = server_with_half_closed_remote_stream()
   let assert Ok(HalfClosedRemote) = h2_core.get_stream_state(server, 1)
 
-  // Receive WINDOW_UPDATE on half-closed (remote) stream 1 — should succeed
+  // Receive WINDOW_UPDATE on half-closed (remote) stream 1 - should succeed
   let assert Ok(wu) =
     h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1024)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, wu)
@@ -289,7 +289,7 @@ pub fn receive_rst_stream_on_half_closed_remote_is_accepted_test() {
   let #(server, _client) = server_with_half_closed_remote_stream()
   let assert Ok(HalfClosedRemote) = h2_core.get_stream_state(server, 1)
 
-  // Receive RST_STREAM on half-closed (remote) stream 1 — should succeed
+  // Receive RST_STREAM on half-closed (remote) stream 1 - should succeed
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
   let assert Ok(#(server, events, _to_send)) = receive_data(server, rst)
@@ -300,7 +300,7 @@ pub fn receive_rst_stream_on_half_closed_remote_is_accepted_test() {
 }
 
 // =============================================================================
-// Closed state — sending restrictions — RFC 9113 Section 5.1
+// Closed state - sending restrictions - RFC 9113 Section 5.1
 // =============================================================================
 
 // RFC 9113 Section 5.1 (closed):
@@ -311,7 +311,7 @@ pub fn send_data_on_closed_stream_is_error_test() {
   let #(server, _client) = server_with_closed_stream()
   let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 
-  // Attempt to send DATA on closed stream 1 — should fail
+  // Attempt to send DATA on closed stream 1 - should fail
   let assert Error(InvalidStreamState) =
     h2_core.send_data(server, 1, <<"illegal":utf8>>, False, None)
 }
@@ -340,7 +340,7 @@ pub fn acknowledge_data_on_closed_stream_is_error_test() {
 }
 
 // =============================================================================
-// Closed state — receiving grace period — RFC 9113 Section 5.1
+// Closed state - receiving grace period - RFC 9113 Section 5.1
 // =============================================================================
 
 // RFC 9113 Section 5.1 (closed):
@@ -358,7 +358,7 @@ pub fn receive_window_update_on_closed_stream_is_silently_discarded_test() {
   let #(server, _client) = server_with_closed_stream()
   let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 
-  // Receive WINDOW_UPDATE on closed stream 1 — should be silently discarded
+  // Receive WINDOW_UPDATE on closed stream 1 - should be silently discarded
   let assert Ok(wu) =
     h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1024)
   let assert Ok(#(_server, events, to_send)) = receive_data(server, wu)
@@ -379,7 +379,7 @@ pub fn receive_rst_stream_on_closed_stream_is_silently_discarded_test() {
   let #(server, _client) = server_with_closed_stream()
   let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 
-  // Receive RST_STREAM on closed stream 1 — should be silently discarded
+  // Receive RST_STREAM on closed stream 1 - should be silently discarded
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.Cancel)
   let assert Ok(#(_server, events, to_send)) = receive_data(server, rst)

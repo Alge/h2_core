@@ -552,18 +552,18 @@ pub fn receive_settings_header_table_size_reduction_affects_encoder_test() {
     h2_frame.encode_settings(ack: False, settings: [
       h2_frame.HeaderTableSize(0),
     ])
-  // Client receives the settings — this applies the new table size
+  // Client receives the settings - this applies the new table size
   // and resizes the encoder automatically
   let assert Ok(#(client, _events, _to_send)) =
     receive_data(client, settings_frame)
 
-  // Client sends headers on a new stream — the encoded block must
+  // Client sends headers on a new stream - the encoded block must
   // start with a Dynamic Table Size Update instruction. The server
   // should be able to decode it without COMPRESSION_ERROR.
   let assert Ok(#(_client, encoded, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
 
-  // Server receives the new headers — if the encoder didn't emit
+  // Server receives the new headers - if the encoder didn't emit
   // the size update, the server's decoder will be out of sync
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, encoded)
   let assert [h2_core.HeadersReceived(stream_id: 3, ..)] = events
@@ -589,7 +589,7 @@ pub fn receive_headers_without_required_size_update_is_compression_error_test() 
   let assert Ok(#(_server, _events, _to_send)) =
     receive_data(server, settings_frame)
 
-  // Server encodes headers WITHOUT calling resize_dynamic — the encoded
+  // Server encodes headers WITHOUT calling resize_dynamic - the encoded
   // block won't have a size update instruction. Client should reject
   // with COMPRESSION_ERROR.
   // To simulate this, we use a raw HPACK block that doesn't start

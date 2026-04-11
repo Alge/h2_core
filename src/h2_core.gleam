@@ -336,8 +336,8 @@ pub opaque type Connection {
 /// `SettingsAcknowledged` event is received.
 ///
 /// Errors:
-/// - `InvalidSettings` — a settings value is outside the allowed range
-/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
+/// - `InvalidSettings` - a settings value is outside the allowed range
+/// - `FrameEncodingError` - frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn new_connection(
   role role: Role,
   settings settings: Settings,
@@ -427,7 +427,7 @@ pub type Header {
     /// The field name. Must be lowercase ASCII per RFC 9113 Section 8.2.
     name: String,
     /// The field value. Represented as a `BitArray` because RFC 9113 Section
-    /// 8.2 permits any octet except NUL, CR, and LF — which may not be valid
+    /// 8.2 permits any octet except NUL, CR, and LF - which may not be valid
     /// UTF-8.
     value: BitArray,
     indexing: Indexing,
@@ -788,7 +788,7 @@ fn to_frame_error_code(code: ErrorCode) -> h2_frame.ErrorCode {
 }
 
 /// Errors returned by the `send_*` and `receive_data` functions.
-/// A `ConnectionError` affects the entire connection — the caller should
+/// A `ConnectionError` affects the entire connection - the caller should
 /// respond with `send_goaway` and close the connection.
 /// A `StreamError` affects only the given stream.
 pub type H2Error {
@@ -809,11 +809,11 @@ fn map_frame_error(error: h2_frame.FrameError) -> H2Error {
 }
 
 pub type SendError {
-  // send window exhausted — wait for WINDOW_UPDATE
+  // send window exhausted - wait for WINDOW_UPDATE
   FlowControlBlocked
-  // data exceeds max_frame_size — split the frame
+  // data exceeds max_frame_size - split the frame
   FrameTooLarge
-  // GOAWAY received — cannot open new streams
+  // GOAWAY received - cannot open new streams
   ConnectionDraining
   // stream is in wrong state for this operation
   InvalidStreamState
@@ -1289,9 +1289,9 @@ fn handle_headers_on_new_stream(
 /// Set `end_stream` to `True` to half-close the stream immediately.
 ///
 /// Errors:
-/// - `ConnectionDraining` — a GOAWAY has been received; no new streams may be opened
-/// - `InvalidHeaders` — the headers fail RFC 9113 validation
-/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
+/// - `ConnectionDraining` - a GOAWAY has been received; no new streams may be opened
+/// - `InvalidHeaders` - the headers fail RFC 9113 validation
+/// - `FrameEncodingError` - frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn open_stream(
   conn conn: Connection,
   headers headers: List(Header),
@@ -1319,10 +1319,10 @@ pub fn open_stream(
 /// Set `end_stream` to `True` to half-close the local side of the stream.
 ///
 /// Errors:
-/// - `UnknownStream` — the stream does not exist
-/// - `InvalidStreamState` — stream is in ReservedRemote, HalfClosedLocal, or Closed state
-/// - `InvalidHeaders` — the headers fail RFC 9113 validation
-/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
+/// - `UnknownStream` - the stream does not exist
+/// - `InvalidStreamState` - stream is in ReservedRemote, HalfClosedLocal, or Closed state
+/// - `InvalidHeaders` - the headers fail RFC 9113 validation
+/// - `FrameEncodingError` - frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn send_headers(
   conn conn: Connection,
   stream_id stream_id: Int,
@@ -1347,7 +1347,7 @@ pub fn send_headers(
     Error(InvalidStreamState),
   )
 
-  // Validate outbound headers — clients send requests (validate with
+  // Validate outbound headers - clients send requests (validate with
   // Server rules), servers send responses (validate with Client rules).
   // RFC 9113 Section 8.3.1 / 8.3.2.
   let outbound_role = case conn.role {
@@ -1433,12 +1433,12 @@ pub fn send_headers(
 /// stream ID. The promised stream is created in the reserved (local) state.
 ///
 /// Errors:
-/// - `ConnectionDraining` — a GOAWAY has been received; no new streams may be opened
-/// - `InvalidRole` — called on a client connection; only servers may send PUSH_PROMISE
-/// - `UnknownStream` — the stream does not exist
-/// - `InvalidStreamState` — stream is not in Open or HalfClosedRemote state
-/// - `PushDisabled` — the peer has disabled push via SETTINGS
-/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
+/// - `ConnectionDraining` - a GOAWAY has been received; no new streams may be opened
+/// - `InvalidRole` - called on a client connection; only servers may send PUSH_PROMISE
+/// - `UnknownStream` - the stream does not exist
+/// - `InvalidStreamState` - stream is not in Open or HalfClosedRemote state
+/// - `PushDisabled` - the peer has disabled push via SETTINGS
+/// - `FrameEncodingError` - frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn send_push_promise(
   conn conn: Connection,
   stream_id stream_id: Int,
@@ -1526,16 +1526,16 @@ pub fn send_push_promise(
 }
 
 /// Sends a DATA frame on an open stream. The data must fit within both the
-/// stream and connection flow control windows — use `get_send_window_size`
+/// stream and connection flow control windows - use `get_send_window_size`
 /// to check available capacity before calling.
 /// Set `end_stream` to `True` to half-close the local side of the stream.
 ///
 /// Errors:
-/// - `UnknownStream` — the stream does not exist
-/// - `InvalidStreamState` — stream is in HalfClosedLocal, Closed, ReservedLocal, or ReservedRemote state
-/// - `FrameTooLarge` — payload exceeds the peer's max_frame_size; split the data and retry
-/// - `FlowControlBlocked` — payload exceeds the available send window; wait for a WINDOW_UPDATE
-/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
+/// - `UnknownStream` - the stream does not exist
+/// - `InvalidStreamState` - stream is in HalfClosedLocal, Closed, ReservedLocal, or ReservedRemote state
+/// - `FrameTooLarge` - payload exceeds the peer's max_frame_size; split the data and retry
+/// - `FlowControlBlocked` - payload exceeds the available send window; wait for a WINDOW_UPDATE
+/// - `FrameEncodingError` - frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn send_data(
   conn conn: Connection,
   stream_id stream_id: Int,
@@ -1718,7 +1718,7 @@ pub fn get_recv_buffer(conn conn: Connection) -> BitArray {
 /// The settings take effect once the peer acknowledges them.
 ///
 /// Errors:
-/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
+/// - `FrameEncodingError` - frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn send_settings(
   conn conn: Connection,
   settings settings: List(Setting),
@@ -1760,8 +1760,8 @@ pub fn send_settings(
 /// The peer will respond with a PING ACK containing the same data.
 ///
 /// Errors:
-/// - `InvalidPingPayload` — data must be exactly 8 bytes
-/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
+/// - `InvalidPingPayload` - data must be exactly 8 bytes
+/// - `FrameEncodingError` - frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn send_ping(
   conn conn: Connection,
   data data: BitArray,
@@ -1797,10 +1797,10 @@ pub fn send_goaway(
 /// Call this after consuming received DATA to allow the peer to send more.
 ///
 /// Errors:
-/// - `UnknownStream` — the stream does not exist
-/// - `InvalidStreamState` — stream is in Closed, ReservedRemote, or ReservedLocal state
-/// - `InvalidWindowIncrement` — increment must be > 0, and must not cause the receive window to exceed 2^31-1
-/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
+/// - `UnknownStream` - the stream does not exist
+/// - `InvalidStreamState` - stream is in Closed, ReservedRemote, or ReservedLocal state
+/// - `InvalidWindowIncrement` - increment must be > 0, and must not cause the receive window to exceed 2^31-1
+/// - `FrameEncodingError` - frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn acknowledge_data(
   conn conn: Connection,
   stream_id stream_id: Int,
@@ -1870,9 +1870,9 @@ pub fn acknowledge_data(
 /// The stream transitions to the closed state.
 ///
 /// Errors:
-/// - `UnknownStream` — the stream does not exist
-/// - `InvalidStreamState` — stream is in Idle or Closed state
-/// - `FrameEncodingError` — frame encoding failed unexpectedly; if you encounter this, please open an issue
+/// - `UnknownStream` - the stream does not exist
+/// - `InvalidStreamState` - stream is in Idle or Closed state
+/// - `FrameEncodingError` - frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn send_rst_stream(
   conn conn: Connection,
   stream_id stream_id: Int,

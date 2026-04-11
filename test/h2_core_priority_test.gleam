@@ -79,7 +79,7 @@ pub fn receive_priority_wrong_length_is_stream_error_test() {
 // Receiving PRIORITY on an idle stream (never opened) should succeed.
 pub fn receive_priority_on_idle_stream_test() {
   let conn = helper.connected_connection(Client)
-  // Stream 3 has never been opened — it is idle
+  // Stream 3 has never been opened - it is idle
   let assert Ok(priority_frame) =
     h2_frame.encode_priority(
       stream_id: 3,

@@ -166,7 +166,7 @@ pub fn receive_goaway_does_not_affect_buffer_test() {
       debug_data: <<>>,
     )
   // Append some trailing bytes that represent a partial frame header
-  // (length=0, then 2 more header bytes — not enough for a full 9-byte header)
+  // (length=0, then 2 more header bytes - not enough for a full 9-byte header)
   let trailing = <<0, 0, 0, 0x06, 0>>
   let data = <<goaway:bits, trailing:bits>>
   let assert Ok(#(conn, events, _to_send)) = receive_data(conn, data)
@@ -188,7 +188,7 @@ pub fn receive_headers_after_goaway_maintains_hpack_state_test() {
   let server = helper.connected_connection(Server)
   let client = helper.connected_connection(Client)
 
-  // Client sends three HEADERS frames — HPACK state accumulates across all three
+  // Client sends three HEADERS frames - HPACK state accumulates across all three
   let assert Ok(#(client, encoded1, _stream_id)) =
     open_stream(
       client,
@@ -225,7 +225,7 @@ pub fn receive_headers_after_goaway_maintains_hpack_state_test() {
   let assert Ok(#(server, events2, _to_send)) = receive_data(server, encoded2)
   assert events2 == []
 
-  // Server receives stream 5 — also discarded, but if HPACK state from
+  // Server receives stream 5 - also discarded, but if HPACK state from
   // stream 3 was not decoded, this will fail with CompressionError
   let assert Ok(#(_server, events3, _to_send)) = receive_data(server, encoded3)
   assert events3 == []
@@ -250,7 +250,7 @@ pub fn receive_goaway_prevents_opening_new_streams_test() {
     )
   let assert Ok(#(client, _events, _to_send)) = receive_data(client, goaway)
 
-  // Attempt to open a new stream — must be rejected
+  // Attempt to open a new stream - must be rejected
   let assert Error(ConnectionDraining) =
     open_stream(client, helper.request_headers(), False)
 }
@@ -289,7 +289,7 @@ pub fn receive_goaway_prevents_push_promise_test() {
   // Server sends GOAWAY
   let #(server, _to_send) = send_goaway(server, NoError, <<>>)
 
-  // Server tries to push — must be rejected (no new streams)
+  // Server tries to push - must be rejected (no new streams)
   let assert Error(ConnectionDraining) =
     h2_core.send_push_promise(server, 1, helper.request_headers())
 }
@@ -308,11 +308,11 @@ pub fn send_goaway_must_not_increase_last_stream_id_test() {
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers1)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers2)
 
-  // First GOAWAY — last_stream_id will be 3 (last_remote_stream_id)
+  // First GOAWAY - last_stream_id will be 3 (last_remote_stream_id)
   let #(server, _to_send) = send_goaway(server, NoError, <<>>)
 
   // Manually lower last_remote_stream_id to simulate wanting to send
-  // a second GOAWAY with a higher value — the library should prevent this.
+  // a second GOAWAY with a higher value - the library should prevent this.
   // Since send_goaway uses last_remote_stream_id, we'd need to receive
   // a new stream to increase it. But after sending GOAWAY, the server
   // shouldn't accept new streams. Instead, let's verify the second
@@ -355,12 +355,12 @@ pub fn send_goaway_ignores_streams_above_last_stream_id_test() {
       False,
     )
 
-  // Server receives stream 3 — should be silently discarded (no event)
+  // Server receives stream 3 - should be silently discarded (no event)
   // but HPACK state must be maintained
   let assert Ok(#(server, events, _to_send)) = receive_data(server, headers3)
   assert events == []
 
-  // Client opens stream 5 — also above last_stream_id, also discarded
+  // Client opens stream 5 - also above last_stream_id, also discarded
   // If HPACK state from stream 3 was not decoded, this will fail
   // with CompressionError
   let assert Ok(#(_client, headers5, _stream_id)) =

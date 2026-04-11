@@ -190,7 +190,7 @@ pub fn handle_rst_stream_closes_stream_on_headers_half_closed_remote_test() {
   // Server sends response so we can craft a second HEADERS from the server
   // to trigger the error on the client side. But it's simpler to test from
   // the server side: send a raw HEADERS frame to the server on stream 1
-  // which is half-closed (remote) — server should RST_STREAM it.
+  // which is half-closed (remote) - server should RST_STREAM it.
   let assert Ok(headers) =
     h2_frame.encode_headers(
       stream_id: 1,
@@ -245,7 +245,7 @@ pub fn handle_rst_stream_closes_stream_on_content_length_exceeded_test() {
     receive_data(server, headers_bytes)
   let assert Ok(Open) = h2_core.get_stream_state(server, 1)
 
-  // Client sends 10 bytes — exceeds content-length of 5
+  // Client sends 10 bytes - exceeds content-length of 5
   let assert Ok(#(_client, data_bytes)) =
     h2_core.send_data(
       conn: client,
@@ -279,14 +279,14 @@ pub fn handle_rst_stream_closes_stream_on_flow_control_violation_test() {
   let assert Ok(#(client, _events, _to_send)) =
     receive_data(client, server_to_send)
 
-  // Client opens stream — server's recv window for the stream is 100 bytes
+  // Client opens stream - server's recv window for the stream is 100 bytes
   let assert Ok(#(_client, headers_bytes, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) =
     receive_data(server, headers_bytes)
   let assert Ok(Open) = h2_core.get_stream_state(server, 1)
 
-  // Craft a raw DATA frame with 200 bytes — exceeds the 100-byte window.
+  // Craft a raw DATA frame with 200 bytes - exceeds the 100-byte window.
   // We bypass the client's send_data to avoid its flow control check.
   let assert Ok(data_frame) =
     h2_frame.encode_data(
@@ -306,7 +306,7 @@ pub fn handle_rst_stream_closes_stream_on_invalid_push_promise_test() {
   let #(_server, client) = helper.server_with_open_stream()
 
   // Send a PUSH_PROMISE with headers that have a pseudo-header after
-  // a regular header — this is malformed per RFC 9113 Section 8.3.1.
+  // a regular header - this is malformed per RFC 9113 Section 8.3.1.
   let bad_hpack = <<0x40, 0x05, "x-foo":utf8, 0x03, "bar":utf8, 0x82>>
   let assert Ok(pp) =
     h2_frame.encode_push_promise(

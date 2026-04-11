@@ -170,7 +170,7 @@ pub fn receive_data_with_end_stream_test() {
     )
   let assert Ok(#(server, events, _to_send)) = receive_data(server, data_frame)
   // RFC 9113 Section 5.1: "the END_STREAM flag is processed as a separate
-  // event to the frame that bears it" — StreamEnded follows DataReceived.
+  // event to the frame that bears it" - StreamEnded follows DataReceived.
   assert events
     == [
       DataReceived(
@@ -258,7 +258,7 @@ pub fn receive_data_without_end_stream_on_half_closed_local_stays_half_closed_te
 // with a stream error (Section 5.4.2) of type STREAM_CLOSED."
 pub fn receive_data_on_half_closed_remote_is_stream_closed_error_test() {
   let #(server, _client) = server_with_half_closed_remote_stream()
-  // Stream 1 is half-closed (remote) — client already sent END_STREAM
+  // Stream 1 is half-closed (remote) - client already sent END_STREAM
   let assert Ok(data_frame) =
     h2_frame.encode_data(
       stream_id: 1,
@@ -365,7 +365,7 @@ pub fn receive_empty_data_frame_with_end_stream_test() {
     )
   let assert Ok(#(server, events, _to_send)) = receive_data(server, data_frame)
   // RFC 9113 Section 5.1: "the END_STREAM flag is processed as a separate
-  // event to the frame that bears it" — StreamEnded follows DataReceived.
+  // event to the frame that bears it" - StreamEnded follows DataReceived.
   assert events
     == [
       DataReceived(
@@ -570,7 +570,7 @@ pub fn send_data_on_stream_zero_is_error_test() {
 // Sending on a stream that was never opened (idle state) must be an error.
 pub fn send_data_on_idle_stream_is_error_test() {
   let server = helper.connected_connection(Server)
-  // Stream 99 was never opened — it is in idle state
+  // Stream 99 was never opened - it is in idle state
   let assert Error(UnknownStream) =
     h2_core.send_data(server, 99, <<"bad":utf8>>, False, None)
 }
@@ -815,7 +815,7 @@ pub fn send_data_exceeding_max_frame_size_is_error_test() {
       [Header(":status", <<"200":utf8>>, WithIndexing)],
       False,
     )
-  // Default max frame size is 16384. Send 16385 bytes — one over the limit.
+  // Default max frame size is 16384. Send 16385 bytes - one over the limit.
   let big_data = <<0:size(16_385)-unit(8)>>
   let assert Error(FrameTooLarge) =
     h2_core.send_data(server, 1, big_data, False, None)
@@ -1051,7 +1051,7 @@ pub fn receive_data_exceeding_stream_window_still_decrements_connection_window_t
       data: data,
       padding: None,
     )
-  // Stream error (not connection error) — receive_data returns Ok with RST_STREAM
+  // Stream error (not connection error) - receive_data returns Ok with RST_STREAM
   let assert Ok(#(server, _events, to_send)) = receive_data(server, data_frame)
   // Connection window MUST still be decremented despite the stream error
   assert get_connection_recv_window_size(server) == 65_535 - data_size
@@ -1085,7 +1085,7 @@ pub fn receive_data_on_closed_stream_still_counts_toward_connection_window_test(
     )
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
 
-  // Now receive DATA on the closed stream — per RFC 5.1 closed state,
+  // Now receive DATA on the closed stream - per RFC 5.1 closed state,
   // the endpoint MUST minimally process and discard. The DATA still
   // counts toward the connection flow-control window.
   let assert Ok(more_data) =
@@ -1128,7 +1128,7 @@ pub fn receive_multiple_data_frames_test() {
   let assert Ok(#(server, events, _to_send)) =
     receive_data(server, <<frame1:bits, frame2:bits>>)
   // RFC 9113 Section 5.1: "the END_STREAM flag is processed as a separate
-  // event to the frame that bears it" — StreamEnded follows the final
+  // event to the frame that bears it" - StreamEnded follows the final
   // DataReceived. The first DATA (without END_STREAM) has no StreamEnded.
   assert events
     == [
@@ -1229,7 +1229,7 @@ pub fn receive_padded_data_pad_length_field_counts_toward_flow_control_test() {
       data: <<"hey":utf8>>,
       padding: Some(10),
     )
-  // Stream error (not connection error) — receive_data returns Ok with RST_STREAM
+  // Stream error (not connection error) - receive_data returns Ok with RST_STREAM
   let assert Ok(#(_server, events, to_send)) = receive_data(server, data_frame)
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(
@@ -1252,7 +1252,7 @@ pub fn receive_padded_data_pad_length_field_counts_toward_flow_control_test() {
 // Verify that sending on half-closed (remote) succeeds.
 pub fn send_data_on_half_closed_remote_succeeds_test() {
   let #(server, _client) = server_with_half_closed_remote_stream()
-  // Stream 1 is half-closed (remote) — server can still send
+  // Stream 1 is half-closed (remote) - server can still send
   let assert Ok(#(server, _to_send)) =
     send_headers(
       server,
@@ -1285,7 +1285,7 @@ pub fn receive_data_on_closed_stream_is_handled_gracefully_test() {
     h2_core.send_rst_stream(server, 1, NoError)
   let assert Ok(Closed) = h2_core.get_stream_state(server, 1)
 
-  // Receive DATA on the now-closed stream — should not be a connection error
+  // Receive DATA on the now-closed stream - should not be a connection error
   let assert Ok(stale_data) =
     h2_frame.encode_data(
       stream_id: 1,
@@ -1341,7 +1341,7 @@ pub fn receive_data_invalid_padding_length_is_protocol_error_test() {
   let #(server, _client) = server_with_open_stream()
   // Manually craft a DATA frame where pad_length >= payload length
   // Length=1, Type=0x00, Flags=0x08 (PADDED), Stream ID=1
-  // Pad Length=1 — but remaining payload after pad_length field is 0 bytes,
+  // Pad Length=1 - but remaining payload after pad_length field is 0 bytes,
   // so padding (1) >= remaining payload (0)
   let bad_padded = <<
     1:size(24),
@@ -1366,7 +1366,7 @@ pub fn receive_data_invalid_padding_length_is_protocol_error_test() {
 // be treated as a connection error of type FRAME_SIZE_ERROR.
 pub fn receive_data_exceeding_max_frame_size_is_frame_size_error_test() {
   let #(server, _client) = server_with_open_stream()
-  // Craft a DATA frame with payload of 16385 bytes — one above the default max
+  // Craft a DATA frame with payload of 16385 bytes - one above the default max
   // Length=16385, Type=0x00, Flags=0, Stream ID=1
   let oversized_payload = <<0:size(16_385)-unit(8)>>
   let oversized_frame = <<
@@ -1408,7 +1408,7 @@ pub fn receive_data_exceeding_content_length_is_malformed_test() {
     )
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
-  // Send 10 bytes of data — exceeds content-length of 5
+  // Send 10 bytes of data - exceeds content-length of 5
   let assert Ok(data_frame) =
     h2_frame.encode_data(
       stream_id: 1,
@@ -1447,7 +1447,7 @@ pub fn receive_data_less_than_content_length_with_end_stream_is_malformed_test()
     )
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
-  // Send only 5 bytes with END_STREAM — less than content-length of 10
+  // Send only 5 bytes with END_STREAM - less than content-length of 10
   let assert Ok(data_frame) =
     h2_frame.encode_data(
       stream_id: 1,
@@ -1526,7 +1526,7 @@ pub fn receive_multiple_data_matching_content_length_succeeds_test() {
     )
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, frame1)
 
-  // Second DATA: 5 bytes with END_STREAM — total 10 matches content-length
+  // Second DATA: 5 bytes with END_STREAM - total 10 matches content-length
   let assert Ok(frame2) =
     h2_frame.encode_data(
       stream_id: 1,

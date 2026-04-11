@@ -86,7 +86,7 @@ pub fn receive_push_promise_when_push_disabled_is_protocol_error_test() {
   let assert Ok(#(_server, _events, _to_send)) =
     receive_data(server, settings_frame)
 
-  // Now server sends PUSH_PROMISE — client should reject it
+  // Now server sends PUSH_PROMISE - client should reject it
   let assert Ok(pp) =
     h2_frame.encode_push_promise(
       stream_id: 1,
@@ -109,7 +109,7 @@ pub fn receive_push_promise_when_push_disabled_is_protocol_error_test() {
 
 pub fn receive_push_promise_on_idle_stream_is_protocol_error_test() {
   let client = helper.connected_connection(Client)
-  // Stream 1 was never opened — it's idle
+  // Stream 1 was never opened - it's idle
   let assert Ok(pp) =
     h2_frame.encode_push_promise(
       stream_id: 1,
@@ -144,13 +144,13 @@ pub fn receive_push_promise_on_open_stream_is_valid_test() {
 pub fn receive_push_promise_on_half_closed_local_is_valid_test() {
   let server = helper.connected_connection(Server)
   let client = helper.connected_connection(Client)
-  // Client sends headers with END_STREAM — stream 1 is half-closed (local)
+  // Client sends headers with END_STREAM - stream 1 is half-closed (local)
   // on the client side
   let assert Ok(#(client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), True)
   let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
 
-  // Server pushes on stream 1 — valid because it's half-closed (local)
+  // Server pushes on stream 1 - valid because it's half-closed (local)
   // from the client's perspective
   let assert Ok(pp) =
     h2_frame.encode_push_promise(
@@ -176,7 +176,7 @@ pub fn receive_push_promise_on_half_closed_local_is_valid_test() {
 
 pub fn receive_push_promise_with_odd_promised_id_is_protocol_error_test() {
   let #(_server, client) = server_with_open_stream()
-  // Server promises stream 3 (odd) — only even IDs are server-initiated
+  // Server promises stream 3 (odd) - only even IDs are server-initiated
   let assert Ok(pp) =
     h2_frame.encode_push_promise(
       stream_id: 1,
@@ -207,7 +207,7 @@ pub fn receive_push_promise_with_already_used_id_is_protocol_error_test() {
   let assert Ok(#(_server, pp_bytes, _promised_id)) =
     h2_core.send_push_promise(server, 1, helper.request_headers())
   let assert Ok(#(client, _events, _to_send)) = receive_data(client, pp_bytes)
-  // Push promises stream 2 — already used (2 <= 2)
+  // Push promises stream 2 - already used (2 <= 2)
   let assert Ok(pp) =
     h2_frame.encode_push_promise(
       stream_id: 1,
@@ -231,7 +231,7 @@ pub fn receive_push_promise_with_decreasing_id_is_protocol_error_test() {
   let assert Ok(#(_server, pp2_bytes, _promised_id)) =
     h2_core.send_push_promise(server, 1, helper.request_headers())
   let assert Ok(#(client, _events, _to_send)) = receive_data(client, pp2_bytes)
-  // Push promises stream 2 — lower than 4, violates ordering
+  // Push promises stream 2 - lower than 4, violates ordering
   let assert Ok(pp) =
     h2_frame.encode_push_promise(
       stream_id: 1,
@@ -402,7 +402,7 @@ pub fn send_push_promise_on_half_closed_remote_test() {
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), True)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
-  // Stream 1 is half-closed (remote) on server — push should work
+  // Stream 1 is half-closed (remote) on server - push should work
   let assert Ok(#(server, _to_send, promised_id)) =
     h2_core.send_push_promise(server, 1, [
       Header(":method", <<"GET":utf8>>, WithIndexing),
@@ -448,7 +448,7 @@ pub fn send_push_promise_when_peer_disabled_push_is_error_test() {
     ])
   let assert Ok(#(server, _events, _to_send)) =
     receive_data(server, settings_frame)
-  // Server tries to push — should fail
+  // Server tries to push - should fail
   let assert Error(PushDisabled) =
     h2_core.send_push_promise(server, 1, [
       Header(":method", <<"GET":utf8>>, WithIndexing),
@@ -464,7 +464,7 @@ pub fn client_send_push_promise_is_error_test() {
   let assert Ok(#(client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
-  // Client tries to push — must be rejected
+  // Client tries to push - must be rejected
   let assert Error(InvalidRole) =
     h2_core.send_push_promise(client, 1, [
       Header(":method", <<"GET":utf8>>, WithIndexing),
@@ -485,11 +485,11 @@ pub fn send_push_promise_on_stream_zero_is_error_test() {
 // (remote)' state."
 //
 // A half-closed (local) stream has had END_STREAM sent by the server,
-// so it is no longer open or half-closed (remote) — sending a
+// so it is no longer open or half-closed (remote) - sending a
 // PUSH_PROMISE on it must be an error.
 pub fn send_push_promise_on_half_closed_local_is_error_test() {
   let #(server, _client) = server_with_open_stream()
-  // Server sends response headers with END_STREAM — stream becomes
+  // Server sends response headers with END_STREAM - stream becomes
   // half-closed (local) from the server's perspective
   let assert Ok(#(server, _to_send)) =
     send_headers(
@@ -519,13 +519,13 @@ pub fn send_push_promise_on_half_closed_local_is_error_test() {
 // RST_STREAM the promised stream if unwanted.
 pub fn receive_push_promise_on_closed_stream_is_handled_gracefully_test() {
   let #(_server, client) = server_with_open_stream()
-  // Server RST_STREAMs stream 1 — now closed on client
+  // Server RST_STREAMs stream 1 - now closed on client
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.NoError)
   let assert Ok(#(client, _events, _to_send)) = receive_data(client, rst)
   let assert Ok(Closed) = h2_core.get_stream_state(client, 1)
 
-  // PUSH_PROMISE arrives on closed stream — must be handled, not rejected
+  // PUSH_PROMISE arrives on closed stream - must be handled, not rejected
   let assert Ok(pp) =
     h2_frame.encode_push_promise(
       stream_id: 1,
@@ -550,10 +550,10 @@ pub fn receive_push_promise_on_closed_stream_is_handled_gracefully_test() {
 pub fn receive_push_promise_invalid_padding_length_is_protocol_error_test() {
   let #(_server, client) = server_with_open_stream()
   // Manually craft a PUSH_PROMISE with PADDED flag where pad_length
-  // equals the remaining payload — invalid.
+  // equals the remaining payload - invalid.
   // Length=5 (1 pad_length + 4 promised_stream_id), Type=0x05,
   // Flags=0x0C (PADDED | END_HEADERS), Stream ID=1
-  // Pad Length=4 — remaining after pad_length field is 4 bytes (the
+  // Pad Length=4 - remaining after pad_length field is 4 bytes (the
   // promised stream ID), so padding (4) >= remaining payload (4).
   let bad_pp = <<
     5:size(24),
@@ -598,7 +598,7 @@ pub fn receive_push_promise_nonzero_padding_bytes_accepted_by_default_test() {
 // created before the RST_STREAM frame is received and processed."
 //
 // A PUSH_PROMISE arriving on a stream where the client previously sent
-// RST_STREAM must not cause a connection error — the server may have sent
+// RST_STREAM must not cause a connection error - the server may have sent
 // the PUSH_PROMISE before processing the RST_STREAM.
 // =============================================================================
 
@@ -617,7 +617,7 @@ pub fn receive_push_promise_after_client_sent_rst_stream_is_not_connection_error
       field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
-  // Must not be a connection error — the endpoint must handle this gracefully
+  // Must not be a connection error - the endpoint must handle this gracefully
   let assert Ok(#(_client, _events, _to_send)) = receive_data(client, pp)
 }
 
@@ -627,7 +627,7 @@ pub fn receive_push_promise_after_client_sent_rst_stream_is_not_connection_error
 // error (Section 5.4.1) of type PROTOCOL_ERROR."
 //
 // Half-closed (remote) on the receiver means the receiver sent END_STREAM
-// but hasn't received it — the stream is not "open" or "half-closed (local)",
+// but hasn't received it - the stream is not "open" or "half-closed (local)",
 // so receiving PUSH_PROMISE here is a PROTOCOL_ERROR.
 // =============================================================================
 
@@ -725,7 +725,7 @@ pub fn send_push_promise_multiple_headers_test() {
     )
   assert to_send == expected
   // HPACK encoder state should be updated on the connection
-  // Verify by sending a second push — the encoder should still work
+  // Verify by sending a second push - the encoder should still work
   let assert Ok(#(_server, _to_send, id2)) =
     h2_core.send_push_promise(server, 1, [
       Header(":method", <<"GET":utf8>>, WithIndexing),
@@ -783,7 +783,7 @@ pub fn receive_multiple_push_promises_reserves_all_streams_test() {
 // A PUSH_PROMISE missing mandatory request pseudo-headers is malformed.
 pub fn receive_push_promise_missing_method_is_malformed_test() {
   let #(_server, client) = server_with_open_stream()
-  // HPACK: :scheme https, :path / — missing :method
+  // HPACK: :scheme https, :path / - missing :method
   let bad_hpack = <<0x87, 0x84>>
   let assert Ok(pp) =
     h2_frame.encode_push_promise(
@@ -900,7 +900,7 @@ pub fn send_push_promise_continuation_round_trip_test() {
   let frames = helper.parse_all_frames_with_limit(to_send, [], 65_535)
   assert list.length(frames) >= 2
 
-  // Client receives the full sequence — the client's max_frame_size
+  // Client receives the full sequence - the client's max_frame_size
   // is still 16384 so it will reject oversized frames. We need to
   // increase the client's setting too.
   // For now, verify the frame structure is correct.

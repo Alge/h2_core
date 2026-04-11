@@ -53,7 +53,7 @@ pub fn open_stream_uses_negotiated_send_window_size_test() {
   let assert Ok(#(client, _events, _to_send)) =
     receive_data(client, settings_frame)
 
-  // Client opens a new stream — its send window should reflect the
+  // Client opens a new stream - its send window should reflect the
   // peer's advertised initial window size, not the default 65535.
   let assert Ok(#(client, _headers, stream_id)) =
     open_stream(client, helper.request_headers(), False)
@@ -75,11 +75,11 @@ pub fn open_stream_uses_negotiated_recv_window_size_test() {
   let assert Ok(#(_server, _events, server_to_send)) =
     receive_data(server, settings_bytes)
 
-  // Client receives the ACK — local settings now take effect
+  // Client receives the ACK - local settings now take effect
   let assert Ok(#(client, _events, _to_send)) =
     receive_data(client, server_to_send)
 
-  // Client opens a new stream — its recv window should be 16384
+  // Client opens a new stream - its recv window should be 16384
   let assert Ok(#(client, _headers, stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(16_384) = h2_core.get_stream_recv_window_size(client, stream_id)
@@ -97,7 +97,7 @@ pub fn inbound_stream_uses_negotiated_send_window_size_test() {
   let assert Ok(#(client, settings_bytes)) =
     send_settings(client, [InitialWindowSize(32_768)])
 
-  // Server receives client's SETTINGS — remote_settings updated, sends ACK
+  // Server receives client's SETTINGS - remote_settings updated, sends ACK
   let assert Ok(#(server, _events, server_to_send)) =
     receive_data(server, settings_bytes)
 
@@ -105,7 +105,7 @@ pub fn inbound_stream_uses_negotiated_send_window_size_test() {
   let assert Ok(#(client, _events, _to_send)) =
     receive_data(client, server_to_send)
 
-  // Client opens stream 1 — server receives it
+  // Client opens stream 1 - server receives it
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
@@ -128,11 +128,11 @@ pub fn inbound_stream_uses_negotiated_recv_window_size_test() {
   let assert Ok(#(client, _events, client_to_send)) =
     receive_data(client, settings_bytes)
 
-  // Server receives the ACK — local settings now take effect
+  // Server receives the ACK - local settings now take effect
   let assert Ok(#(server, _events, _to_send)) =
     receive_data(server, client_to_send)
 
-  // Client opens stream 1 — server receives it
+  // Client opens stream 1 - server receives it
   let assert Ok(#(_client, headers, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
@@ -150,7 +150,7 @@ pub fn push_promise_stream_uses_negotiated_send_window_size_test() {
   let assert Ok(#(client, settings_bytes)) =
     send_settings(client, [InitialWindowSize(32_768)])
 
-  // Server receives client's SETTINGS — remote_settings updated, sends ACK
+  // Server receives client's SETTINGS - remote_settings updated, sends ACK
   let assert Ok(#(server, _events, server_to_send)) =
     receive_data(server, settings_bytes)
 
@@ -163,7 +163,7 @@ pub fn push_promise_stream_uses_negotiated_send_window_size_test() {
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers)
 
-  // Server sends PUSH_PROMISE — the promised stream should have
+  // Server sends PUSH_PROMISE - the promised stream should have
   // send_window_size=32768 (the peer's setting)
   let push_headers = [
     Header(":method", <<"GET":utf8>>, WithIndexing),
@@ -190,7 +190,7 @@ pub fn received_push_promise_stream_uses_negotiated_recv_window_size_test() {
   let assert Ok(#(server, _events, server_to_send)) =
     receive_data(server, settings_bytes)
 
-  // Client receives the ACK — local settings now take effect
+  // Client receives the ACK - local settings now take effect
   let assert Ok(#(client, _events, _to_send)) =
     receive_data(client, server_to_send)
 
@@ -208,7 +208,7 @@ pub fn received_push_promise_stream_uses_negotiated_recv_window_size_test() {
   let assert Ok(#(_server, push_bytes, promised_id)) =
     h2_core.send_push_promise(server, 1, push_headers)
 
-  // Client receives the PUSH_PROMISE — the promised stream's recv
+  // Client receives the PUSH_PROMISE - the promised stream's recv
   // window should reflect the client's own initial window size setting.
   let assert Ok(#(client, _events, _to_send)) = receive_data(client, push_bytes)
   let assert Ok(16_384) =
@@ -216,7 +216,7 @@ pub fn received_push_promise_stream_uses_negotiated_recv_window_size_test() {
 }
 
 // =============================================================================
-// acknowledge_data — sending WINDOW_UPDATE for both stream and connection
+// acknowledge_data - sending WINDOW_UPDATE for both stream and connection
 // =============================================================================
 
 // RFC 9113 Section 6.9 - "Separate WINDOW_UPDATE frames are sent for the
@@ -346,7 +346,7 @@ pub fn acknowledge_data_connection_overflow_is_flow_control_error_test() {
   // Connection window is now at 2_147_483_647, stream 1 at 2_147_483_647
   // Stream 3 is still at 65_535
 
-  // Now try to acknowledge on stream 3 — stream 3 has room but connection
+  // Now try to acknowledge on stream 3 - stream 3 has room but connection
   // would overflow past 2^31-1
   let assert Error(InvalidWindowIncrement) = acknowledge_data(server, 3, 1)
 }
@@ -405,7 +405,7 @@ pub fn acknowledge_data_on_half_closed_local_stream_test() {
 // RFC 9113 Section 6.9 - "A receiver MUST treat the receipt of a
 // WINDOW_UPDATE frame with an increment of 0 as a stream error of type
 // PROTOCOL_ERROR." Sending a zero-increment WINDOW_UPDATE is therefore
-// forbidden — the peer would reject it.
+// forbidden - the peer would reject it.
 pub fn acknowledge_data_zero_increment_is_error_test() {
   let #(server, _client) = helper.server_with_open_stream()
   let assert Error(InvalidWindowIncrement) = acknowledge_data(server, 1, 0)
@@ -426,7 +426,7 @@ pub fn acknowledge_data_negative_increment_is_error_test() {
 // and slip through. The increment must be validated independently.
 //
 // Example: recv_window = -1000, increment = 2^31 (= 2_147_483_648, one
-// above the RFC maximum). Sum = 2_147_482_648 — below the overflow limit,
+// above the RFC maximum). Sum = 2_147_482_648 - below the overflow limit,
 // so a result-only check would pass. An explicit range check catches it.
 pub fn acknowledge_data_oversized_increment_with_negative_window_is_error_test() {
   let #(server, _client) = helper.server_with_open_stream()
@@ -471,7 +471,7 @@ pub fn acknowledge_data_on_reserved_remote_stream_is_error_test() {
 }
 
 // =============================================================================
-// Receiving WINDOW_UPDATE — RFC 9113 Section 6.9
+// Receiving WINDOW_UPDATE - RFC 9113 Section 6.9
 // =============================================================================
 
 // Connection-level WINDOW_UPDATE increases send_window_size
@@ -735,7 +735,7 @@ pub fn receive_window_update_on_closed_stream_test() {
 
   let assert Ok(wu) =
     h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1000)
-  // Silently discarded — no events, no response
+  // Silently discarded - no events, no response
   let assert Ok(#(_server, events, to_send)) = receive_data(server, wu)
   assert events == []
   assert to_send == <<>>
@@ -751,7 +751,7 @@ pub fn receive_window_update_connection_survives_stream_overflow_test() {
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, headers1)
 
-  // Overflow stream 1's window — should get RST_STREAM but connection lives
+  // Overflow stream 1's window - should get RST_STREAM but connection lives
   let assert Ok(wu) =
     h2_frame.encode_window_update(
       stream_id: 1,
@@ -760,7 +760,7 @@ pub fn receive_window_update_connection_survives_stream_overflow_test() {
   let assert Ok(#(server, events, _to_send)) = receive_data(server, wu)
   let assert [StreamReset(stream_id: 1, error_code: FlowControlError)] = events
 
-  // Connection should still work — open stream 3
+  // Connection should still work - open stream 3
   let assert Ok(#(_client, headers3, _stream_id)) =
     open_stream(
       client,

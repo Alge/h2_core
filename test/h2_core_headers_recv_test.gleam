@@ -161,7 +161,7 @@ pub fn receive_headers_no_response_test() {
 
 // Receiving HEADERS with empty field block fragment
 // RFC 9113 Section 8.3.1 - A request with no pseudo-headers at all is
-// malformed — it's missing :method, :scheme, :path.
+// malformed - it's missing :method, :scheme, :path.
 pub fn receive_headers_empty_block_is_malformed_test() {
   // Manually craft HEADERS with empty field block to bypass outbound validation
   // Length=0, Type=0x01, Flags=0x04 (END_HEADERS), Stream ID=1
@@ -527,7 +527,7 @@ pub fn receive_headers_on_closed_stream_is_discarded_test() {
 // STREAM_CLOSED."
 
 // Receiving HEADERS on a half-closed(remote) stream is a stream error,
-// not a connection error — the connection must survive.
+// not a connection error - the connection must survive.
 pub fn receive_headers_on_half_closed_remote_is_stream_error_test() {
   let client = helper.connected_connection(Client)
   let assert Ok(#(client, encoded1, _stream_id)) =
@@ -579,7 +579,7 @@ pub fn receive_headers_on_half_closed_remote_sends_rst_stream_test() {
   assert to_send == expected_rst
 }
 
-// The connection continues processing after a stream error —
+// The connection continues processing after a stream error -
 // subsequent valid HEADERS on a new stream must succeed.
 pub fn receive_headers_after_stream_error_succeeds_test() {
   let client = helper.connected_connection(Client)
@@ -667,7 +667,7 @@ pub fn rejected_headers_must_still_update_hpack_state_test() {
   let assert Ok(#(_server, events, _to_send)) = receive_data(server, encoded3)
   let assert [HeadersReceived(stream_id: 5, headers: h, end_stream: False)] =
     events
-  // Verify the custom header survived — mandatory pseudo-headers are also present
+  // Verify the custom header survived - mandatory pseudo-headers are also present
   let assert [_, _, _, Header("x-custom", <<"value3":utf8>>, _)] = h
 }
 
@@ -700,7 +700,7 @@ pub fn receive_headers_exceeding_max_concurrent_streams_test() {
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
   let assert Ok(Open) = get_stream_state(server, 1)
 
-  // Open stream 3 — should be refused (exceeds MAX_CONCURRENT_STREAMS=1)
+  // Open stream 3 - should be refused (exceeds MAX_CONCURRENT_STREAMS=1)
   let assert Ok(#(_client, encoded3, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(_server, events, to_send)) = receive_data(server, encoded3)
@@ -772,7 +772,7 @@ pub fn receive_headers_with_decreasing_stream_id_is_protocol_error_test() {
   let patched5 = helper.patch_stream_id(encoded2, 5)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, patched5)
 
-  // Now send HEADERS on stream 3 (lower than 5) — must be rejected
+  // Now send HEADERS on stream 3 (lower than 5) - must be rejected
   let assert Ok(#(_client2, encoded3, _stream_id)) =
     open_stream(
       helper.connected_connection(Client),
@@ -848,7 +848,7 @@ pub fn receive_headers_duplicate_pseudo_header_is_malformed_test() {
 // that contains undefined or invalid pseudo-header fields as malformed."
 //
 // Receive trailing HEADERS (with END_STREAM) containing a pseudo-header
-// — must be treated as a stream error of type PROTOCOL_ERROR.
+// - must be treated as a stream error of type PROTOCOL_ERROR.
 pub fn receive_trailers_with_pseudo_header_is_malformed_test() {
   let server = helper.connected_connection(Server)
   let client = helper.connected_connection(Client)
@@ -857,7 +857,7 @@ pub fn receive_trailers_with_pseudo_header_is_malformed_test() {
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
 
-  // Trailers with pseudo-header :method GET — invalid
+  // Trailers with pseudo-header :method GET - invalid
   // END_STREAM=True marks this as trailers
   let bad_hpack = <<0x82>>
   let assert Ok(trailer_frame) =
@@ -1156,7 +1156,7 @@ pub fn receive_informational_response_with_end_stream_is_malformed_test() {
     let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
     #(server, client)
   }
-  // 1xx status with END_STREAM — malformed
+  // 1xx status with END_STREAM - malformed
   // 0x48 0x03 "100" = :status 100 (literal with indexing, name index 8)
   let bad_hpack = <<0x48, 0x03, "100":utf8>>
   let assert Ok(headers_frame) =
@@ -1185,7 +1185,7 @@ pub fn receive_informational_response_with_end_stream_is_malformed_test() {
 // malformed (Section 8.1.1)."
 pub fn receive_request_missing_method_is_malformed_test() {
   let server = helper.connected_connection(Server)
-  // HPACK: :scheme https + :path / — missing :method
+  // HPACK: :scheme https + :path / - missing :method
   let bad_hpack = <<0x87, 0x84>>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -1208,7 +1208,7 @@ pub fn receive_request_missing_method_is_malformed_test() {
 
 pub fn receive_request_missing_scheme_is_malformed_test() {
   let server = helper.connected_connection(Server)
-  // HPACK: :method GET + :path / — missing :scheme
+  // HPACK: :method GET + :path / - missing :scheme
   let bad_hpack = <<0x82, 0x84>>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -1231,7 +1231,7 @@ pub fn receive_request_missing_scheme_is_malformed_test() {
 
 pub fn receive_request_missing_path_is_malformed_test() {
   let server = helper.connected_connection(Server)
-  // HPACK: :method GET + :scheme https — missing :path
+  // HPACK: :method GET + :scheme https - missing :path
   let bad_hpack = <<0x82, 0x87>>
   let assert Ok(headers_frame) =
     h2_frame.encode_headers(
@@ -1264,7 +1264,7 @@ pub fn receive_response_missing_status_is_malformed_test() {
     let assert Ok(#(_server, _events, _to_send)) = receive_data(server, headers)
     #(server, client)
   }
-  // Response HEADERS with no :status — just a regular header
+  // Response HEADERS with no :status - just a regular header
   // 0x40 0x0C "content-type" 0x09 "text/html"
   let bad_hpack = <<0x40, 0x0C, "content-type":utf8, 0x09, "text/html":utf8>>
   let assert Ok(headers_frame) =
@@ -1358,7 +1358,7 @@ pub fn receive_informational_response_after_final_is_malformed_test() {
     )
   let assert Ok(#(client, _events, _to_send)) =
     receive_data(client, final_frame)
-  // 100 Continue after final response — malformed
+  // 100 Continue after final response - malformed
   let assert Ok(informational_frame) =
     h2_frame.encode_headers(
       stream_id: 1,
@@ -1459,7 +1459,7 @@ pub fn receive_request_with_empty_path_is_malformed_test() {
 pub fn receive_connect_request_with_path_is_malformed_test() {
   let server = helper.connected_connection(Server)
   // HPACK: :method CONNECT, :authority example.com, :path /
-  // 0x86 = :method CONNECT? No — not in static table. Use literal.
+  // 0x86 = :method CONNECT? No - not in static table. Use literal.
   // Literal with indexing, name index 2 (:method), value "CONNECT"
   let bad_hpack = <<
     0x42, 0x07, "CONNECT":utf8, 0x41, 0x0B, "example.com":utf8, 0x84,

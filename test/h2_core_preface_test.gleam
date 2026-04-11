@@ -13,7 +13,7 @@ import helper
 const client_preface_magic = <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8>>
 
 // =============================================================================
-// Connection initial state — RFC 9113 Section 3.4
+// Connection initial state - RFC 9113 Section 3.4
 // =============================================================================
 
 // RFC 9113 Section 3.4:
@@ -32,7 +32,7 @@ pub fn server_starts_in_awaiting_preface_state_test() {
 //  frame (Section 6.5) that MUST be the first frame the server sends in
 //  the HTTP/2 connection."
 //
-// A client does not receive the 24-byte magic from the server — only a
+// A client does not receive the 24-byte magic from the server - only a
 // SETTINGS frame. So the client starts in AwaitingSettings state.
 pub fn client_starts_in_awaiting_settings_state_test() {
   let assert Ok(#(conn, _)) = new_connection(Client, default_settings())
@@ -40,7 +40,7 @@ pub fn client_starts_in_awaiting_settings_state_test() {
 }
 
 // =============================================================================
-// new_connection preface bytes — RFC 9113 Section 3.4
+// new_connection preface bytes - RFC 9113 Section 3.4
 //
 // "The client connection preface starts with a sequence of 24 octets [...]
 //  This sequence MUST be followed by a SETTINGS frame"
@@ -140,7 +140,7 @@ pub fn client_receives_settings_ack_after_preface_test() {
     receive_data(client, settings_ack)
 }
 
-// Same for server side — receiving a SETTINGS ACK after preface should work.
+// Same for server side - receiving a SETTINGS ACK after preface should work.
 pub fn server_receives_settings_ack_after_preface_test() {
   let assert Ok(#(server, _)) = new_connection(Server, default_settings())
   let assert Ok(#(_client, client_preface)) =
@@ -154,7 +154,7 @@ pub fn server_receives_settings_ack_after_preface_test() {
 }
 
 // =============================================================================
-// Server: client preface magic — RFC 9113 Section 3.4
+// Server: client preface magic - RFC 9113 Section 3.4
 //
 // "The client connection preface starts with a sequence of 24 octets,
 //  which in hex notation is:
@@ -202,7 +202,7 @@ pub fn server_transitions_to_awaiting_settings_after_magic_test() {
 }
 
 // =============================================================================
-// Server: invalid preface — RFC 9113 Section 3.4
+// Server: invalid preface - RFC 9113 Section 3.4
 //
 // "Clients and servers MUST treat an invalid connection preface as a
 //  connection error (Section 5.4.1) of type PROTOCOL_ERROR."
@@ -227,7 +227,7 @@ pub fn server_receives_corrupted_preface_magic_test() {
 }
 
 // =============================================================================
-// Server: first frame after magic MUST be SETTINGS — RFC 9113 Section 3.4
+// Server: first frame after magic MUST be SETTINGS - RFC 9113 Section 3.4
 //
 // "This sequence MUST be followed by a SETTINGS frame"
 // =============================================================================
@@ -266,12 +266,12 @@ pub fn server_receives_preface_magic_followed_by_headers_test() {
 // =============================================================================
 // Server: partial preface delivery
 //
-// Incomplete data should not error — the connection should buffer and
+// Incomplete data should not error - the connection should buffer and
 // wait for more data.
 // =============================================================================
 
 // Server receives only the 24-byte magic without a SETTINGS frame yet.
-// This is incomplete, not an error — the server should wait for more data.
+// This is incomplete, not an error - the server should wait for more data.
 pub fn server_receives_only_preface_magic_waits_for_settings_test() {
   let assert Ok(#(conn, _preface)) = new_connection(Server, default_settings())
   let assert Ok(#(conn, events, to_send)) =
@@ -288,7 +288,7 @@ pub fn server_receives_only_preface_magic_waits_for_settings_test() {
 }
 
 // Server receives the magic in two separate chunks (split mid-magic).
-// Both chunks are individually incomplete — the connection should buffer.
+// Both chunks are individually incomplete - the connection should buffer.
 pub fn server_receives_preface_magic_in_chunks_test() {
   let assert Ok(#(conn, _preface)) = new_connection(Server, default_settings())
   // Split the 24-byte magic into two parts
@@ -360,7 +360,7 @@ fn feed_bytes(conn, bytes) {
 }
 
 // =============================================================================
-// Client: first frame MUST be SETTINGS — RFC 9113 Section 3.4
+// Client: first frame MUST be SETTINGS - RFC 9113 Section 3.4
 //
 // "The server connection preface consists of a potentially empty SETTINGS
 //  frame (Section 6.5) that MUST be the first frame the server sends in
@@ -429,7 +429,7 @@ pub fn client_receives_window_update_as_first_frame_test() {
 // =============================================================================
 // Client: magic bytes from server
 //
-// The server does NOT send the 24-byte magic string — only the client does.
+// The server does NOT send the 24-byte magic string - only the client does.
 // A client receiving magic bytes treats it as a connection error (it would
 // be unparseable as a valid frame).
 // =============================================================================
@@ -441,7 +441,7 @@ pub fn client_receiving_magic_bytes_is_error_test() {
 }
 
 // =============================================================================
-// Post-preface normal processing — RFC 9113 Section 3.4
+// Post-preface normal processing - RFC 9113 Section 3.4
 //
 // After the preface is complete, normal frame processing should continue.
 // =============================================================================
