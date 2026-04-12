@@ -109,6 +109,15 @@ fn apply_send_new_window_size(
   use streams <- result.try(
     list.try_map(dict.to_list(conn.streams), fn(pair) {
       let #(stream_id, stream) = pair
+
+      // Don't update closed streams
+      use <- bool.guard(
+        //stream.state != Open && stream.state != HalfClosedLocal,
+        stream.state != Open && stream.state != HalfClosedRemote,
+        // return unchanged                                                              
+        Ok(#(stream_id, stream)),
+      )
+
       let stream =
         Stream(..stream, send_window_size: stream.send_window_size + delta)
       use <- bool.guard(
@@ -131,6 +140,14 @@ fn apply_recv_new_window_size(
   use streams <- result.try(
     list.try_map(dict.to_list(conn.streams), fn(pair) {
       let #(stream_id, stream) = pair
+
+      // Don't update closed streams
+      use <- bool.guard(
+        stream.state != Open && stream.state != HalfClosedLocal,
+        // return unchanged
+        Ok(#(stream_id, stream)),
+      )
+
       let stream =
         Stream(..stream, recv_window_size: stream.recv_window_size + delta)
       use <- bool.guard(

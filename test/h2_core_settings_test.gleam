@@ -319,6 +319,147 @@ pub fn receive_settings_initial_window_size_adjusts_existing_streams_test() {
   let assert Ok(32_768) = h2_core.get_stream_send_window_size(server, 1)
 }
 
+// RFC 9113 Section 6.9.2 - "streams in the 'open' or 'half-closed (remote)'
+// state" have active send flow-control windows. Half-closed (remote) means
+// the peer has sent END_STREAM but we haven't - we can still send data, so
+// the send window delta must be applied.
+pub fn receive_settings_initial_window_size_applied_to_half_closed_remote_stream_test() {
+  let #(server, client) = helper.server_with_open_stream()
+
+  // Transition stream 1 to half-closed (remote) by client sending END_STREAM
+  let assert Ok(#(_client, data_bytes)) =
+    h2_core.send_data(client, 1, <<>>, True, None)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_bytes)
+  let assert Ok(65_535) = h2_core.get_stream_send_window_size(server, 1)
+
+  // Client sends SETTINGS with INITIAL_WINDOW_SIZE=32768
+  let assert Ok(settings_frame) =
+    h2_frame.encode_settings(ack: False, settings: [
+      h2_frame.InitialWindowSize(32_768),
+    ])
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, settings_frame)
+
+  // HalfClosedRemote stream's send window must have been updated
+  let assert Ok(32_768) = h2_core.get_stream_send_window_size(server, 1)
+}
+
+// RFC 9113 Section 6.9.2 - "a SETTINGS frame can alter the initial
+// flow-control window size for streams with active flow-control windows
+// (that is, streams in the 'open' or 'half-closed (remote)' state)"
+//
+// The delta MUST NOT be applied to Closed streams.
+pub fn receive_settings_initial_window_size_not_applied_to_closed_stream_test() {
+  let #(server, _client) = helper.server_with_open_stream()
+  let assert Ok(65_535) = h2_core.get_stream_send_window_size(server, 1)
+
+  // Close stream 1
+  let assert Ok(#(server, _to_send)) =
+    h2_core.send_rst_stream(server, 1, h2_core.NoError)
+
+  // Peer sends SETTINGS reducing the initial window size
+  let assert Ok(settings_frame) =
+    h2_frame.encode_settings(ack: False, settings: [
+      h2_frame.InitialWindowSize(32_768),
+    ])
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, settings_frame)
+
+  // Closed stream's window must not have changed
+  let assert Ok(65_535) = h2_core.get_stream_send_window_size(server, 1)
+}
+
+// RFC 9113 Section 6.9.2 - applying the delta to a Closed stream that had
+// its window inflated via WINDOW_UPDATE before closing can produce a false
+// FLOW_CONTROL_ERROR. The fix is to skip non-active streams.
+//
+// Scenario:
+//   - Stream 1 receives WINDOW_UPDATE(1024) -> send window = 66_559
+//   - Stream 1 closes
+//   - Peer sends SETTINGS_INITIAL_WINDOW_SIZE = 2^31-1
+//   - delta = 2^31-1 - 65_535 = 2_147_418_112
+//   - Buggy: 66_559 + 2_147_418_112 = 2_147_484_671 > 2^31-1 -> false error
+//   - Fixed: closed stream skipped, no error
+pub fn receive_settings_initial_window_size_closed_stream_avoids_false_overflow_test() {
+  let #(server, _client) = helper.server_with_open_stream()
+
+  // Client sends WINDOW_UPDATE on stream 1 - inflates the server's send window
+  let assert Ok(wu) =
+    h2_frame.encode_window_update(stream_id: 1, window_size_increment: 1024)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, wu)
+  let assert Ok(66_559) = h2_core.get_stream_send_window_size(server, 1)
+
+  // Close stream 1
+  let assert Ok(#(server, _to_send)) =
+    h2_core.send_rst_stream(server, 1, h2_core.NoError)
+
+  // Peer sends SETTINGS_INITIAL_WINDOW_SIZE = 2^31-1 (max valid value)
+  // delta = 2_147_483_647 - 65_535 = 2_147_418_112
+  // 66_559 + 2_147_418_112 = 2_147_484_671 which exceeds 2^31-1 if applied
+  let assert Ok(settings_frame) =
+    h2_frame.encode_settings(ack: False, settings: [
+      h2_frame.InitialWindowSize(2_147_483_647),
+    ])
+  // Must succeed - closed stream must be skipped
+  let assert Ok(#(_server, _events, _to_send)) =
+    receive_data(server, settings_frame)
+}
+
+// RFC 9113 Section 6.9.2 - the delta from a local SETTINGS_INITIAL_WINDOW_SIZE
+// (applied on ACK) must only update streams that can still receive data:
+// "open" or "half-closed (local)". Closed streams must be skipped.
+pub fn settings_ack_initial_window_size_not_applied_to_closed_stream_test() {
+  let #(server, _client) = helper.server_with_open_stream()
+  let assert Ok(65_535) = h2_core.get_stream_recv_window_size(server, 1)
+
+  // Close stream 1 by sending RST_STREAM
+  let assert Ok(#(server, _to_send)) =
+    h2_core.send_rst_stream(server, 1, h2_core.NoError)
+
+  // Server sends SETTINGS reducing the recv window
+  let assert Ok(#(server, _to_send)) =
+    send_settings(server, [InitialWindowSize(32_768)])
+
+  // Server receives the ACK - delta applied to active streams only
+  let assert Ok(settings_ack) =
+    h2_frame.encode_settings(ack: True, settings: [])
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, settings_ack)
+
+  // Closed stream's recv window must not have changed
+  let assert Ok(65_535) = h2_core.get_stream_recv_window_size(server, 1)
+}
+
+// RFC 9113 Section 6.9.2 - delta from local SETTINGS_INITIAL_WINDOW_SIZE
+// MUST be applied to half-closed (local) streams - the peer has not yet
+// sent END_STREAM and can still send us data, so the recv window matters.
+pub fn settings_ack_initial_window_size_applied_to_half_closed_local_stream_test() {
+  let #(server, _client) = helper.server_with_open_stream()
+
+  // Transition stream 1 to half-closed (local) by sending response with END_STREAM
+  let assert Ok(#(server, _to_send)) =
+    send_headers(
+      server,
+      1,
+      [h2_core.Header(":status", <<"200":utf8>>, h2_core.WithIndexing)],
+      True,
+    )
+  let assert Ok(65_535) = h2_core.get_stream_recv_window_size(server, 1)
+
+  // Server sends SETTINGS reducing the recv window
+  let assert Ok(#(server, _to_send)) =
+    send_settings(server, [InitialWindowSize(32_768)])
+
+  // Server receives the ACK - delta must be applied to HalfClosedLocal stream
+  let assert Ok(settings_ack) =
+    h2_frame.encode_settings(ack: True, settings: [])
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, settings_ack)
+
+  // HalfClosedLocal stream's recv window must have been updated
+  let assert Ok(32_768) = h2_core.get_stream_recv_window_size(server, 1)
+}
+
 // RFC 9113 Section 6.9.2 - "An endpoint MUST treat a change to
 // SETTINGS_INITIAL_WINDOW_SIZE that causes any flow-control window
 // to exceed the maximum size as a connection error (Section 5.4.1)
