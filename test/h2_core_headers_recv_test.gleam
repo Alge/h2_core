@@ -4,8 +4,9 @@ import gleam/option
 import h2_core.{
   Client, CompressionError, ConnectionError, Header, HeadersReceived,
   MaxConcurrentStreams, NeverIndexed, ProtocolError, RefusedStream, Server,
-  StreamClosed, StreamEnded, StreamReset, WithIndexing, WithoutIndexing,
-  get_stream_state, open_stream, receive_data, send_headers, send_settings,
+  StreamClosed, StreamEnded, StreamRefused, StreamReset, WithIndexing,
+  WithoutIndexing, get_stream_state, open_stream, receive_data, send_headers,
+  send_settings,
 }
 import h2_core/internal/stream.{Closed, HalfClosedLocal, HalfClosedRemote, Open}
 import h2_frame
@@ -695,14 +696,24 @@ pub fn receive_headers_exceeding_max_concurrent_streams_test() {
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, ack_bytes)
 
   // Open stream 1
-  let assert Ok(#(client, encoded1, _stream_id)) =
+  let assert Ok(#(_client, encoded1, _stream_id)) =
     open_stream(client, helper.request_headers(), False)
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, encoded1)
   let assert Ok(Open) = get_stream_state(server, 1)
 
-  // Open stream 3 - should be refused (exceeds MAX_CONCURRENT_STREAMS=1)
-  let assert Ok(#(_client, encoded3, _stream_id)) =
-    open_stream(client, helper.request_headers(), False)
+  // Craft a raw HEADERS frame for stream 3 using the static table only
+  // (0x82=:method GET, 0x87=:scheme https, 0x84=:path /) so that HPACK state
+  // is irrelevant. This bypasses the client-side limit check so we can still
+  // test server-side enforcement.
+  let assert Ok(encoded3) =
+    h2_frame.encode_headers(
+      stream_id: 3,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
+      padding: option.None,
+    )
   let assert Ok(#(_server, events, to_send)) = receive_data(server, encoded3)
 
   // Should get a RST_STREAM with REFUSED_STREAM
@@ -710,6 +721,90 @@ pub fn receive_headers_exceeding_max_concurrent_streams_test() {
   let assert Ok(#(frame_data, _rest)) = h2_frame.extract_frame(to_send, 16_384)
   let assert Ok(h2_frame.RstStream(3, h2_frame.RefusedStream)) =
     h2_frame.decode_frame(frame_data)
+}
+
+// --- Client-side MAX_CONCURRENT_STREAMS enforcement ---
+//
+// RFC 9113 Section 5.1.2 - "Endpoints MUST NOT exceed the limit set by
+// their peer." open_stream must enforce this before sending, not leave it
+// to the server to reject with RST_STREAM.
+
+// Basic case: client may not open a second stream when max is 1 and one is
+// already open.
+pub fn open_stream_respects_remote_max_concurrent_streams_test() {
+  let #(server, client) = helper.connected_pair()
+  let assert Ok(#(_server, settings_bytes)) =
+    send_settings(server, [MaxConcurrentStreams(1)])
+  // Client receives the settings - remote_settings takes effect immediately.
+  let assert Ok(#(client, _events, _ack)) = receive_data(client, settings_bytes)
+
+  let assert Ok(#(client, _bytes, _id)) =
+    open_stream(client, helper.request_headers(), False)
+
+  let assert Error(StreamRefused) =
+    open_stream(client, helper.request_headers(), False)
+}
+
+// A stream in HalfClosedLocal state (we sent END_STREAM, awaiting response)
+// still counts toward the limit.
+pub fn open_stream_half_closed_local_counts_toward_limit_test() {
+  let #(server, client) = helper.connected_pair()
+  let assert Ok(#(_server, settings_bytes)) =
+    send_settings(server, [MaxConcurrentStreams(1)])
+  let assert Ok(#(client, _events, _ack)) = receive_data(client, settings_bytes)
+
+  // Open with END_STREAM - stream goes to HalfClosedLocal.
+  let assert Ok(#(client, _bytes, _id)) =
+    open_stream(client, helper.request_headers(), True)
+
+  // Still at the limit - HalfClosedLocal counts.
+  let assert Error(StreamRefused) =
+    open_stream(client, helper.request_headers(), False)
+}
+
+// Once a stream closes (RST received from the peer), the slot is freed and
+// a new stream may be opened.
+pub fn open_stream_closed_stream_frees_slot_test() {
+  let #(server, client) = helper.connected_pair()
+  let assert Ok(#(_server, settings_bytes)) =
+    send_settings(server, [MaxConcurrentStreams(1)])
+  let assert Ok(#(client, _events, _ack)) = receive_data(client, settings_bytes)
+
+  let assert Ok(#(client, _bytes, _id)) =
+    open_stream(client, helper.request_headers(), False)
+
+  // Server RST_STREAMs stream 1 - client closes it.
+  let assert Ok(rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.NoError)
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, rst)
+
+  // Slot freed - next open_stream must succeed.
+  let assert Ok(#(_client, _bytes, _id)) =
+    open_stream(client, helper.request_headers(), False)
+}
+
+// MAX_CONCURRENT_STREAMS=0 must prevent any stream from being opened.
+pub fn open_stream_max_concurrent_streams_zero_blocks_all_test() {
+  let #(server, client) = helper.connected_pair()
+  let assert Ok(#(_server, settings_bytes)) =
+    send_settings(server, [MaxConcurrentStreams(0)])
+  let assert Ok(#(client, _events, _ack)) = receive_data(client, settings_bytes)
+
+  let assert Error(StreamRefused) =
+    open_stream(client, helper.request_headers(), False)
+}
+
+// When the server has not set MAX_CONCURRENT_STREAMS (option.None), there is
+// no limit and multiple streams may be opened freely.
+pub fn open_stream_no_limit_when_max_concurrent_streams_not_set_test() {
+  let client = helper.connected_connection(Client)
+
+  let assert Ok(#(client, _bytes, _)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(client, _bytes, _)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(_client, _bytes, _)) =
+    open_stream(client, helper.request_headers(), False)
 }
 
 // --- Stream ID parity validation ---

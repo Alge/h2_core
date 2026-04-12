@@ -415,6 +415,20 @@ fn count_inbound_streams(conn: Connection) -> Int {
   })
 }
 
+fn count_outbound_streams(conn: Connection) -> Int {
+  dict.fold(conn.streams, 0, fn(count, stream_id, stream) {
+    let is_outbound_stream = case conn.role {
+      Server -> stream_id % 2 == 0
+      Client -> stream_id % 2 == 1
+    }
+
+    case is_outbound_stream, stream.state {
+      True, Open | True, HalfClosedLocal | True, HalfClosedRemote -> count + 1
+      _, _ -> count
+    }
+  })
+}
+
 fn add_stream(conn: Connection, stream: Stream) -> #(Connection, Int) {
   #(
     Connection(
@@ -851,6 +865,8 @@ pub type SendError {
   InvalidWindowIncrement
   // frame encoding failed unexpectedly; if you encounter this, please open an issue
   FrameEncodingError
+  // the peer's SETTINGS_MAX_CONCURRENT_STREAMS limit has been reached
+  StreamRefused
 }
 
 fn chunk_bytes(
@@ -1320,6 +1336,15 @@ pub fn open_stream(
   use <- bool.guard(conn.role == Server, Error(InvalidRole))
   // Not allowed to open streams while in Draining state (we have received a GOAWAY)
   use <- bool.guard(conn.state == Draining, Error(ConnectionDraining))
+
+  // Check MAX_CONCURRENT_STREAMS
+  use <- bool.guard(
+    case conn.remote_settings.max_concurrent_streams {
+      option.Some(max) -> count_outbound_streams(conn) >= max
+      option.None -> False
+    },
+    Error(StreamRefused),
+  )
 
   let stream =
     new_stream(
