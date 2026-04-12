@@ -174,6 +174,22 @@ pub fn send_trailers_with_pseudo_header_is_malformed_test() {
     )
 }
 
+// RFC 9113 Section 8.2.1 / [HTTP] Section 5.1 - field-name = token = 1*tchar.
+// A zero-length field name must be rejected as InvalidHeaders.
+pub fn send_headers_with_empty_field_name_is_invalid_test() {
+  let #(server, _client) = server_with_open_stream()
+  let assert Error(InvalidHeaders) =
+    send_headers(
+      server,
+      1,
+      [
+        Header(":status", <<"200":utf8>>, WithIndexing),
+        Header("", <<"some-value":utf8>>, WithIndexing),
+      ],
+      False,
+    )
+}
+
 // =============================================================================
 // Invalid states - RFC 9113 Section 5.1
 // =============================================================================

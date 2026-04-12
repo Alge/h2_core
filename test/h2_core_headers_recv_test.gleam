@@ -1696,6 +1696,32 @@ pub fn receive_headers_colon_in_field_name_is_malformed_test() {
   assert to_send == expected_rst
 }
 
+// RFC 9113 Section 8.2.1 / [HTTP] Section 5.1 - field-name = token = 1*tchar.
+// A zero-length field name contains no characters and is therefore not a valid
+// token. It must be rejected as a malformed message.
+//
+// HPACK: 0x40 = literal with indexing, new name; 0x00 = name length 0;
+// 0x05 = value length 5; "value" = value bytes.
+pub fn receive_headers_empty_field_name_is_malformed_test() {
+  let server = helper.connected_connection(Server)
+  let bad_hpack = <<0x82, 0x87, 0x84, 0x40, 0x00, 0x05, "value":utf8>>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Ok(#(_server, events, to_send)) =
+    receive_data(server, headers_frame)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+  assert to_send == expected_rst
+}
+
 // RFC 9113 Section 8.2.1 - "A field value MUST NOT contain the zero
 // value (ASCII NUL, 0x00), line feed (ASCII LF, 0x0a), or carriage
 // return (ASCII CR, 0x0d) at any position."

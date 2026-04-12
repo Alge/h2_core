@@ -553,8 +553,10 @@ fn validate_headers(
 }
 
 fn validate_header_name(name: BitArray) -> Result(Nil, Nil) {
-  // First char might be a ":", but that is not allowed after first byte
   case name {
+    // Name cannot be empty
+    <<>> -> Error(Nil)
+    // First char might be a ":", but that is not allowed after first byte
     <<":", rest:bits>> -> check_header_name_bytes(rest)
     _ -> check_header_name_bytes(name)
   }
