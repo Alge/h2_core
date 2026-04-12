@@ -2457,6 +2457,18 @@ fn parse_loop(
                 Error(Nil) -> Error(ConnectionError(ProtocolError))
               })
 
+              use <- bool.guard(
+                stream.state == Closed,
+                handle_rst_stream(
+                  conn: conn,
+                  stream_id: stream_id,
+                  error_code: StreamClosed,
+                  flow_controlled_length: 0,
+                  events: events,
+                  to_send: to_send,
+                ),
+              )
+
               let new_stream_state = case end_stream {
                 True -> {
                   case stream.state {

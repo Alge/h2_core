@@ -114,6 +114,27 @@ pub fn receive_window_update_on_reserved_remote_is_protocol_error_test() {
 // WINDOW_UPDATE on a stream in this state MUST be treated as a
 // connection error (Section 5.4.1) of type PROTOCOL_ERROR."
 //
+// WINDOW_UPDATE is explicitly in the allowed list for reserved (local),
+// so it must be accepted (the client updating the send window for the
+// promised stream before the server sends HEADERS on it).
+pub fn receive_window_update_on_reserved_local_is_accepted_test() {
+  let #(server, promised_id) = server_with_reserved_local_stream()
+  let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, promised_id)
+
+  let assert Ok(wu) =
+    h2_frame.encode_window_update(
+      stream_id: promised_id,
+      window_size_increment: 1024,
+    )
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, wu)
+  // Stream must still be in reserved (local) state
+  let assert Ok(ReservedLocal) = h2_core.get_stream_state(server, promised_id)
+  // Send window for the promised stream should have increased
+  let assert Ok(window) =
+    h2_core.get_stream_send_window_size(server, promised_id)
+  assert window == 65_535 + 1024
+}
+
 // HEADERS is not in the allowed list for reserved (local).
 pub fn receive_headers_on_reserved_local_is_protocol_error_test() {
   let #(server, promised_id) = server_with_reserved_local_stream()

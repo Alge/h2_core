@@ -296,6 +296,44 @@ pub fn receive_data_on_idle_stream_is_protocol_error_test() {
     receive_data(server, data_frame)
 }
 
+// RFC 9113 Section 6.1 - "If a DATA frame is received whose stream is not in
+// the 'open' or 'half-closed (local)' state, the recipient MUST respond with
+// a stream error (Section 5.4.2) of type STREAM_CLOSED."
+//
+// A closed stream is tracked in the dict (it was previously open), so this
+// exercises a different code path than the idle stream test above.
+pub fn receive_data_on_closed_stream_is_stream_closed_error_test() {
+  let #(server, _client) = helper.server_with_closed_stream()
+  let assert Ok(data_frame) =
+    h2_frame.encode_data(
+      stream_id: 1,
+      end_stream: False,
+      data: <<"illegal":utf8>>,
+      padding: None,
+    )
+  let assert Ok(#(_server, events, to_send)) = receive_data(server, data_frame)
+  let assert [StreamReset(stream_id: 1, error_code: StreamClosed)] = events
+  let assert Ok(#(frame_data, _)) = h2_frame.extract_frame(to_send, 16_384)
+  let assert Ok(h2_frame.RstStream(1, h2_frame.StreamClosed)) =
+    h2_frame.decode_frame(frame_data)
+}
+
+// RFC 9113 Section 6.1 - DATA on a closed stream must not consume flow control
+// window. The connection window must remain unchanged after the RST_STREAM.
+pub fn receive_data_on_closed_stream_does_not_consume_window_test() {
+  let #(server, _client) = helper.server_with_closed_stream()
+  let window_before = h2_core.get_connection_recv_window_size(server)
+  let assert Ok(data_frame) =
+    h2_frame.encode_data(
+      stream_id: 1,
+      end_stream: False,
+      data: <<"illegal":utf8>>,
+      padding: None,
+    )
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
+  assert h2_core.get_connection_recv_window_size(server) == window_before
+}
+
 // RFC 9113 Section 5.1 (reserved local) - "Receiving any type of frame other
 // than RST_STREAM, PRIORITY, or WINDOW_UPDATE on a stream in this state MUST
 // be treated as a connection error (Section 5.4.1) of type PROTOCOL_ERROR."
@@ -1073,9 +1111,9 @@ pub fn receive_data_exceeding_stream_window_still_decrements_connection_window_t
 //
 // RFC 9113 Section 5.1 (closed state) - "the content of DATA frames counts
 // toward the connection flow-control window."
-pub fn receive_data_on_closed_stream_still_counts_toward_connection_window_test() {
+pub fn receive_data_on_half_closed_remote_still_counts_toward_connection_window_test() {
   let #(server, _client) = server_with_open_stream()
-  // Close stream 1 by receiving END_STREAM
+  // Transition stream 1 to half-closed (remote) by receiving END_STREAM
   let assert Ok(data_frame) =
     h2_frame.encode_data(
       stream_id: 1,
@@ -1085,9 +1123,9 @@ pub fn receive_data_on_closed_stream_still_counts_toward_connection_window_test(
     )
   let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
 
-  // Now receive DATA on the closed stream - per RFC 5.1 closed state,
-  // the endpoint MUST minimally process and discard. The DATA still
-  // counts toward the connection flow-control window.
+  // Now receive DATA on the half-closed (remote) stream. Per RFC 9113
+  // Section 5.1, the endpoint MUST respond with a stream error STREAM_CLOSED.
+  // The DATA still counts toward the connection flow-control window.
   let assert Ok(more_data) =
     h2_frame.encode_data(
       stream_id: 1,
