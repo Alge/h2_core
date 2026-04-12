@@ -112,9 +112,8 @@ fn apply_send_new_window_size(
 
       // Don't update closed streams
       use <- bool.guard(
-        //stream.state != Open && stream.state != HalfClosedLocal,
         stream.state != Open && stream.state != HalfClosedRemote,
-        // return unchanged                                                              
+        // return unchanged
         Ok(#(stream_id, stream)),
       )
 
@@ -581,8 +580,8 @@ fn check_header_name_bytes(name: BitArray) -> Result(Nil, Nil) {
 
 fn validate_header_value(header: Header) -> Result(Nil, Nil) {
   use _ <- result.try(check_header_value_bytes(header.value))
-  // RFC 9113 Section 8.2.1: a field value MUST NOT start or end with ASCII                                     
-  // whitespace (SP 0x20 or HTAB 0x09).                                                                         
+  // RFC 9113 Section 8.2.1: a field value MUST NOT start or end with ASCII
+  // whitespace (SP 0x20 or HTAB 0x09).
   use <- bool.guard(
     bit_array.starts_with(header.value, <<0x20>>)
       || bit_array.starts_with(header.value, <<0x09>>),
