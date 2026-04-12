@@ -299,7 +299,7 @@ pub fn handle_rst_stream_closes_stream_on_flow_control_violation_test() {
 }
 
 // Malformed push promise headers trigger automatic RST_STREAM on the
-// associated stream. The stream must be Closed afterwards.
+// promised stream. The parent stream must remain open and unaffected.
 pub fn handle_rst_stream_closes_stream_on_invalid_push_promise_test() {
   let #(_server, client) = helper.server_with_open_stream()
 
@@ -315,6 +315,10 @@ pub fn handle_rst_stream_closes_stream_on_invalid_push_promise_test() {
       padding: option.None,
     )
   let assert Ok(#(client, events, _to_send)) = receive_data(client, pp)
-  let assert [StreamReset(stream_id: 1, error_code: ProtocolError)] = events
-  let assert Ok(Closed) = h2_core.get_stream_state(client, 1)
+  // Stream error targets the promised stream (2), not the parent (1).
+  let assert [StreamReset(stream_id: 2, error_code: ProtocolError)] = events
+  // Parent stream (1) is unaffected and remains open.
+  let assert Ok(Open) = h2_core.get_stream_state(client, 1)
+  // Promised stream (2) is never added to conn.streams - validation fails before creation.
+  let assert Error(Nil) = h2_core.get_stream_state(client, 2)
 }

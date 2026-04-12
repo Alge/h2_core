@@ -9,7 +9,7 @@ import h2_core.{
   PushPromiseReceived, Server, StreamReset, UnknownStream, WithIndexing,
   open_stream, receive_data, send_data, send_headers, send_rst_stream,
 }
-import h2_core/internal/stream.{Closed, ReservedLocal, ReservedRemote}
+import h2_core/internal/stream.{Closed, Open, ReservedLocal, ReservedRemote}
 import h2_frame
 import helper
 
@@ -622,6 +622,85 @@ pub fn send_push_promise_empty_headers_is_error_test() {
   let assert Error(InvalidHeaders) = h2_core.send_push_promise(server, 1, [])
 }
 
+// =============================================================================
+// Bug fix: RFC 9113 Section 8.4.1 - receiving a PUSH_PROMISE with an invalid
+// request field block MUST be treated as a stream error on the PROMISED stream,
+// not the parent stream.
+//
+// "A PUSH_PROMISE frame that includes a request field block that is invalid
+// (Section 8.1.1) MUST be treated as a stream error (Section 5.4.2) of type
+// PROTOCOL_ERROR."
+//
+// The stream in error is the promised stream. The parent stream must be
+// unaffected.
+// =============================================================================
+
+// HPACK: 0x82 = :method GET, 0x87 = :scheme https - missing :path, so invalid.
+pub fn receive_push_promise_invalid_headers_rsts_promised_stream_not_parent_test() {
+  let #(_server, client) = server_with_open_stream()
+
+  let assert Ok(pp) =
+    h2_frame.encode_push_promise(
+      stream_id: 1,
+      end_headers: True,
+      promised_stream_id: 2,
+      field_block_fragment: <<0x82, 0x87>>,
+      padding: None,
+    )
+  let assert Ok(#(client, events, to_send)) = receive_data(client, pp)
+
+  // StreamReset must target the promised stream (2), not the parent (1).
+  let assert [StreamReset(stream_id: 2, error_code: ProtocolError)] = events
+
+  // Parent stream (1) must remain open - the push promise failure must not
+  // affect it.
+  let assert Ok(Open) = h2_core.get_stream_state(client, 1)
+
+  // Promised stream (2) must not be reserved - it was rejected before creation.
+  let assert Error(Nil) = h2_core.get_stream_state(client, 2)
+
+  // to_send must contain RST_STREAM targeting stream 2.
+  let frames = helper.parse_all_frames(to_send, [])
+  let assert True =
+    list.any(frames, fn(f) {
+      case f {
+        h2_frame.RstStream(2, h2_frame.ProtocolError) -> True
+        _ -> False
+      }
+    })
+}
+
+// Same bug exercised via the CONTINUATION path: PUSH_PROMISE with end_headers=False
+// followed by CONTINUATION completing an invalid header block.
+pub fn receive_push_promise_invalid_headers_via_continuation_rsts_promised_stream_test() {
+  let #(_server, client) = server_with_open_stream()
+
+  // Split the invalid header block across PUSH_PROMISE + CONTINUATION.
+  let assert Ok(pp) =
+    h2_frame.encode_push_promise(
+      stream_id: 1,
+      end_headers: False,
+      promised_stream_id: 2,
+      field_block_fragment: <<0x82>>,
+      padding: None,
+    )
+  // Continuation carries :scheme https - still missing :path, so invalid.
+  let assert Ok(cont) =
+    h2_frame.encode_continuation(
+      stream_id: 1,
+      end_headers: True,
+      field_block_fragment: <<0x87>>,
+    )
+  let assert Ok(#(client, events, _to_send)) =
+    receive_data(client, <<pp:bits, cont:bits>>)
+
+  // StreamReset must target the promised stream (2), not the parent (1).
+  let assert [StreamReset(stream_id: 2, error_code: ProtocolError)] = events
+
+  // Parent stream (1) must remain open.
+  let assert Ok(Open) = h2_core.get_stream_state(client, 1)
+}
+
 // RFC 9113 Section 8.3.1 - Missing :scheme is malformed.
 pub fn send_push_promise_missing_scheme_is_error_test() {
   let #(server, _client) = server_with_open_stream()
@@ -918,9 +997,10 @@ pub fn receive_push_promise_missing_method_is_malformed_test() {
     )
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_client, events, to_send)) = receive_data(client, pp)
-  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  // Stream error targets the promised stream (2), not the parent (1).
+  assert events == [StreamReset(stream_id: 2, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
-    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+    h2_frame.encode_rst_stream(stream_id: 2, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
 }
 
@@ -940,9 +1020,10 @@ pub fn receive_push_promise_pseudo_after_regular_is_malformed_test() {
     )
   // RFC 9113 Section 5.4.2 - Stream errors are non-fatal.
   let assert Ok(#(_client, events, to_send)) = receive_data(client, pp)
-  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+  // Stream error targets the promised stream (2), not the parent (1).
+  assert events == [StreamReset(stream_id: 2, error_code: ProtocolError)]
   let assert Ok(expected_rst) =
-    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.ProtocolError)
+    h2_frame.encode_rst_stream(stream_id: 2, error_code: h2_frame.ProtocolError)
   assert to_send == expected_rst
 }
 

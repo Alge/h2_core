@@ -956,7 +956,7 @@ fn handle_decoded_push_promise(
     validate_headers(Server, decoded_headers, False) == Error(Nil),
     handle_rst_stream(
       conn:,
-      stream_id:,
+      stream_id: promised_stream_id,
       error_code: ProtocolError,
       flow_controlled_length: 0,
       events:,
