@@ -19,6 +19,7 @@ pub type Stream {
     final_response_received: Bool,
     expected_content_length: option.Option(Int),
     received_content_length: Int,
+    closed_by_rst: Bool,
   )
 }
 
@@ -34,5 +35,6 @@ pub fn new_stream(
     final_response_received: False,
     expected_content_length: option.None,
     received_content_length: 0,
+    closed_by_rst: False,
   )
 }

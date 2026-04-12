@@ -1916,7 +1916,7 @@ pub fn send_rst_stream(
   use <- bool.guard(stream.state == Closed, Error(InvalidStreamState))
 
   // Close the stream
-  let stream = Stream(..stream, state: Closed)
+  let stream = Stream(..stream, state: Closed, closed_by_rst: True)
 
   let conn =
     Connection(..conn, streams: dict.insert(conn.streams, stream_id, stream))
@@ -2391,7 +2391,7 @@ fn parse_loop(
                 parse_loop(conn, events, to_send),
               )
 
-              let stream = Stream(..stream, state: Closed)
+              let stream = Stream(..stream, state: Closed, closed_by_rst: True)
 
               let conn =
                 Connection(
@@ -2611,6 +2611,7 @@ fn parse_loop(
               parse_loop(conn, list.flatten([new_events, events]), to_send)
             }
 
+            // PUSH_PROMISE
             h2_frame.PushPromise(
               stream_id,
               end_headers,
@@ -2629,12 +2630,18 @@ fn parse_loop(
                 |> result.replace_error(ConnectionError(ProtocolError)),
               )
 
-              // Stream state must be one of these
+              // If the stream was closed naturally (END_STREAM), PUSH_PROMISE is a PROTOCOL_ERROR.
+              // If it was closed by RST_STREAM (either side), treat as a race condition and silently ignore.
               use <- bool.guard(
-                !list.contains([Open, HalfClosedLocal, Closed], stream.state),
-                Error(ConnectionError(ProtocolError)),
+                stream.state == Closed && stream.closed_by_rst,
+                parse_loop(conn, events, to_send),
               )
 
+              // Stream state must be Open or HalfClosedLocal
+              use <- bool.guard(
+                !list.contains([Open, HalfClosedLocal], stream.state),
+                Error(ConnectionError(ProtocolError)),
+              )
               // Our setting for enable push must be true
               use <- bool.guard(
                 !conn.local_settings.enable_push,

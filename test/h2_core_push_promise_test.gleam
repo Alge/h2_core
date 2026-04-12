@@ -7,7 +7,7 @@ import h2_core.{
   type Connection, Cancel, Client, ConnectionError, Header, InvalidHeaders,
   InvalidRole, InvalidStreamState, ProtocolError, PushDisabled,
   PushPromiseReceived, Server, StreamReset, UnknownStream, WithIndexing,
-  open_stream, receive_data, send_headers, send_rst_stream,
+  open_stream, receive_data, send_data, send_headers, send_rst_stream,
 }
 import h2_core/internal/stream.{Closed, ReservedLocal, ReservedRemote}
 import h2_frame
@@ -509,15 +509,19 @@ pub fn send_push_promise_on_half_closed_local_is_error_test() {
 // the lenient approach: accept PUSH_PROMISE on any closed stream, decode
 // HPACK, reserve the promised stream, and emit the event. The caller can
 // RST_STREAM the promised stream if unwanted.
-pub fn receive_push_promise_on_closed_stream_is_handled_gracefully_test() {
+// RFC 9113 Section 6.6 - when a stream is closed via RST_STREAM (either
+// direction), a PUSH_PROMISE may still be in flight. Both sides of an RST_STREAM
+// close are treated as a potential race condition - the PUSH_PROMISE must be
+// handled gracefully (promised stream not reserved, no connection error).
+pub fn receive_push_promise_on_stream_closed_by_remote_rst_is_graceful_test() {
   let #(_server, client) = server_with_open_stream()
-  // Server RST_STREAMs stream 1 - now closed on client
+  // Server RST_STREAMs stream 1
   let assert Ok(rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.NoError)
   let assert Ok(#(client, _events, _to_send)) = receive_data(client, rst)
   let assert Ok(Closed) = h2_core.get_stream_state(client, 1)
 
-  // PUSH_PROMISE arrives on closed stream - must be handled, not rejected
+  // PUSH_PROMISE arrives - must be handled gracefully (promised stream not reserved)
   let assert Ok(pp) =
     h2_frame.encode_push_promise(
       stream_id: 1,
@@ -526,12 +530,33 @@ pub fn receive_push_promise_on_closed_stream_is_handled_gracefully_test() {
       field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
-  let assert Ok(#(client, events, _to_send)) = receive_data(client, pp)
-  let assert [
-    PushPromiseReceived(stream_id: 1, promised_stream_id: 2, headers: _),
-  ] = events
-  // Promised stream should still be reserved
-  let assert Ok(ReservedRemote) = h2_core.get_stream_state(client, 2)
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, pp)
+  let assert Error(_) = h2_core.get_stream_state(client, 2)
+}
+
+// RFC 9113 Section 6.6 - a stream closed naturally by END_STREAM (no RST_STREAM
+// involved) is a genuine protocol violation if PUSH_PROMISE arrives on it.
+// There is no race condition to account for, so this must be a connection error.
+pub fn receive_push_promise_on_stream_closed_by_end_stream_is_protocol_error_test() {
+  let #(server, client) = server_with_open_stream()
+  // Server sends response with END_STREAM -> client stream goes to HalfClosedRemote
+  let assert Ok(#(_server, response_bytes)) =
+    send_headers(server, 1, helper.response_headers(), True)
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, response_bytes)
+  // Client sends END_STREAM -> stream is now Closed (no RST_STREAM involved)
+  let assert Ok(#(client, _to_send)) = send_data(client, 1, <<>>, True, None)
+  let assert Ok(Closed) = h2_core.get_stream_state(client, 1)
+
+  let assert Ok(pp) =
+    h2_frame.encode_push_promise(
+      stream_id: 1,
+      end_headers: True,
+      promised_stream_id: 2,
+      field_block_fragment: <<0x82, 0x87, 0x84>>,
+      padding: None,
+    )
+  let assert Error(ConnectionError(ProtocolError)) = receive_data(client, pp)
 }
 
 // RFC 9113 Section 6.6 - "The total number of padding octets is
@@ -720,8 +745,9 @@ pub fn receive_push_promise_after_client_sent_rst_stream_is_not_connection_error
       field_block_fragment: <<0x82, 0x87, 0x84>>,
       padding: None,
     )
-  // Must not be a connection error - the endpoint must handle this gracefully
-  let assert Ok(#(_client, _events, _to_send)) = receive_data(client, pp)
+  // Must not be a connection error - handle gracefully (promised stream not reserved)
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, pp)
+  let assert Error(_) = h2_core.get_stream_state(client, 2)
 }
 
 // =============================================================================
