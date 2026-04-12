@@ -1980,11 +1980,18 @@ fn handle_rst_stream(
         |> result.map_error(map_frame_error),
       )
       Ok(
-        #(conn, [StreamReset(stream_id:, error_code:), ..events], <<
-          to_send:bits,
-          encoded_rst_stream_frame:bits,
-          encoded_window_update:bits,
-        >>),
+        #(
+          Connection(
+            ..conn,
+            recv_window_size: conn.recv_window_size + flow_controlled_length,
+          ),
+          [StreamReset(stream_id:, error_code:), ..events],
+          <<
+            to_send:bits,
+            encoded_rst_stream_frame:bits,
+            encoded_window_update:bits,
+          >>,
+        ),
       )
     }
   }

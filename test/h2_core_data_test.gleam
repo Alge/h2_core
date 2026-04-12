@@ -1074,14 +1074,17 @@ pub fn get_send_window_size_negative_window_returns_zero_test() {
 // (Section 5.4.1). This is necessary even if the frame is in error."
 //
 // When DATA exceeds the stream window (a stream error, not connection error),
-// the connection flow-control window MUST still be decremented.
-pub fn receive_data_exceeding_stream_window_still_decrements_connection_window_test() {
+// the library sends RST_STREAM and a connection-level WINDOW_UPDATE to reclaim
+// the credit for other streams. Because we grant the remote N more bytes via
+// WINDOW_UPDATE, our local connection window tracking must also be restored -
+// otherwise the local and remote views diverge and future valid DATA will be
+// incorrectly rejected.
+pub fn receive_data_exceeding_stream_window_reclaims_connection_window_test() {
   let #(server, _client) = server_with_open_stream()
   // Set stream recv_window_size to 5 bytes via local SETTINGS change,
   // leaving connection window at default
   let server = set_stream_recv_window(server, 5)
   let data = <<"too much data":utf8>>
-  let data_size = 13
   let assert Ok(data_frame) =
     h2_frame.encode_data(
       stream_id: 1,
@@ -1091,9 +1094,9 @@ pub fn receive_data_exceeding_stream_window_still_decrements_connection_window_t
     )
   // Stream error (not connection error) - receive_data returns Ok with RST_STREAM
   let assert Ok(#(server, _events, to_send)) = receive_data(server, data_frame)
-  // Connection window MUST still be decremented despite the stream error
-  assert get_connection_recv_window_size(server) == 65_535 - data_size
-  // Data is discarded, so auto-reclaim via WINDOW_UPDATE
+  // WINDOW_UPDATE restores the remote's window, so local tracking must match:
+  // net connection window change is zero.
+  assert get_connection_recv_window_size(server) == 65_535
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(
       stream_id: 1,
@@ -1111,7 +1114,12 @@ pub fn receive_data_exceeding_stream_window_still_decrements_connection_window_t
 //
 // RFC 9113 Section 5.1 (closed state) - "the content of DATA frames counts
 // toward the connection flow-control window."
-pub fn receive_data_on_half_closed_remote_still_counts_toward_connection_window_test() {
+//
+// When DATA arrives on a half-closed (remote) stream the library sends
+// RST_STREAM and a connection-level WINDOW_UPDATE. Because the remote is
+// granted N more bytes, the local connection window tracking must also be
+// restored to stay in sync.
+pub fn receive_data_on_half_closed_remote_reclaims_connection_window_test() {
   let #(server, _client) = server_with_open_stream()
   // Transition stream 1 to half-closed (remote) by receiving END_STREAM
   let assert Ok(data_frame) =
@@ -1125,7 +1133,6 @@ pub fn receive_data_on_half_closed_remote_still_counts_toward_connection_window_
 
   // Now receive DATA on the half-closed (remote) stream. Per RFC 9113
   // Section 5.1, the endpoint MUST respond with a stream error STREAM_CLOSED.
-  // The DATA still counts toward the connection flow-control window.
   let assert Ok(more_data) =
     h2_frame.encode_data(
       stream_id: 1,
@@ -1134,8 +1141,9 @@ pub fn receive_data_on_half_closed_remote_still_counts_toward_connection_window_
       padding: None,
     )
   let assert Ok(#(server, _events, to_send)) = receive_data(server, more_data)
-  // Connection window is decremented then reclaimed via auto WINDOW_UPDATE
-  assert get_connection_recv_window_size(server) == 65_535 - 5
+  // WINDOW_UPDATE restores the remote's window, so local tracking must match:
+  // net connection window change is zero.
+  assert get_connection_recv_window_size(server) == 65_535
   let assert Ok(expected_rst) =
     h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.StreamClosed)
   let assert Ok(expected_wu) =

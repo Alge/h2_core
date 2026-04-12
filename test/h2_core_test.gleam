@@ -189,10 +189,9 @@ pub fn receive_frame_with_reserved_bit_set_is_accepted_test() {
   assert to_send == expected_ack
 }
 
-// Bug: receiving a response with END_STREAM on a client-initiated stream
-// is incorrectly treated as a trailer because is_trailer uses
-// (end_stream && stream_exists). A response with :status should not
-// be validated as a trailer even when END_STREAM is set.
+// A response with END_STREAM must not be treated as a trailer. Trailers on
+// client-initiated streams are only expected after final_response_received is
+// True, so a first response with :status and END_STREAM must pass validation.
 pub fn client_receives_response_with_end_stream_test() {
   let #(server, client) = helper.server_with_open_stream()
   let assert Ok(#(_server, response_bytes)) =
