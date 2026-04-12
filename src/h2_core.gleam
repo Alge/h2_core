@@ -2264,6 +2264,22 @@ fn parse_loop(
                       - old_settings.initial_window_size,
                   ))
 
+                  // Trigger a hpack table resize if we have a new table size
+                  let conn = case
+                    new_settings.header_table_size
+                    == old_settings.header_table_size
+                  {
+                    True -> conn
+                    False ->
+                      Connection(
+                        ..conn,
+                        hpack_encoder: alpacki.resize_dynamic(
+                          conn.hpack_encoder,
+                          new_settings.header_table_size,
+                        ),
+                      )
+                  }
+
                   // Reply with an ACK
                   case h2_frame.encode_settings(ack: True, settings: []) {
                     Ok(response) ->
