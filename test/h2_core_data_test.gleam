@@ -1678,8 +1678,7 @@ pub fn client_receive_response_data_exceeding_content_length_test() {
   // Server sends 10 bytes of DATA - exceeds content-length of 5
   let assert Ok(#(_server, data_bytes)) =
     h2_core.send_data(server, 1, <<"0123456789":utf8>>, False, None)
-  let assert Ok(#(_client, events, _to_send)) =
-    receive_data(client, data_bytes)
+  let assert Ok(#(_client, events, _to_send)) = receive_data(client, data_bytes)
   assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
 }
 
@@ -1705,8 +1704,7 @@ pub fn client_receive_response_data_less_than_content_length_test() {
   // Server sends only 5 bytes with END_STREAM
   let assert Ok(#(_server, data_bytes)) =
     h2_core.send_data(server, 1, <<"hello":utf8>>, True, None)
-  let assert Ok(#(_client, events, _to_send)) =
-    receive_data(client, data_bytes)
+  let assert Ok(#(_client, events, _to_send)) = receive_data(client, data_bytes)
   assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
 }
 

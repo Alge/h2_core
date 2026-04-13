@@ -1256,12 +1256,31 @@ fn handle_headers_on_existing_stream(
         // RFC 9113 Section 5.1 (reserved remote) - HEADERS transitions to
         // half-closed (local)
         ReservedRemote -> {
+          let status_code =
+            extract_status_code(decoded_headers)
+            |> result.unwrap(0)
+
+          // 1xx + END_STREAM is malformed
+          use <- bool.guard(
+            status_code >= 100 && status_code < 200 && end_stream,
+            handle_rst_stream(
+              conn:,
+              stream_id:,
+              error_code: ProtocolError,
+              flow_controlled_length: 0,
+              events:,
+              to_send:,
+            ),
+          )
+
           let response_content_length = extract_content_length(decoded_headers)
 
           // END_STREAM + non-zero content-length = malformed
-          // (exempt HEAD responses and 204/304)
+          // (exempt HEAD, 204, 304)
           use <- bool.guard(
             end_stream
+              && status_code != 204
+              && status_code != 304
               && existing_stream.request_method != option.Some("HEAD")
               && case response_content_length {
               Ok(option.Some(n)) -> n != 0
