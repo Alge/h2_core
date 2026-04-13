@@ -2121,8 +2121,7 @@ pub fn receive_trailers_on_push_promise_stream_test() {
   // Server sends some data
   let assert Ok(#(server, data_bytes)) =
     send_data(server, promised_id, <<"body":utf8>>, False, option.None)
-  let assert Ok(#(client, _events, _to_send)) =
-    receive_data(client, data_bytes)
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, data_bytes)
 
   // Server sends trailers (HEADERS + END_STREAM) - no :status pseudo-header,
   // which is correct for trailers. This must be accepted.
@@ -2137,8 +2136,8 @@ pub fn receive_trailers_on_push_promise_stream_test() {
     receive_data(client, trailer_bytes)
   // Should get HeadersReceived for the trailers and StreamEnded
   let assert [
-    StreamEnded(stream_id: end_sid),
     HeadersReceived(stream_id: trailer_sid, end_stream: True, ..),
+    StreamEnded(stream_id: end_sid),
   ] = events
   assert trailer_sid == promised_id
   assert end_sid == promised_id
