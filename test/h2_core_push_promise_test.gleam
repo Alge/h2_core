@@ -4,12 +4,15 @@ import gleam/list
 import gleam/option.{None}
 import gleam/string
 import h2_core.{
-  type Connection, Cancel, Client, ConnectionError, Header, InvalidHeaders,
-  InvalidRole, InvalidStreamState, ProtocolError, PushDisabled,
-  PushPromiseReceived, Server, StreamReset, UnknownStream, WithIndexing,
-  open_stream, receive_data, send_data, send_headers, send_rst_stream,
+  type Connection, Cancel, Client, ConnectionError, Header, HeadersReceived,
+  InvalidHeaders, InvalidRole, InvalidStreamState, ProtocolError, PushDisabled,
+  PushPromiseReceived, Server, StreamEnded, StreamReset, UnknownStream,
+  WithIndexing, get_stream_state, open_stream, receive_data, send_data,
+  send_headers, send_rst_stream,
 }
-import h2_core/internal/stream.{Closed, Open, ReservedLocal, ReservedRemote}
+import h2_core/internal/stream.{
+  Closed, Open, ReservedLocal, ReservedRemote,
+}
 import h2_frame
 import helper
 
@@ -1198,4 +1201,143 @@ pub fn send_push_promise_continuation_uses_full_max_frame_size_test() {
     let assert h2_frame.Continuation(field_block_fragment: frag, ..) = f
     assert bit_array.byte_size(frag) == 16_384
   })
+}
+
+// =============================================================================
+// PUSH_PROMISE request_method tracking
+//
+// RFC 9113 Section 8.1.1 / RFC 9110 Section 6.4.1: Responses to HEAD
+// requests may include content-length that doesn't match the (empty) body.
+// The push promise headers contain the :method, so the promised stream
+// must track request_method so the HEAD exemption applies.
+// =============================================================================
+
+// A PUSH_PROMISE with HEAD method followed by a response with
+// content-length and END_STREAM must be accepted by the client. The
+// HEAD exemption requires the promised stream to store request_method.
+pub fn push_promise_head_response_with_content_length_is_valid_test() {
+  let #(server, client) = server_with_open_stream()
+
+  // Server pushes a HEAD request
+  let push_headers = [
+    Header(":method", <<"HEAD":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/pushed":utf8>>, WithIndexing),
+  ]
+  let assert Ok(#(server, push_bytes, promised_id)) =
+    h2_core.send_push_promise(server, 1, push_headers)
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, push_bytes)
+
+  // Server sends HEADERS response on the promised stream with
+  // content-length: 5000 and END_STREAM. Per RFC 9110 Section 6.4.1,
+  // HEAD responses are defined as having no content, so the
+  // content-length describes the resource size — not the body.
+  let assert Ok(#(_server, response_bytes)) =
+    send_headers(
+      server,
+      promised_id,
+      [
+        Header(":status", <<"200":utf8>>, WithIndexing),
+        Header("content-length", <<"5000":utf8>>, WithIndexing),
+      ],
+      True,
+    )
+  let assert Ok(#(client, events, _to_send)) =
+    receive_data(client, response_bytes)
+
+  // With the bug: request_method is None, HEAD exemption doesn't fire,
+  //   client rejects as malformed → StreamReset(ProtocolError)
+  // With the fix: request_method is Some("HEAD"), accepted correctly
+  let assert [
+    HeadersReceived(stream_id: sid, end_stream: True, ..),
+    StreamEnded(stream_id: sid2),
+  ] = events
+  assert sid == promised_id
+  assert sid2 == promised_id
+  let assert Ok(Closed) = get_stream_state(client, promised_id)
+}
+
+// =============================================================================
+// ReservedRemote content-length validation
+//
+// RFC 9113 Section 8.1.1: content-length validation applies to all
+// responses, including those on pushed streams. The ReservedRemote →
+// Closed transition (HEADERS with END_STREAM) must check that a
+// non-zero content-length with zero DATA bytes is malformed.
+// =============================================================================
+
+// A pushed GET response with content-length: 100 and END_STREAM on the
+// HEADERS frame means zero DATA bytes will follow. This is malformed
+// per RFC 9113 Section 8.1.1 — the content-length doesn't match the
+// body length (0).
+pub fn push_promise_response_with_content_length_and_end_stream_is_malformed_test() {
+  let #(server, client) = server_with_open_stream()
+
+  // Server pushes a GET request
+  let push_headers = [
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/pushed":utf8>>, WithIndexing),
+  ]
+  let assert Ok(#(server, push_bytes, promised_id)) =
+    h2_core.send_push_promise(server, 1, push_headers)
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, push_bytes)
+  let assert Ok(ReservedRemote) = get_stream_state(client, promised_id)
+
+  // Server sends response with content-length: 100 and END_STREAM.
+  // Body length is 0 (no DATA), so this is malformed.
+  let assert Ok(#(_server, response_bytes)) =
+    send_headers(
+      server,
+      promised_id,
+      [
+        Header(":status", <<"200":utf8>>, WithIndexing),
+        Header("content-length", <<"100":utf8>>, WithIndexing),
+      ],
+      True,
+    )
+  let assert Ok(#(client, events, _to_send)) =
+    receive_data(client, response_bytes)
+  let assert [StreamReset(stream_id: sid, error_code: ProtocolError)] = events
+  assert sid == promised_id
+  let assert Ok(Closed) = get_stream_state(client, promised_id)
+}
+
+// A pushed response with content-length: 0 and END_STREAM is valid —
+// the body length (0) matches content-length (0).
+pub fn push_promise_response_with_zero_content_length_and_end_stream_is_valid_test() {
+  let #(server, client) = server_with_open_stream()
+
+  let push_headers = [
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/pushed":utf8>>, WithIndexing),
+  ]
+  let assert Ok(#(server, push_bytes, promised_id)) =
+    h2_core.send_push_promise(server, 1, push_headers)
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, push_bytes)
+
+  // content-length: 0 + END_STREAM — body is 0 bytes, matches.
+  let assert Ok(#(_server, response_bytes)) =
+    send_headers(
+      server,
+      promised_id,
+      [
+        Header(":status", <<"200":utf8>>, WithIndexing),
+        Header("content-length", <<"0":utf8>>, WithIndexing),
+      ],
+      True,
+    )
+  let assert Ok(#(client, events, _to_send)) =
+    receive_data(client, response_bytes)
+  let assert [
+    HeadersReceived(stream_id: sid, end_stream: True, ..),
+    StreamEnded(stream_id: sid2),
+  ] = events
+  assert sid == promised_id
+  assert sid2 == promised_id
+  let assert Ok(Closed) = get_stream_state(client, promised_id)
 }
