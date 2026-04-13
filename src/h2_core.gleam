@@ -1181,7 +1181,15 @@ fn handle_headers_on_existing_stream(
 
           // Set final_response_received if this is a non-1xx response
           let existing_stream = case conn.role == Client && status_code >= 200 {
-            True -> Stream(..existing_stream, final_response_received: True)
+            True ->
+              Stream(
+                ..existing_stream,
+                final_response_received: True,
+                expected_content_length: case response_content_length {
+                  Ok(cl) -> cl
+                  _ -> option.None
+                },
+              )
             False -> existing_stream
           }
 
