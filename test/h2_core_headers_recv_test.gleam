@@ -2143,3 +2143,139 @@ pub fn receive_trailers_on_push_promise_stream_test() {
   assert end_sid == promised_id
   let assert Ok(Closed) = get_stream_state(client, promised_id)
 }
+
+// =============================================================================
+// Content-Length mismatch on HEADERS + END_STREAM
+// RFC 9113 Section 8.1.1: "A request or response is also malformed if the
+// value of a content-length header field does not equal the sum of the DATA
+// frame payload lengths that form the content"
+// =============================================================================
+
+// Server-side: a POST request with content-length but END_STREAM on HEADERS
+// means zero DATA frames will follow. content-length > 0 is a mismatch.
+pub fn receive_request_with_content_length_and_end_stream_is_malformed_test() {
+  let #(server, client) = helper.connected_pair()
+  let assert Ok(#(_client, headers_bytes, _stream_id)) =
+    open_stream(
+      client,
+      [
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
+        Header("content-length", <<"100":utf8>>, WithIndexing),
+      ],
+      True,
+    )
+  let assert Ok(#(server, events, _to_send)) =
+    receive_data(server, headers_bytes)
+  // Should be rejected as malformed - content-length says 100 but no DATA
+  let assert [StreamReset(stream_id: 1, error_code: ProtocolError)] = events
+  let assert Ok(Closed) = get_stream_state(server, 1)
+}
+
+// Server-side: content-length: 0 with END_STREAM is valid - zero bytes
+// promised, zero bytes delivered.
+pub fn receive_request_with_zero_content_length_and_end_stream_is_valid_test() {
+  let #(server, client) = helper.connected_pair()
+  let assert Ok(#(_client, headers_bytes, _stream_id)) =
+    open_stream(
+      client,
+      [
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
+        Header("content-length", <<"0":utf8>>, WithIndexing),
+      ],
+      True,
+    )
+  let assert Ok(#(server, events, _to_send)) =
+    receive_data(server, headers_bytes)
+  let assert [
+    HeadersReceived(stream_id: 1, end_stream: True, ..),
+    StreamEnded(stream_id: 1),
+  ] = events
+  let assert Ok(HalfClosedRemote) = get_stream_state(server, 1)
+}
+
+// Server-side: a GET request with no content-length and END_STREAM is normal.
+pub fn receive_get_request_with_end_stream_and_no_content_length_is_valid_test() {
+  let #(server, client) = helper.connected_pair()
+  let assert Ok(#(_client, headers_bytes, _stream_id)) =
+    open_stream(client, helper.request_headers(), True)
+  let assert Ok(#(server, events, _to_send)) =
+    receive_data(server, headers_bytes)
+  let assert [
+    HeadersReceived(stream_id: 1, end_stream: True, ..),
+    StreamEnded(stream_id: 1),
+  ] = events
+  let assert Ok(HalfClosedRemote) = get_stream_state(server, 1)
+}
+
+// Client-side: a 200 response with content-length: 100 and END_STREAM on
+// HEADERS means zero DATA. This is malformed for a normal response.
+pub fn receive_response_with_content_length_and_end_stream_is_malformed_test() {
+  let #(server, client) = helper.server_with_open_stream()
+  let assert Ok(#(_server, response_bytes)) =
+    send_headers(
+      server,
+      1,
+      [
+        Header(":status", <<"200":utf8>>, WithIndexing),
+        Header("content-length", <<"100":utf8>>, WithIndexing),
+      ],
+      True,
+    )
+  let assert Ok(#(client, events, _to_send)) =
+    receive_data(client, response_bytes)
+  let assert [StreamReset(stream_id: 1, error_code: ProtocolError)] = events
+  let assert Ok(Closed) = get_stream_state(client, 1)
+}
+
+// Client-side: RFC 9113 Section 8.1.1 - "A response that is defined as having
+// no content... MAY have a non-zero content-length header field, even though
+// no content is included in DATA frames."
+// 204 No Content with content-length is valid.
+pub fn receive_204_response_with_content_length_and_end_stream_is_valid_test() {
+  let #(server, client) = helper.server_with_open_stream()
+  let assert Ok(#(_server, response_bytes)) =
+    send_headers(
+      server,
+      1,
+      [
+        Header(":status", <<"204":utf8>>, WithIndexing),
+        Header("content-length", <<"100":utf8>>, WithIndexing),
+      ],
+      True,
+    )
+  let assert Ok(#(client, events, _to_send)) =
+    receive_data(client, response_bytes)
+  let assert [
+    HeadersReceived(stream_id: 1, end_stream: True, ..),
+    StreamEnded(stream_id: 1),
+  ] = events
+  // Open -> HalfClosedRemote (client received END_STREAM, but hasn't sent it)
+  let assert Ok(HalfClosedRemote) = get_stream_state(client, 1)
+}
+
+// Client-side: 304 Not Modified with content-length is valid per RFC 9113
+// Section 8.1.1 (defined as having no content).
+pub fn receive_304_response_with_content_length_and_end_stream_is_valid_test() {
+  let #(server, client) = helper.server_with_open_stream()
+  let assert Ok(#(_server, response_bytes)) =
+    send_headers(
+      server,
+      1,
+      [
+        Header(":status", <<"304":utf8>>, WithIndexing),
+        Header("content-length", <<"100":utf8>>, WithIndexing),
+      ],
+      True,
+    )
+  let assert Ok(#(client, events, _to_send)) =
+    receive_data(client, response_bytes)
+  let assert [
+    HeadersReceived(stream_id: 1, end_stream: True, ..),
+    StreamEnded(stream_id: 1),
+  ] = events
+  let assert Ok(HalfClosedRemote) = get_stream_state(client, 1)
+}
