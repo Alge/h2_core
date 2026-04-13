@@ -508,6 +508,21 @@ fn extract_content_length(
   }
 }
 
+fn extract_method(headers: List(Header)) -> option.Option(String) {
+  case headers {
+    [] -> option.None
+    [header, ..rest] -> {
+      case header.name {
+        ":method" ->
+          header.value
+          |> bit_array.to_string
+          |> option.from_result
+        _ -> extract_method(rest)
+      }
+    }
+  }
+}
+
 fn verify_mandatory_pseudoheaders(
   role role: Role,
   headers headers: List(Header),
@@ -1143,6 +1158,32 @@ fn handle_headers_on_existing_stream(
             ),
           )
 
+          // RFC 9113 Section 8.1.1 / [HTTP] Section 6.4.1: If content-length
+          // is present and end_stream is set on the HEADERS frame, the body
+          // length is 0 and must match content-length. A non-zero value is
+          // malformed — except for responses defined as having no content:
+          // 204, 304, and responses to HEAD requests (RFC 9110 Section 6.4.1).
+          let response_content_length = extract_content_length(decoded_headers)
+          use <- bool.guard(
+            end_stream
+              && conn.role == Client
+              && status_code != 204
+              && status_code != 304
+              && existing_stream.request_method != option.Some("HEAD")
+              && case response_content_length {
+              Ok(option.Some(n)) -> n != 0
+              _ -> False
+            },
+            handle_rst_stream(
+              conn:,
+              stream_id:,
+              error_code: ProtocolError,
+              flow_controlled_length: 0,
+              events:,
+              to_send:,
+            ),
+          )
+
           // Set final_response_received if this is a non-1xx response
           let existing_stream = case conn.role == Client && status_code >= 200 {
             True -> Stream(..existing_stream, final_response_received: True)
@@ -1300,6 +1341,8 @@ fn handle_headers_on_new_stream(
     |> result.replace_error(StreamError(stream_id, ProtocolError)),
   )
 
+  let request_method = extract_method(decoded_headers)
+
   let stream = case end_stream {
     False ->
       Stream(
@@ -1309,6 +1352,7 @@ fn handle_headers_on_new_stream(
         ),
         state: Open,
         expected_content_length: content_length,
+        request_method:,
       )
     True ->
       Stream(
@@ -1318,6 +1362,7 @@ fn handle_headers_on_new_stream(
         ),
         state: HalfClosedRemote,
         expected_content_length: content_length,
+        request_method:,
       )
   }
 
@@ -1327,6 +1372,26 @@ fn handle_headers_on_new_stream(
       last_remote_stream_id: stream_id,
       streams: dict.insert(conn.streams, stream_id, stream),
     )
+
+  // RFC 9113 Section 8.1.1: If content-length is present and end_stream
+  // is set on the HEADERS frame (no DATA will follow), the received body
+  // length is 0 and must equal content-length. A non-zero content-length
+  // is therefore malformed.
+  use <- bool.guard(
+    end_stream
+      && case content_length {
+      option.Some(n) -> n != 0
+      option.None -> False
+    },
+    handle_rst_stream(
+      conn:,
+      stream_id:,
+      error_code: ProtocolError,
+      flow_controlled_length: 0,
+      events:,
+      to_send:,
+    ),
+  )
 
   let new_events = [
     HeadersReceived(
@@ -1373,9 +1438,12 @@ pub fn open_stream(
   )
 
   let stream =
-    new_stream(
-      send_window_size: conn.remote_settings.initial_window_size,
-      recv_window_size: conn.local_settings.initial_window_size,
+    Stream(
+      ..new_stream(
+        send_window_size: conn.remote_settings.initial_window_size,
+        recv_window_size: conn.local_settings.initial_window_size,
+      ),
+      request_method: extract_method(headers),
     )
   let #(conn, stream_id) = add_stream(conn, stream)
 

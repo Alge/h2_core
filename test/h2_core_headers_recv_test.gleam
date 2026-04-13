@@ -2279,3 +2279,43 @@ pub fn receive_304_response_with_content_length_and_end_stream_is_valid_test() {
   ] = events
   let assert Ok(HalfClosedRemote) = get_stream_state(client, 1)
 }
+
+// Client-side: HEAD response with content-length is valid per RFC 9113
+// Section 8.1.1 / RFC 9110 Section 6.4.1. A response to a HEAD request
+// is defined as having no content, so content-length describes the resource
+// size rather than the (empty) body.
+pub fn receive_head_response_with_content_length_and_end_stream_is_valid_test() {
+  let #(server, client) = helper.connected_pair()
+  // Client opens stream with HEAD method
+  let assert Ok(#(client, headers_bytes, _stream_id)) =
+    open_stream(
+      client,
+      [
+        Header(":method", <<"HEAD":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
+      ],
+      True,
+    )
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, headers_bytes)
+  // Server responds with 200 + content-length: 5000 + END_STREAM
+  let assert Ok(#(_server, response_bytes)) =
+    send_headers(
+      server,
+      1,
+      [
+        Header(":status", <<"200":utf8>>, WithIndexing),
+        Header("content-length", <<"5000":utf8>>, WithIndexing),
+      ],
+      True,
+    )
+  let assert Ok(#(client, events, _to_send)) =
+    receive_data(client, response_bytes)
+  // Should be accepted - HEAD response with content-length is valid
+  let assert [
+    HeadersReceived(stream_id: 1, end_stream: True, ..),
+    StreamEnded(stream_id: 1),
+  ] = events
+  let assert Ok(Closed) = get_stream_state(client, 1)
+}
