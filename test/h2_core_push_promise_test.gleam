@@ -1380,3 +1380,101 @@ pub fn push_promise_response_data_exceeding_content_length_is_malformed_test() {
   let assert [StreamReset(stream_id: sid, error_code: ProtocolError)] = events
   assert sid == promised_id
 }
+
+// RFC 9113 Section 8.1: Informational responses (1xx) with END_STREAM
+// are malformed. The ReservedRemote branch must reject these.
+pub fn push_promise_1xx_response_with_end_stream_is_malformed_test() {
+  let #(server, client) = server_with_open_stream()
+
+  let push_headers = [
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/pushed":utf8>>, WithIndexing),
+  ]
+  let assert Ok(#(server, push_bytes, promised_id)) =
+    h2_core.send_push_promise(server, 1, push_headers)
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, push_bytes)
+
+  let assert Ok(#(_server, response_bytes)) =
+    send_headers(
+      server,
+      promised_id,
+      [Header(":status", <<"100":utf8>>, WithIndexing)],
+      True,
+    )
+  let assert Ok(#(_client, events, _to_send)) =
+    receive_data(client, response_bytes)
+  let assert [StreamReset(stream_id: sid, error_code: ProtocolError)] = events
+  assert sid == promised_id
+}
+
+// RFC 9113 Section 8.1.1 / RFC 9110 Section 6.4.1: A 204 response is
+// defined as having no content. A non-zero content-length with END_STREAM
+// is valid because content-length does not describe the body.
+pub fn push_promise_204_response_with_content_length_and_end_stream_is_valid_test() {
+  let #(server, client) = server_with_open_stream()
+
+  let push_headers = [
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/pushed":utf8>>, WithIndexing),
+  ]
+  let assert Ok(#(server, push_bytes, promised_id)) =
+    h2_core.send_push_promise(server, 1, push_headers)
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, push_bytes)
+
+  let assert Ok(#(_server, response_bytes)) =
+    send_headers(
+      server,
+      promised_id,
+      [
+        Header(":status", <<"204":utf8>>, WithIndexing),
+        Header("content-length", <<"100":utf8>>, WithIndexing),
+      ],
+      True,
+    )
+  let assert Ok(#(client, events, _to_send)) =
+    receive_data(client, response_bytes)
+  let assert [
+    HeadersReceived(stream_id: sid, end_stream: True, ..),
+    StreamEnded(stream_id: sid2),
+  ] = events
+  assert sid == promised_id
+  assert sid2 == promised_id
+  let assert Ok(Closed) = get_stream_state(client, promised_id)
+}
+
+// RFC 9113 Section 8.1.1 / RFC 9110 Section 6.4.1: A 304 response is
+// defined as having no content. Same exemption as 204.
+pub fn push_promise_304_response_with_content_length_and_end_stream_is_valid_test() {
+  let #(server, client) = server_with_open_stream()
+
+  let push_headers = [
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/pushed":utf8>>, WithIndexing),
+  ]
+  let assert Ok(#(server, push_bytes, promised_id)) =
+    h2_core.send_push_promise(server, 1, push_headers)
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, push_bytes)
+
+  let assert Ok(#(_server, response_bytes)) =
+    send_headers(
+      server,
+      promised_id,
+      [
+        Header(":status", <<"304":utf8>>, WithIndexing),
+        Header("content-length", <<"100":utf8>>, WithIndexing),
+      ],
+      True,
+    )
+  let assert Ok(#(client, events, _to_send)) =
+    receive_data(client, response_bytes)
+  let assert [
+    HeadersReceived(stream_id: sid, end_stream: True, ..),
+    StreamEnded(stream_id: sid2),
+  ] = events
+  assert sid == promised_id
+  assert sid2 == promised_id
+  let assert Ok(Closed) = get_stream_state(client, promised_id)
+}

@@ -1003,6 +1003,14 @@ fn handle_decoded_push_promise(
     ),
   )
 
+  let request_method = case
+    list.find(decoded_headers, fn(h) { h.name == ":method" })
+  {
+    Ok(header) ->
+      option.Some(bit_array.to_string(header.value) |> result.unwrap(""))
+    Error(_) -> option.None
+  }
+
   let promised_stream =
     Stream(
       ..new_stream(
@@ -1010,6 +1018,7 @@ fn handle_decoded_push_promise(
         recv_window_size: conn.local_settings.initial_window_size,
       ),
       state: ReservedRemote,
+      request_method:,
     )
 
   let conn =
@@ -1247,6 +1256,27 @@ fn handle_headers_on_existing_stream(
         // RFC 9113 Section 5.1 (reserved remote) - HEADERS transitions to
         // half-closed (local)
         ReservedRemote -> {
+          let response_content_length = extract_content_length(decoded_headers)
+
+          // END_STREAM + non-zero content-length = malformed
+          // (exempt HEAD responses and 204/304)
+          use <- bool.guard(
+            end_stream
+              && existing_stream.request_method != option.Some("HEAD")
+              && case response_content_length {
+              Ok(option.Some(n)) -> n != 0
+              _ -> False
+            },
+            handle_rst_stream(
+              conn:,
+              stream_id:,
+              error_code: ProtocolError,
+              flow_controlled_length: 0,
+              events:,
+              to_send:,
+            ),
+          )
+
           let new_state = case end_stream {
             True -> Closed
             False -> HalfClosedLocal
@@ -1261,6 +1291,10 @@ fn handle_headers_on_existing_stream(
                   ..existing_stream,
                   state: new_state,
                   final_response_received: True,
+                  expected_content_length: case response_content_length {
+                    Ok(cl) -> cl
+                    _ -> option.None
+                  },
                 ),
               ),
             )
@@ -1624,6 +1658,7 @@ pub fn send_push_promise(
           recv_window_size: conn.local_settings.initial_window_size,
         ),
         state: ReservedLocal,
+        request_method: extract_method(headers),
       ),
     )
 
