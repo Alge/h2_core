@@ -1202,7 +1202,11 @@ fn handle_headers_on_existing_stream(
               streams: dict.insert(
                 conn.streams,
                 stream_id,
-                Stream(..existing_stream, state: new_state),
+                Stream(
+                  ..existing_stream,
+                  state: new_state,
+                  final_response_received: True,
+                ),
               ),
             )
 
