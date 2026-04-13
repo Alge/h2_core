@@ -1645,6 +1645,71 @@ pub fn receive_content_length_zero_no_data_succeeds_test() {
     events
 }
 
+// =============================================================================
+// Client-side content-length validation on response DATA
+//
+// RFC 9113 Section 8.1.1: "A request or response is also malformed if
+// the value of a content-length header field does not equal the sum of
+// the DATA frame payload lengths that form the content."
+//
+// These tests verify the client validates response DATA against the
+// content-length declared in the response HEADERS.
+// =============================================================================
+
+// Client receives a 200 response with content-length: 5, then the server
+// sends 10 bytes of DATA. The client must detect the excess and reset
+// the stream with PROTOCOL_ERROR.
+pub fn client_receive_response_data_exceeding_content_length_test() {
+  let #(server, client) = helper.server_with_open_stream()
+  // Server sends response HEADERS with content-length: 5 (no END_STREAM)
+  let assert Ok(#(server, response_bytes)) =
+    send_headers(
+      server,
+      1,
+      [
+        Header(":status", <<"200":utf8>>, WithIndexing),
+        Header("content-length", <<"5":utf8>>, WithIndexing),
+      ],
+      False,
+    )
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, response_bytes)
+
+  // Server sends 10 bytes of DATA - exceeds content-length of 5
+  let assert Ok(#(_server, data_bytes)) =
+    h2_core.send_data(server, 1, <<"0123456789":utf8>>, False, None)
+  let assert Ok(#(_client, events, _to_send)) =
+    receive_data(client, data_bytes)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+}
+
+// Client receives a 200 response with content-length: 10, then the server
+// sends only 5 bytes with END_STREAM. The client must detect the undershoot
+// and reset the stream with PROTOCOL_ERROR.
+pub fn client_receive_response_data_less_than_content_length_test() {
+  let #(server, client) = helper.server_with_open_stream()
+  // Server sends response HEADERS with content-length: 10 (no END_STREAM)
+  let assert Ok(#(server, response_bytes)) =
+    send_headers(
+      server,
+      1,
+      [
+        Header(":status", <<"200":utf8>>, WithIndexing),
+        Header("content-length", <<"10":utf8>>, WithIndexing),
+      ],
+      False,
+    )
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, response_bytes)
+
+  // Server sends only 5 bytes with END_STREAM
+  let assert Ok(#(_server, data_bytes)) =
+    h2_core.send_data(server, 1, <<"hello":utf8>>, True, None)
+  let assert Ok(#(_client, events, _to_send)) =
+    receive_data(client, data_bytes)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+}
+
 // RFC 9113 Section 8.1.1 - A non-numeric content-length value is
 // malformed.
 pub fn receive_headers_invalid_content_length_is_malformed_test() {
