@@ -1478,3 +1478,78 @@ pub fn push_promise_304_response_with_content_length_and_end_stream_is_valid_tes
   assert sid2 == promised_id
   let assert Ok(Closed) = get_stream_state(client, promised_id)
 }
+
+// =============================================================================
+// RFC 9113 Section 8.4.2 / 8.1: Pushed responses use the same frame
+// sequence as regular responses (Section 8.1). This includes the
+// possibility of 1xx informational responses before the final response.
+//
+// A 1xx response (without END_STREAM) transitions ReservedRemote →
+// HalfClosedLocal. A subsequent 200 response MUST be accepted — it is
+// valid to receive multiple HEADERS frames on a pushed stream just like
+// on a regular stream.
+//
+// Bug: ReservedRemote unconditionally sets final_response_received=True,
+// so when the 200 arrives in the HalfClosedLocal branch, the guard
+// (final_response_received && !end_stream) fires and incorrectly
+// rejects it as a ProtocolError.
+// =============================================================================
+
+pub fn push_promise_1xx_followed_by_200_is_valid_test() {
+  let #(server, client) = server_with_open_stream()
+
+  let push_headers = [
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/pushed":utf8>>, WithIndexing),
+  ]
+  let assert Ok(#(server, push_bytes, promised_id)) =
+    h2_core.send_push_promise(server, 1, push_headers)
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, push_bytes)
+  let assert Ok(ReservedRemote) = get_stream_state(client, promised_id)
+
+  // Server sends 1xx informational response (no END_STREAM)
+  // ReservedRemote → HalfClosedLocal
+  let assert Ok(#(_server, info_bytes)) =
+    send_headers(
+      server,
+      promised_id,
+      [Header(":status", <<"100":utf8>>, WithIndexing)],
+      False,
+    )
+  let assert Ok(#(client, events1, _to_send)) =
+    receive_data(client, info_bytes)
+  let assert [HeadersReceived(stream_id: sid1, end_stream: False, ..)] = events1
+  assert sid1 == promised_id
+  let assert Ok(HalfClosedLocal) = get_stream_state(client, promised_id)
+
+  // Server sends the final 200 response with END_STREAM.
+  // Note: send_headers rejects this because headers_sent=True makes
+  // validate_headers expect trailers (no :status). This is a separate
+  // server-side bug (headers_sent should not be True after 1xx). We
+  // work around it by manually encoding the HEADERS frame using HPACK
+  // static index 0x88 = :status 200.
+  let assert Ok(final_bytes) =
+    h2_frame.encode_headers(
+      stream_id: promised_id,
+      end_stream: True,
+      end_headers: True,
+      priority: None,
+      field_block_fragment: <<0x88>>,
+      padding: None,
+    )
+  // With the bug: the client rejects the 200 because
+  // final_response_received was already True from the 1xx, and the
+  // guard (final_response_received && !end_stream) fires.
+  // With the fix: 1xx doesn't set final_response_received, so
+  // the 200 is accepted normally.
+  let assert Ok(#(client, events2, _to_send)) =
+    receive_data(client, final_bytes)
+  let assert [
+    HeadersReceived(stream_id: sid2, end_stream: True, ..),
+    StreamEnded(stream_id: sid3),
+  ] = events2
+  assert sid2 == promised_id
+  assert sid3 == promised_id
+  let assert Ok(Closed) = get_stream_state(client, promised_id)
+}
