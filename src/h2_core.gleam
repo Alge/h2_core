@@ -490,19 +490,35 @@ fn extract_status_code(headers: List(Header)) -> Result(Int, Nil) {
   }
 }
 
+// RFC 9110 Section 8.6: content-length must be a non-negative integer.
+// Duplicate content-length headers with different values are malformed.
+// Duplicate content-length headers with the same value are equivalent
+// to a single instance and are allowed.
 fn extract_content_length(
   headers: List(Header),
 ) -> Result(option.Option(Int), Nil) {
-  case headers {
+  // Collect all content-length headers
+  let cl_values = list.filter(headers, fn(h) { h.name == "content-length" })
+  case cl_values {
+    // No content-length header present
     [] -> Ok(option.None)
-    [header, ..rest] -> {
-      case header.name {
-        "content-length" ->
-          header.value
+    _ -> {
+      // Parse all content-length values; any non-numeric value is malformed
+      use parsed <- result.try(
+        list.try_map(cl_values, fn(h) {
+          h.value
           |> bit_array.to_string
           |> result.try(int.parse)
-          |> result.map(option.Some)
-        _ -> extract_content_length(rest)
+        }),
+      )
+      case parsed {
+        [] -> Ok(option.None)
+        // All values must be non-negative and identical
+        [n, ..rest] ->
+          case n >= 0 && list.all(rest, fn(v) { v == n }) {
+            True -> Ok(option.Some(n))
+            False -> Error(Nil)
+          }
       }
     }
   }
