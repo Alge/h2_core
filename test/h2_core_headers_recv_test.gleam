@@ -5,10 +5,12 @@ import h2_core.{
   Client, CompressionError, ConnectionError, Header, HeadersReceived,
   MaxConcurrentStreams, NeverIndexed, ProtocolError, RefusedStream, Server,
   StreamClosed, StreamEnded, StreamRefused, StreamReset, WithIndexing,
-  WithoutIndexing, get_stream_state, open_stream, receive_data, send_headers,
-  send_settings,
+  WithoutIndexing, get_stream_state, open_stream, receive_data, send_data,
+  send_headers, send_settings,
 }
-import h2_core/internal/stream.{Closed, HalfClosedLocal, HalfClosedRemote, Open}
+import h2_core/internal/stream.{
+  Closed, HalfClosedLocal, HalfClosedRemote, Open, ReservedRemote,
+}
 import h2_frame
 import helper
 
@@ -2083,4 +2085,62 @@ pub fn receive_headers_all_obs_text_bytes_in_value_is_accepted_test() {
         end_stream: False,
       ),
     ]
+}
+
+// =============================================================================
+// Bug: ReservedRemote -> HalfClosedLocal transition must set
+// final_response_received so that subsequent trailers are validated correctly.
+// =============================================================================
+
+// RFC 9113 Section 8.1: "An HTTP request/response exchange fully consumes a
+// single stream. [...] Trailers are indicated by a header block with the
+// END_STREAM flag set."
+//
+// When a client receives a push response (HEADERS on a ReservedRemote stream),
+// final_response_received must be set so that subsequent HEADERS+END_STREAM
+// are treated as trailers rather than a second response missing :status.
+pub fn receive_trailers_on_push_promise_stream_test() {
+  let #(server, client, promised_id) =
+    helper.client_with_reserved_remote_stream()
+  let assert Ok(ReservedRemote) = get_stream_state(client, promised_id)
+
+  // Server sends the push response (200) on the promised stream without END_STREAM
+  let assert Ok(#(server, response_bytes)) =
+    send_headers(
+      server,
+      promised_id,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      False,
+    )
+  let assert Ok(#(client, events, _to_send)) =
+    receive_data(client, response_bytes)
+  let assert [HeadersReceived(stream_id: sid, end_stream: False, ..)] = events
+  assert sid == promised_id
+  let assert Ok(HalfClosedLocal) = get_stream_state(client, promised_id)
+
+  // Server sends some data
+  let assert Ok(#(server, data_bytes)) =
+    send_data(server, promised_id, <<"body":utf8>>, False, option.None)
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, data_bytes)
+
+  // Server sends trailers (HEADERS + END_STREAM) - no :status pseudo-header,
+  // which is correct for trailers. This must be accepted.
+  let assert Ok(#(_server, trailer_bytes)) =
+    send_headers(
+      server,
+      promised_id,
+      [Header("x-checksum", <<"abc123":utf8>>, WithIndexing)],
+      True,
+    )
+  let assert Ok(#(client, events, _to_send)) =
+    receive_data(client, trailer_bytes)
+  // Should get HeadersReceived for the trailers and StreamEnded
+  let assert [
+    StreamEnded(stream_id: end_sid),
+    HeadersReceived(stream_id: trailer_sid, end_stream: True, ..),
+  ] = events
+  assert trailer_sid == promised_id
+  assert end_sid == promised_id
+  let assert Ok(Closed) = get_stream_state(client, promised_id)
 }
