@@ -1202,7 +1202,11 @@ fn handle_headers_on_existing_stream(
               streams: dict.insert(
                 conn.streams,
                 stream_id,
-                Stream(..existing_stream, state: new_state),
+                Stream(
+                  ..existing_stream,
+                  state: new_state,
+                  final_response_received: True,
+                ),
               ),
             )
 
@@ -2529,13 +2533,30 @@ fn parse_loop(
                 Error(Nil) -> Error(ConnectionError(ProtocolError))
               })
 
+              let payload_length = case padding {
+                option.Some(pad_length) ->
+                  1 + bit_array.byte_size(data) + pad_length
+                option.None -> bit_array.byte_size(data)
+              }
+
+              let new_conn_recv_window = conn.recv_window_size - payload_length
+
+              // Make sure that the data does not exceed the connection recv window
+              use <- bool.guard(
+                new_conn_recv_window < 0,
+                Error(ConnectionError(FlowControlError)),
+              )
+
+              let conn =
+                Connection(..conn, recv_window_size: new_conn_recv_window)
+
               use <- bool.guard(
                 stream.state == Closed,
                 handle_rst_stream(
                   conn: conn,
                   stream_id: stream_id,
                   error_code: StreamClosed,
-                  flow_controlled_length: 0,
+                  flow_controlled_length: payload_length,
                   events: events,
                   to_send: to_send,
                 ),
@@ -2550,20 +2571,6 @@ fn parse_loop(
                 }
                 False -> stream.state
               }
-
-              let payload_length = case padding {
-                option.Some(pad_length) ->
-                  1 + bit_array.byte_size(data) + pad_length
-                option.None -> bit_array.byte_size(data)
-              }
-
-              let new_conn_recv_window = conn.recv_window_size - payload_length
-
-              // Make sure that the data does not exceed the connection recv window
-              use <- bool.guard(
-                new_conn_recv_window < 0,
-                Error(ConnectionError(FlowControlError)),
-              )
 
               let new_stream_recv_window =
                 stream.recv_window_size - payload_length
@@ -2581,7 +2588,6 @@ fn parse_loop(
                         + bit_array.byte_size(data),
                     ),
                   ),
-                  recv_window_size: new_conn_recv_window,
                 )
 
               // Make sure we didn't receive more data than the expected content length
