@@ -1309,10 +1309,14 @@ fn handle_headers_on_existing_stream(
                 Stream(
                   ..existing_stream,
                   state: new_state,
-                  final_response_received: True,
-                  expected_content_length: case response_content_length {
-                    Ok(cl) -> cl
-                    _ -> option.None
+                  final_response_received: status_code >= 200,
+                  expected_content_length: case status_code >= 200 {
+                    True ->
+                      case response_content_length {
+                        Ok(cl) -> cl
+                        _ -> option.None
+                      }
+                    False -> option.None
                   },
                 ),
               ),
@@ -1576,7 +1580,14 @@ pub fn send_headers(
       }
   }
 
-  let stream = Stream(..stream, state: new_state, headers_sent: True)
+  let headers_sent = case conn.role {
+    Server ->
+      extract_status_code(headers)
+      |> result.unwrap(0)
+      >= 200
+    Client -> True
+  }
+  let stream = Stream(..stream, state: new_state, headers_sent: headers_sent)
 
   let conn =
     Connection(..conn, streams: dict.insert(conn.streams, stream_id, stream))
