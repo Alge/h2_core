@@ -2280,6 +2280,96 @@ pub fn receive_304_response_with_content_length_and_end_stream_is_valid_test() {
   let assert Ok(HalfClosedRemote) = get_stream_state(client, 1)
 }
 
+// =============================================================================
+// HPACK decoder state preservation — RFC 9113 Section 4.3
+//
+// "A decoding error in a header block MUST be treated as a connection error
+// (Section 5.4.1) of type COMPRESSION_ERROR."
+//
+// However, when HPACK decoding succeeds but higher-level validation fails
+// (e.g. invalid UTF-8 in a header name), the HPACK dynamic table has
+// already been updated. The connection must preserve the updated table so
+// that subsequent header blocks decode correctly.
+// =============================================================================
+
+// RFC 9113 Section 4.3: HPACK decoder state must be preserved even when
+// a header block is rejected for non-compression reasons (e.g. invalid
+// UTF-8 in header name). If the dynamic table update is discarded, all
+// subsequent HEADERS frames that reference the dynamic table will fail
+// with COMPRESSION_ERROR.
+pub fn hpack_decoder_state_preserved_after_invalid_utf8_header_test() {
+  let server = helper.connected_connection(Server)
+
+  // Craft a HEADERS frame on stream 1 with two literal-with-indexing headers:
+  // 1) x-valid: good  (valid, added to dynamic table at index 62, then 63)
+  // 2) \xFF\xFE: bad  (invalid UTF-8 name, added to dynamic table at index 62)
+  //
+  // HPACK encoding:
+  //   0x82       = :method GET (static index 2)
+  //   0x87       = :scheme https (static index 7)
+  //   0x84       = :path / (static index 4)
+  //   0x40       = literal with incremental indexing, new name
+  //   0x07       = name length 7 (no Huffman)
+  //   "x-valid"  = 0x78 0x2D 0x76 0x61 0x6C 0x69 0x64
+  //   0x04       = value length 4
+  //   "good"     = 0x67 0x6F 0x6F 0x64
+  //   0x40       = literal with incremental indexing, new name
+  //   0x02       = name length 2 (no Huffman)
+  //   0xFF 0xFE  = invalid UTF-8 bytes
+  //   0x03       = value length 3
+  //   "bad"      = 0x62 0x61 0x64
+  let hpack_block = <<
+    0x82, 0x87, 0x84, 0x40, 0x07, 0x78, 0x2D, 0x76, 0x61, 0x6C, 0x69, 0x64,
+    0x04, 0x67, 0x6F, 0x6F, 0x64, 0x40, 0x02, 0xFF, 0xFE, 0x03, 0x62, 0x61,
+    0x64,
+  >>
+
+  let assert Ok(headers_frame_1) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: hpack_block,
+      padding: option.None,
+    )
+
+  // Server should reject this with a stream error (invalid UTF-8 header name)
+  // but must preserve the HPACK dynamic table state.
+  let assert Ok(#(server, events, _to_send)) =
+    receive_data(server, headers_frame_1)
+  let assert [StreamReset(stream_id: 1, error_code: ProtocolError)] = events
+
+  // Now send a second HEADERS frame on stream 3 that references the dynamic
+  // table. After decoding frame 1, the dynamic table should contain:
+  //   Index 62: \xFF\xFE: bad  (most recently added)
+  //   Index 63: x-valid: good
+  //
+  // We reference index 63 (x-valid: good) via indexed representation 0xBF.
+  //   0x82       = :method GET
+  //   0x87       = :scheme https
+  //   0x84       = :path /
+  //   0xBF       = indexed, index 63
+  let hpack_block_2 = <<0x82, 0x87, 0x84, 0xBF>>
+
+  let assert Ok(headers_frame_2) =
+    h2_frame.encode_headers(
+      stream_id: 3,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: hpack_block_2,
+      padding: option.None,
+    )
+
+  // With the bug: HPACK table was discarded, index 63 doesn't exist →
+  //   ConnectionError(CompressionError)
+  // With the fix: table preserved, index 63 resolves to x-valid: good → success
+  let assert Ok(#(_server, events, _to_send)) =
+    receive_data(server, headers_frame_2)
+  let assert [HeadersReceived(stream_id: 3, end_stream: False, ..)] = events
+}
+
 // Client-side: HEAD response with content-length is valid per RFC 9113
 // Section 8.1.1 / RFC 9110 Section 6.4.1. A response to a HEAD request
 // is defined as having no content, so content-length describes the resource
