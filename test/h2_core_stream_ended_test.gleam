@@ -117,6 +117,64 @@ pub fn trailers_end_stream_emits_stream_ended_test() {
   ] = events
 }
 
+// RFC 9113 Section 8.1: "Trailer fields are carried in a field block that also
+// terminates the stream [...] where the HEADERS frame bears an END_STREAM flag."
+// "Trailers MUST NOT include pseudo-header fields."
+//
+// Server-to-client trailers (HEADERS+END_STREAM after a final response) must
+// be accepted and emitted as HeadersReceived+StreamEnded. They carry no
+// pseudo-header fields - this is valid and must NOT be treated as an error.
+pub fn server_trailers_received_by_client_test() {
+  let #(server, client) = helper.server_with_open_stream()
+  // Server sends 200 response without END_STREAM (stream stays open)
+  let assert Ok(#(server, response_bytes)) =
+    send_headers(server, 1, helper.response_headers(), False)
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, response_bytes)
+
+  // Server sends trailer headers with END_STREAM - no pseudo-headers per RFC
+  let assert Ok(#(_server, trailer_bytes)) =
+    send_headers(
+      server,
+      1,
+      [Header("x-trailer", <<"done":utf8>>, WithIndexing)],
+      True,
+    )
+  let assert Ok(#(_client, events, _to_send)) =
+    receive_data(client, trailer_bytes)
+  let assert [
+    HeadersReceived(stream_id: 1, end_stream: True, ..),
+    StreamEnded(stream_id: 1),
+  ] = events
+}
+
+// RFC 9113 Section 8.1: trailers after DATA frames must also be accepted.
+pub fn server_trailers_after_data_received_by_client_test() {
+  let #(server, client) = helper.server_with_open_stream()
+  let assert Ok(#(server, response_bytes)) =
+    send_headers(server, 1, helper.response_headers(), False)
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, response_bytes)
+
+  let assert Ok(#(server, data_bytes)) =
+    send_data(server, 1, <<"hello":utf8>>, False, None)
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, data_bytes)
+
+  let assert Ok(#(_server, trailer_bytes)) =
+    send_headers(
+      server,
+      1,
+      [Header("x-trailer", <<"done":utf8>>, WithIndexing)],
+      True,
+    )
+  let assert Ok(#(_client, events, _to_send)) =
+    receive_data(client, trailer_bytes)
+  let assert [
+    HeadersReceived(stream_id: 1, end_stream: True, ..),
+    StreamEnded(stream_id: 1),
+  ] = events
+}
+
 // --- HEADERS + END_STREAM on a push promise (reserved remote) stream ---
 
 // Receiving HEADERS+END_STREAM on a reserved (remote) stream (server push

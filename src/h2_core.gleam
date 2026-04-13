@@ -1096,9 +1096,20 @@ fn handle_headers_on_existing_stream(
 
           use status_code <- result.try(
             {
-              case conn.role {
-                Client -> extract_status_code(decoded_headers)
-                Server -> Ok(0)
+              case
+                conn.role,
+                existing_stream.final_response_received,
+                end_stream
+              {
+                // RFC 9113 Section 8.1: trailers carry no pseudo-header fields;
+                // use 0 as a sentinel to skip the checks below
+                Client, True, True -> Ok(0)
+                // extract :status from response headers; fails if missing
+                Client, _, _ -> {
+                  extract_status_code(decoded_headers)
+                }
+                // servers receive requests, which have no :status
+                Server, _, _ -> Ok(0)
               }
             }
             |> result.replace_error(ConnectionError(ProtocolError)),
