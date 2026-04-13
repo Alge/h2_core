@@ -1553,3 +1553,41 @@ pub fn push_promise_1xx_followed_by_200_is_valid_test() {
   assert sid3 == promised_id
   let assert Ok(Closed) = get_stream_state(client, promised_id)
 }
+
+// RFC 9113 Section 8.4.2 / 8.1: After sending a 1xx informational
+// response on a pushed stream, the server must be able to send the
+// final (e.g. 200) response via send_headers. Currently headers_sent
+// is set to True after the 1xx, which causes validate_headers to
+// treat the 200 as trailers and reject :status as invalid.
+pub fn server_send_200_after_1xx_on_pushed_stream_test() {
+  let #(server, _client) = server_with_open_stream()
+
+  let push_headers = [
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/pushed":utf8>>, WithIndexing),
+  ]
+  let assert Ok(#(server, _push_bytes, promised_id)) =
+    h2_core.send_push_promise(server, 1, push_headers)
+
+  // Server sends 1xx informational response (no END_STREAM)
+  // ReservedLocal → HalfClosedRemote
+  let assert Ok(#(server, _info_bytes)) =
+    send_headers(
+      server,
+      promised_id,
+      [Header(":status", <<"100":utf8>>, WithIndexing)],
+      False,
+    )
+
+  // Server sends final 200 response — must succeed.
+  // Bug: headers_sent is True from the 1xx, so validate_headers
+  // treats this as trailers and rejects :status → InvalidHeaders.
+  let assert Ok(#(_server, _response_bytes)) =
+    send_headers(
+      server,
+      promised_id,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      True,
+    )
+}

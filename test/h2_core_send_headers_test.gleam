@@ -134,6 +134,35 @@ pub fn send_headers_interim_response_does_not_close_stream_test() {
   let assert Ok(Open) = h2_core.get_stream_state(server, 1)
 }
 
+// RFC 9113 Section 8.1: After sending a 1xx informational response,
+// the server must be able to send the final response (e.g. 200) on
+// the same stream. The 1xx is not the final response, so headers_sent
+// should not prevent sending another HEADERS with :status.
+//
+// Bug: send_headers sets headers_sent=True after the 1xx, which causes
+// validate_headers to treat the 200 as trailers and reject :status.
+pub fn send_headers_200_after_1xx_on_regular_stream_test() {
+  let #(server, _client) = server_with_open_stream()
+  // Server sends 1xx informational response
+  let assert Ok(#(server, _to_send)) =
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"100":utf8>>, WithIndexing)],
+      False,
+    )
+  let assert Ok(Open) = h2_core.get_stream_state(server, 1)
+
+  // Server sends final 200 response — must succeed
+  let assert Ok(#(_server, _to_send)) =
+    send_headers(
+      server,
+      1,
+      [Header(":status", <<"200":utf8>>, WithIndexing)],
+      True,
+    )
+}
+
 // RFC 9113 Section 5.1 - Without END_STREAM the stream state stays Open.
 pub fn send_headers_without_end_stream_does_not_change_state_test() {
   let #(server, _client) = server_with_open_stream()
