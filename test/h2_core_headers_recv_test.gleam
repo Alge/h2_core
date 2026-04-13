@@ -2408,3 +2408,100 @@ pub fn receive_head_response_with_content_length_and_end_stream_is_valid_test() 
   ] = events
   let assert Ok(Closed) = get_stream_state(client, 1)
 }
+
+// =============================================================================
+// Trailer content-length validation — RFC 9113 Section 8.1.1
+//
+// "A request or response is also malformed if the value of a
+// content-length header field does not equal the sum of the DATA frame
+// payload lengths that form the content."
+//
+// When a stream is closed via trailers (HEADERS with END_STREAM), the
+// total received DATA must match the content-length declared in the
+// initial HEADERS. An undershoot must be detected even though no further
+// DATA frames will arrive.
+// =============================================================================
+
+// Server-side: client sends content-length: 100, then 50 bytes of DATA
+// (no END_STREAM), then trailers with END_STREAM. The received body
+// length (50) doesn't match the declared content-length (100). The
+// server must reject this as malformed.
+pub fn receive_trailers_with_content_length_undershoot_is_malformed_test() {
+  let #(server, client) = helper.connected_pair()
+
+  // Client sends POST with content-length: 100
+  let assert Ok(#(client, headers_bytes, _stream_id)) =
+    open_stream(
+      client,
+      [
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
+        Header("content-length", <<"100":utf8>>, WithIndexing),
+      ],
+      False,
+    )
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, headers_bytes)
+
+  // Client sends 50 bytes of DATA (no END_STREAM)
+  let assert Ok(#(client, data_bytes)) =
+    send_data(client, 1, <<0:size(400)>>, False, option.None)
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, data_bytes)
+
+  // Client sends trailers with END_STREAM — body was only 50 bytes,
+  // but content-length promised 100.
+  let assert Ok(#(_client, trailer_bytes)) =
+    send_headers(
+      client,
+      1,
+      [Header("x-checksum", <<"abc123":utf8>>, WithIndexing)],
+      True,
+    )
+  let assert Ok(#(_server, events, _to_send)) =
+    receive_data(server, trailer_bytes)
+  let assert [StreamReset(stream_id: 1, error_code: ProtocolError)] = events
+}
+
+// Server-side: client sends content-length: 50, then exactly 50 bytes
+// of DATA, then trailers with END_STREAM. Body matches — should succeed.
+pub fn receive_trailers_with_content_length_match_is_valid_test() {
+  let #(server, client) = helper.connected_pair()
+
+  // Client sends POST with content-length: 50
+  let assert Ok(#(client, headers_bytes, _stream_id)) =
+    open_stream(
+      client,
+      [
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
+        Header("content-length", <<"50":utf8>>, WithIndexing),
+      ],
+      False,
+    )
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, headers_bytes)
+
+  // Client sends exactly 50 bytes of DATA (no END_STREAM)
+  let assert Ok(#(client, data_bytes)) =
+    send_data(client, 1, <<0:size(400)>>, False, option.None)
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, data_bytes)
+
+  // Client sends trailers with END_STREAM — body matches content-length
+  let assert Ok(#(_client, trailer_bytes)) =
+    send_headers(
+      client,
+      1,
+      [Header("x-checksum", <<"abc123":utf8>>, WithIndexing)],
+      True,
+    )
+  let assert Ok(#(_server, events, _to_send)) =
+    receive_data(server, trailer_bytes)
+  let assert [
+    HeadersReceived(stream_id: 1, end_stream: True, ..),
+    StreamEnded(stream_id: 1),
+  ] = events
+}
