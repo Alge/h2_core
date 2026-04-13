@@ -11,7 +11,7 @@ import h2_core.{
   send_headers, send_rst_stream,
 }
 import h2_core/internal/stream.{
-  Closed, Open, ReservedLocal, ReservedRemote,
+  Closed, HalfClosedLocal, Open, ReservedLocal, ReservedRemote,
 }
 import h2_frame
 import helper
@@ -1226,8 +1226,7 @@ pub fn push_promise_head_response_with_content_length_is_valid_test() {
   ]
   let assert Ok(#(server, push_bytes, promised_id)) =
     h2_core.send_push_promise(server, 1, push_headers)
-  let assert Ok(#(client, _events, _to_send)) =
-    receive_data(client, push_bytes)
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, push_bytes)
 
   // Server sends HEADERS response on the promised stream with
   // content-length: 5000 and END_STREAM. Per RFC 9110 Section 6.4.1,
@@ -1282,8 +1281,7 @@ pub fn push_promise_response_with_content_length_and_end_stream_is_malformed_tes
   ]
   let assert Ok(#(server, push_bytes, promised_id)) =
     h2_core.send_push_promise(server, 1, push_headers)
-  let assert Ok(#(client, _events, _to_send)) =
-    receive_data(client, push_bytes)
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, push_bytes)
   let assert Ok(ReservedRemote) = get_stream_state(client, promised_id)
 
   // Server sends response with content-length: 100 and END_STREAM.
@@ -1317,8 +1315,7 @@ pub fn push_promise_response_with_zero_content_length_and_end_stream_is_valid_te
   ]
   let assert Ok(#(server, push_bytes, promised_id)) =
     h2_core.send_push_promise(server, 1, push_headers)
-  let assert Ok(#(client, _events, _to_send)) =
-    receive_data(client, push_bytes)
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, push_bytes)
 
   // content-length: 0 + END_STREAM — body is 0 bytes, matches.
   let assert Ok(#(_server, response_bytes)) =
@@ -1340,4 +1337,46 @@ pub fn push_promise_response_with_zero_content_length_and_end_stream_is_valid_te
   assert sid == promised_id
   assert sid2 == promised_id
   let assert Ok(Closed) = get_stream_state(client, promised_id)
+}
+
+// A pushed response with content-length: 5 (no END_STREAM on HEADERS) followed
+// by a DATA frame with 10 bytes should be rejected as malformed — the DATA
+// exceeds the promised content-length. This test verifies that
+// expected_content_length is stored on the stream during the ReservedRemote →
+// HalfClosedLocal transition so the DATA handler can enforce it.
+pub fn push_promise_response_data_exceeding_content_length_is_malformed_test() {
+  let #(server, client) = server_with_open_stream()
+
+  // Server pushes a GET request
+  let push_headers = [
+    Header(":method", <<"GET":utf8>>, WithIndexing),
+    Header(":scheme", <<"https":utf8>>, WithIndexing),
+    Header(":path", <<"/pushed":utf8>>, WithIndexing),
+  ]
+  let assert Ok(#(server, push_bytes, promised_id)) =
+    h2_core.send_push_promise(server, 1, push_headers)
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, push_bytes)
+  let assert Ok(ReservedRemote) = get_stream_state(client, promised_id)
+
+  // Server sends response HEADERS with content-length: 5 (no END_STREAM)
+  let assert Ok(#(server, response_bytes)) =
+    send_headers(
+      server,
+      promised_id,
+      [
+        Header(":status", <<"200":utf8>>, WithIndexing),
+        Header("content-length", <<"5":utf8>>, WithIndexing),
+      ],
+      False,
+    )
+  let assert Ok(#(client, _events, _to_send)) =
+    receive_data(client, response_bytes)
+  let assert Ok(HalfClosedLocal) = get_stream_state(client, promised_id)
+
+  // Server sends 10 bytes of DATA — exceeds content-length of 5
+  let assert Ok(#(_server, data_bytes)) =
+    send_data(server, promised_id, <<"0123456789":utf8>>, False, None)
+  let assert Ok(#(_client, events, _to_send)) = receive_data(client, data_bytes)
+  let assert [StreamReset(stream_id: sid, error_code: ProtocolError)] = events
+  assert sid == promised_id
 }
