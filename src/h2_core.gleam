@@ -39,31 +39,42 @@ pub type Settings {
 }
 
 fn validate_settings(settings: Settings) -> Result(Nil, SendError) {
-  use <- bool.guard(
-    settings.initial_window_size < 0
-      || settings.initial_window_size > 2_147_483_647,
-    Error(InvalidSettings),
+  use _ <- result.try(
+    validate_setting(HeaderTableSize(settings.header_table_size)),
   )
-  use <- bool.guard(
-    settings.max_frame_size < 16_384 || settings.max_frame_size > 16_777_215,
-    Error(InvalidSettings),
+  use _ <- result.try(
+    validate_setting(InitialWindowSize(settings.initial_window_size)),
   )
-
-  use <- bool.guard(settings.header_table_size < 0, Error(InvalidSettings))
-
-  use <- bool.guard(
-    settings.max_concurrent_streams
-      |> option.map(fn(v) { v < 0 })
-      |> option.unwrap(False),
-    Error(InvalidSettings),
-  )
-  use <- bool.guard(
-    settings.max_header_list_size
-      |> option.map(fn(v) { v < 0 })
-      |> option.unwrap(False),
-    Error(InvalidSettings),
-  )
+  use _ <- result.try(validate_setting(MaxFrameSize(settings.max_frame_size)))
+  use _ <- result.try(case settings.max_concurrent_streams {
+    option.Some(v) -> validate_setting(MaxConcurrentStreams(v))
+    option.None -> Ok(Nil)
+  })
+  use _ <- result.try(case settings.max_header_list_size {
+    option.Some(v) -> validate_setting(MaxHeaderListSize(v))
+    option.None -> Ok(Nil)
+  })
   Ok(Nil)
+}
+
+fn validate_setting(setting: Setting) -> Result(Nil, SendError) {
+  case setting {
+    InitialWindowSize(v) ->
+      bool.guard(v < 0 || v > 2_147_483_647, Error(InvalidSettings), fn() {
+        Ok(Nil)
+      })
+    MaxFrameSize(v) ->
+      bool.guard(v < 16_384 || v > 16_777_215, Error(InvalidSettings), fn() {
+        Ok(Nil)
+      })
+    HeaderTableSize(v) ->
+      bool.guard(v < 0, Error(InvalidSettings), fn() { Ok(Nil) })
+    MaxConcurrentStreams(v) ->
+      bool.guard(v < 0, Error(InvalidSettings), fn() { Ok(Nil) })
+    MaxHeaderListSize(v) ->
+      bool.guard(v < 0, Error(InvalidSettings), fn() { Ok(Nil) })
+    EnablePush(_) -> Ok(Nil)
+  }
 }
 
 /// Helper function to convert a settings object to a list of h2_frame.Setting
@@ -1785,11 +1796,14 @@ pub fn get_recv_buffer(conn conn: Connection) -> BitArray {
 /// The settings take effect once the peer acknowledges them.
 ///
 /// Errors:
+/// - `InvalidSettings` - a settings value is outside the allowed range
 /// - `FrameEncodingError` - frame encoding failed unexpectedly; if you encounter this, please open an issue
 pub fn send_settings(
   conn conn: Connection,
   settings settings: List(Setting),
 ) -> Result(#(Connection, BitArray), SendError) {
+  use _ <- result.try(validate_setting_list(settings))
+
   let conn =
     Connection(
       ..conn,
@@ -1801,6 +1815,16 @@ pub fn send_settings(
     |> result.replace_error(FrameEncodingError),
   )
   Ok(#(conn, encoded))
+}
+
+fn validate_setting_list(settings: List(Setting)) -> Result(Nil, SendError) {
+  case settings {
+    [] -> Ok(Nil)
+    [setting, ..rest] -> {
+      use _ <- result.try(validate_setting(setting))
+      validate_setting_list(rest)
+    }
+  }
 }
 
 /// Sends a PING frame with the given 8-byte opaque data.
