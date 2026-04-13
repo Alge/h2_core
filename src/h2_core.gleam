@@ -1218,6 +1218,31 @@ fn handle_headers_on_existing_stream(
             False -> existing_stream
           }
 
+          // RFC 9113 Section 8.1.1: when the stream ends (via trailers or
+          // any HEADERS with END_STREAM), verify that the total DATA received
+          // matches the content-length declared in the original headers.
+          // Exempt responses defined as having no content (204, 304, HEAD)
+          // per RFC 9110 Section 6.4.1.
+          use <- bool.guard(
+            end_stream
+              && status_code != 204
+              && status_code != 304
+              && existing_stream.request_method != option.Some("HEAD")
+              && case existing_stream.expected_content_length {
+              option.Some(expected) ->
+                existing_stream.received_content_length != expected
+              option.None -> False
+            },
+            handle_rst_stream(
+              conn:,
+              stream_id:,
+              error_code: ProtocolError,
+              flow_controlled_length: 0,
+              events:,
+              to_send:,
+            ),
+          )
+
           // If end_stream is set, update the stream state
           let new_state = case end_stream {
             False -> existing_stream.state
