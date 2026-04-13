@@ -712,6 +712,42 @@ pub fn receive_settings_header_table_size_reduction_affects_encoder_test() {
   let assert [h2_core.HeadersReceived(stream_id: 3, ..)] = events
 }
 
+// RFC 7541 Section 4.2 - "A change in the maximum size of the dynamic
+// table is signaled via a dynamic table size update (see Section 6.3).
+// This dynamic table size update MUST occur at the beginning of the
+// first header block following the change to the dynamic table size."
+//
+// An *increase* to SETTINGS_HEADER_TABLE_SIZE is also a change.
+// When we increase our header table size via SETTINGS and the peer
+// acknowledges, the peer's next field block must include a size update.
+// If it doesn't, we must return COMPRESSION_ERROR.
+pub fn receive_headers_without_required_size_update_after_increase_is_compression_error_test() {
+  let #(server, client) = helper.connected_pair()
+
+  // Server increases the table size above the default 4096.
+  let assert Ok(#(server, settings_bytes)) =
+    send_settings(server, [HeaderTableSize(8192)])
+  let assert Ok(#(_client, _events, ack_bytes)) =
+    receive_data(client, settings_bytes)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, ack_bytes)
+
+  // Simulate the client encoding headers WITHOUT a Dynamic Table Size
+  // Update instruction. The server's decoder should reject this with
+  // COMPRESSION_ERROR because the table size changed.
+  let bad_hpack = <<0x88>>
+  let assert Ok(headers_frame) =
+    h2_frame.encode_headers(
+      stream_id: 1,
+      end_stream: False,
+      end_headers: True,
+      priority: option.None,
+      field_block_fragment: bad_hpack,
+      padding: option.None,
+    )
+  let assert Error(ConnectionError(CompressionError)) =
+    receive_data(server, headers_frame)
+}
+
 // RFC 9113 Section 4.3.1 - "An endpoint MUST treat a field block that
 // follows an acknowledgment of the reduction to the maximum dynamic
 // table size as a connection error (Section 5.4.1) of type
@@ -728,9 +764,12 @@ pub fn receive_headers_without_required_size_update_is_compression_error_test() 
   // Client sends SETTINGS reducing header table size to 0
   let assert Ok(#(client, settings_frame)) =
     send_settings(client, [HeaderTableSize(0)])
-  // Server receives and processes settings
-  let assert Ok(#(_server, _events, _to_send)) =
+  // Server receives and processes settings, sends ACK
+  let assert Ok(#(_server, _events, ack_bytes)) =
     receive_data(server, settings_frame)
+  // Client receives the ACK - only now should the decoder arm
+  // expect_table_size_update
+  let assert Ok(#(client, _events, _to_send)) = receive_data(client, ack_bytes)
 
   // Server encodes headers WITHOUT calling resize_dynamic - the encoded
   // block won't have a size update instruction. Client should reject
@@ -765,7 +804,8 @@ pub fn decoder_does_not_require_size_update_before_settings_ack_test() {
   // Client opens stream 1, server receives the headers
   let assert Ok(#(client, stream1_bytes, _)) =
     open_stream(client, helper.request_headers(), False)
-  let assert Ok(#(server, _events, _to_send)) = receive_data(server, stream1_bytes)
+  let assert Ok(#(server, _events, _to_send)) =
+    receive_data(server, stream1_bytes)
 
   // Server sends SETTINGS reducing header table size to 0.
   // The bug: current code arms expect_table_size_update on the decoder here,
@@ -782,7 +822,8 @@ pub fn decoder_does_not_require_size_update_before_settings_ack_test() {
   // Server must accept these headers - they were sent before the client knew
   // about our new table size. With the timing bug, the server incorrectly
   // arms expect_table_size_update too early and returns COMPRESSION_ERROR.
-  let assert Ok(#(server, events, _to_send)) = receive_data(server, stream3_bytes)
+  let assert Ok(#(server, events, _to_send)) =
+    receive_data(server, stream3_bytes)
   let assert [h2_core.HeadersReceived(stream_id: 3, ..)] = events
 
   // Complete the settings exchange - only now should the server arm

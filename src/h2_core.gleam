@@ -1792,26 +1792,6 @@ pub fn send_settings(
       pending_settings: list.append(conn.pending_settings, [settings]),
     )
 
-  let conn = case
-    list.find(settings, fn(s) {
-      case s {
-        HeaderTableSize(_) -> True
-        _ -> False
-      }
-    })
-  {
-    Ok(HeaderTableSize(new_size)) ->
-      case new_size < alpacki.dynamic_max_size(conn.hpack_decoder) {
-        True ->
-          Connection(
-            ..conn,
-            hpack_decoder: alpacki.expect_table_size_update(conn.hpack_decoder),
-          )
-        False -> conn
-      }
-    _ -> conn
-  }
-
   use encoded <- result.try(
     h2_frame.encode_settings(ack: False, settings: to_frame_settings(settings))
     |> result.replace_error(FrameEncodingError),
@@ -2333,6 +2313,21 @@ fn parse_loop(
                         new_settings.initial_window_size
                           - old_settings.initial_window_size,
                       ))
+
+                      // Check if we should update the header table size
+                      let conn = case
+                        new_settings.header_table_size
+                        != old_settings.header_table_size
+                      {
+                        True ->
+                          Connection(
+                            ..conn,
+                            hpack_decoder: alpacki.expect_table_size_update(
+                              conn.hpack_decoder,
+                            ),
+                          )
+                        False -> conn
+                      }
 
                       parse_loop(
                         conn,
