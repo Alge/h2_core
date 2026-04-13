@@ -318,11 +318,17 @@ pub fn receive_data_on_closed_stream_is_stream_closed_error_test() {
     h2_frame.decode_frame(frame_data)
 }
 
-// RFC 9113 Section 6.1 - DATA on a closed stream must not consume flow control
-// window. The connection window must remain unchanged after the RST_STREAM.
-pub fn receive_data_on_closed_stream_does_not_consume_window_test() {
+// RFC 9113 Section 5.1 (closed state): "An endpoint MUST minimally process
+// and then discard any frames it receives in this state. [...] Additionally,
+// the content of DATA frames counts toward the connection flow-control window."
+//
+// When DATA arrives on a closed stream the library sends RST_STREAM +
+// a connection-level WINDOW_UPDATE to reclaim the flow-controlled bytes.
+// The net effect is that the connection recv window is restored to its
+// original value.
+pub fn receive_data_on_closed_stream_counts_toward_connection_window_test() {
   let #(server, _client) = helper.server_with_closed_stream()
-  let window_before = h2_core.get_connection_recv_window_size(server)
+  let window_before = get_connection_recv_window_size(server)
   let assert Ok(data_frame) =
     h2_frame.encode_data(
       stream_id: 1,
@@ -330,8 +336,39 @@ pub fn receive_data_on_closed_stream_does_not_consume_window_test() {
       data: <<"illegal":utf8>>,
       padding: None,
     )
-  let assert Ok(#(server, _events, _to_send)) = receive_data(server, data_frame)
-  assert h2_core.get_connection_recv_window_size(server) == window_before
+  let assert Ok(#(server, _events, to_send)) = receive_data(server, data_frame)
+  // The library must restore the connection window by sending a
+  // connection-level WINDOW_UPDATE for the flow-controlled length.
+  assert get_connection_recv_window_size(server) == window_before
+  // to_send must include both RST_STREAM and WINDOW_UPDATE
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.StreamClosed)
+  let assert Ok(expected_wu) =
+    h2_frame.encode_window_update(stream_id: 0, window_size_increment: 7)
+  assert to_send == <<expected_rst:bits, expected_wu:bits>>
+}
+
+// Same as above but with padding. The entire DATA frame payload (including
+// Pad Length and Padding fields) is flow-controlled per RFC 9113 Section 6.1.
+pub fn receive_data_on_closed_stream_with_padding_counts_full_payload_test() {
+  let #(server, _client) = helper.server_with_closed_stream()
+  let window_before = get_connection_recv_window_size(server)
+  // Manually craft a padded DATA frame: 5 bytes data + 3 bytes padding
+  // Flow-controlled length = 1 (pad length field) + 5 (data) + 3 (padding) = 9
+  let assert Ok(data_frame) =
+    h2_frame.encode_data(
+      stream_id: 1,
+      end_stream: False,
+      data: <<"hello":utf8>>,
+      padding: Some(3),
+    )
+  let assert Ok(#(server, _events, to_send)) = receive_data(server, data_frame)
+  assert get_connection_recv_window_size(server) == window_before
+  let assert Ok(expected_rst) =
+    h2_frame.encode_rst_stream(stream_id: 1, error_code: h2_frame.StreamClosed)
+  let assert Ok(expected_wu) =
+    h2_frame.encode_window_update(stream_id: 0, window_size_increment: 9)
+  assert to_send == <<expected_rst:bits, expected_wu:bits>>
 }
 
 // RFC 9113 Section 5.1 (reserved local) - "Receiving any type of frame other
