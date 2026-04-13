@@ -750,3 +750,44 @@ pub fn receive_headers_without_required_size_update_is_compression_error_test() 
   let assert Error(ConnectionError(CompressionError)) =
     receive_data(client, headers_frame)
 }
+
+// RFC 9113 Section 4.3.1: "Any change to the maximum value set using
+// SETTINGS_HEADER_TABLE_SIZE takes effect when the endpoint acknowledges
+// settings (Section 6.5.3)."
+//
+// The decoder must only start requiring a Dynamic Table Size Update AFTER
+// receiving the SETTINGS ACK - not at the moment we call send_settings.
+// Headers sent by the peer before they have received our SETTINGS must be
+// decoded without requiring a size update prefix.
+pub fn decoder_does_not_require_size_update_before_settings_ack_test() {
+  let #(server, client) = helper.connected_pair()
+
+  // Client opens stream 1, server receives the headers
+  let assert Ok(#(client, stream1_bytes, _)) =
+    open_stream(client, helper.request_headers(), False)
+  let assert Ok(#(server, _events, _to_send)) = receive_data(server, stream1_bytes)
+
+  // Server sends SETTINGS reducing header table size to 0.
+  // The bug: current code arms expect_table_size_update on the decoder here,
+  // before the client has even received our SETTINGS.
+  let assert Ok(#(server, settings_bytes)) =
+    send_settings(server, [HeaderTableSize(0)])
+
+  // Client opens stream 3 BEFORE receiving settings_bytes. The encoded headers
+  // will not include a Dynamic Table Size Update because the client has not yet
+  // seen our reduced table size.
+  let assert Ok(#(_client, stream3_bytes, _)) =
+    open_stream(client, helper.request_headers(), False)
+
+  // Server must accept these headers - they were sent before the client knew
+  // about our new table size. With the timing bug, the server incorrectly
+  // arms expect_table_size_update too early and returns COMPRESSION_ERROR.
+  let assert Ok(#(server, events, _to_send)) = receive_data(server, stream3_bytes)
+  let assert [h2_core.HeadersReceived(stream_id: 3, ..)] = events
+
+  // Complete the settings exchange - only now should the server arm
+  // expect_table_size_update on its decoder
+  let assert Ok(#(_client, _events, ack_bytes)) =
+    receive_data(client, settings_bytes)
+  let assert Ok(#(_server, _events, _to_send)) = receive_data(server, ack_bytes)
+}
