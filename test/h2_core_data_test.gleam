@@ -1708,6 +1708,73 @@ pub fn client_receive_response_data_less_than_content_length_test() {
   assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
 }
 
+// RFC 9113 Section 8.1.1 / RFC 9110 Section 8.6: "If a message is
+// received with a content-length header field having... multiple members
+// with different field-values... the message framing is invalid and the
+// recipient MUST treat it as an unrecoverable error."
+//
+// Duplicate content-length headers with different values must be rejected.
+pub fn receive_headers_duplicate_content_length_different_values_is_malformed_test() {
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
+  let assert Ok(#(_client, headers, _stream_id)) =
+    open_stream(
+      client,
+      [
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
+        Header("content-length", <<"5":utf8>>, WithIndexing),
+        Header("content-length", <<"10":utf8>>, WithIndexing),
+      ],
+      False,
+    )
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, headers)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+}
+
+// RFC 9113 Section 8.1.1 / RFC 9110 Section 8.6: Duplicate content-length
+// headers with the same value are allowed (they are equivalent to a single
+// instance).
+pub fn receive_headers_duplicate_content_length_same_values_is_valid_test() {
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
+  let assert Ok(#(_client, headers, _stream_id)) =
+    open_stream(
+      client,
+      [
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
+        Header("content-length", <<"5":utf8>>, WithIndexing),
+        Header("content-length", <<"5":utf8>>, WithIndexing),
+      ],
+      False,
+    )
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, headers)
+  let assert [HeadersReceived(stream_id: 1, ..)] = events
+}
+
+// RFC 9110 Section 8.6: A negative content-length value is not a valid
+// non-negative integer and must be treated as malformed.
+pub fn receive_headers_negative_content_length_is_malformed_test() {
+  let server = helper.connected_connection(Server)
+  let client = helper.connected_connection(Client)
+  let assert Ok(#(_client, headers, _stream_id)) =
+    open_stream(
+      client,
+      [
+        Header(":method", <<"POST":utf8>>, WithIndexing),
+        Header(":scheme", <<"https":utf8>>, WithIndexing),
+        Header(":path", <<"/":utf8>>, WithIndexing),
+        Header("content-length", <<"-1":utf8>>, WithIndexing),
+      ],
+      False,
+    )
+  let assert Ok(#(_server, events, _to_send)) = receive_data(server, headers)
+  assert events == [StreamReset(stream_id: 1, error_code: ProtocolError)]
+}
+
 // RFC 9113 Section 8.1.1 - A non-numeric content-length value is
 // malformed.
 pub fn receive_headers_invalid_content_length_is_malformed_test() {
