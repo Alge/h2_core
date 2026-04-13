@@ -1,9 +1,9 @@
 import gleam/option.{None, Some}
 import h2_core.{
   Client, CompressionError, ConnectionError, EnablePush, FlowControlError,
-  FrameSizeError, HeaderTableSize, InitialWindowSize, MaxConcurrentStreams,
-  MaxFrameSize, ProtocolError, RemoteSettingsChanged, Server,
-  SettingsAcknowledged, get_local_settings, get_pending_settings,
+  FrameSizeError, HeaderTableSize, InitialWindowSize, InvalidSettings,
+  MaxConcurrentStreams, MaxFrameSize, ProtocolError, RemoteSettingsChanged,
+  Server, SettingsAcknowledged, get_local_settings, get_pending_settings,
   get_remote_settings, open_stream, receive_data, send_data, send_headers,
   send_settings,
 }
@@ -831,4 +831,46 @@ pub fn decoder_does_not_require_size_update_before_settings_ack_test() {
   let assert Ok(#(_client, _events, ack_bytes)) =
     receive_data(client, settings_bytes)
   let assert Ok(#(_server, _events, _to_send)) = receive_data(server, ack_bytes)
+}
+
+// =============================================================================
+// send_settings must validate setting values before sending
+// =============================================================================
+
+// RFC 9113 Section 6.5.2 - SETTINGS_INITIAL_WINDOW_SIZE: "Values above the
+// maximum flow-control window size of 2^31-1 MUST be treated as a connection
+// error (Section 5.4.1) of type FLOW_CONTROL_ERROR."
+//
+// send_settings must reject invalid values upfront rather than sending them
+// to the peer and self-destructing when the ACK arrives.
+pub fn send_settings_rejects_initial_window_size_too_large_test() {
+  let conn = helper.connected_connection(Client)
+  let assert Error(InvalidSettings) =
+    send_settings(conn, [InitialWindowSize(2_147_483_648)])
+}
+
+// RFC 9113 Section 6.5.2 - SETTINGS_MAX_FRAME_SIZE: "The initial value is
+// 2^14 (16,384) octets. The value advertised by an endpoint MUST be between
+// this initial value and the maximum allowed frame size (2^24-1 or
+// 16,777,215 octets), inclusive."
+pub fn send_settings_rejects_max_frame_size_too_small_test() {
+  let conn = helper.connected_connection(Client)
+  let assert Error(InvalidSettings) =
+    send_settings(conn, [MaxFrameSize(16_383)])
+}
+
+pub fn send_settings_rejects_max_frame_size_too_large_test() {
+  let conn = helper.connected_connection(Client)
+  let assert Error(InvalidSettings) =
+    send_settings(conn, [MaxFrameSize(16_777_216)])
+}
+
+// send_settings must not queue invalid settings into pending_settings.
+// If it does, receiving the ACK would cause a self-inflicted connection error.
+pub fn send_settings_invalid_value_does_not_queue_pending_test() {
+  let conn = helper.connected_connection(Client)
+  let assert Error(InvalidSettings) =
+    send_settings(conn, [InitialWindowSize(2_147_483_648)])
+  // pending_settings must still be empty
+  assert get_pending_settings(conn) == []
 }
